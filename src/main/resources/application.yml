@@ -1,0 +1,77 @@
+spring:
+  application:
+    name: sep26-warehouse-management
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/sep26
+    username: postgres
+    password: tranhuyhoang
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        use_sql_comments: true
+    open-in-view: false
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:your-email@gmail.com}
+    password: ${MAIL_PASSWORD:your-app-password}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+        transport:
+          protocol: smtp
+    default-encoding: UTF-8
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:Sep26WarehouseManagementSecretKeyForJWTTokenGeneration2026}
+  expiration-ms: 300000 # 5 minutes
+  remember-me-expiration-ms: 604800000 # 7 days
+
+# OTP Configuration
+otp:
+  length: 6
+  expiration-minutes: 3
+  max-attempts: 5
+  resend-limit-per-hour: 5
+
+# File Upload
+file:
+  upload:
+    dir: ${user.home}/warehouse-uploads
+    max-size: 5242880 # 5MB
+
+# Logging
+logging:
+  level:
+    org.example.sep26management: DEBUG
+    org.springframework.security: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+# Server
+server:
+  port: 8080
+  servlet:
+    context-path: /api
