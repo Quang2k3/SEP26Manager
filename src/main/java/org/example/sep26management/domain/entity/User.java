@@ -1,45 +1,88 @@
 package org.example.sep26management.domain.entity;
 
-import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
+import org.example.sep26management.domain.enums.UserRole;
+import org.example.sep26management.domain.enums.UserStatus;
 
-@Entity
-@Table(name = "users", uniqueConstraints = {
-    @UniqueConstraint(columnNames = "username"),
-    @UniqueConstraint(columnNames = "email")
-})
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class User extends BaseEntity {
-    
-    @Column(name = "username", nullable = false, unique = true)
-    private String username;
-    
-    @Column(name = "email", nullable = false, unique = true)
-    private String email;
-    
-    @Column(name = "password", nullable = false)
-    private String password;
-    
-    @Column(name = "first_name")
-    private String firstName;
-    
-    @Column(name = "last_name")
-    private String lastName;
-    
-    @Column(name = "enabled", nullable = false)
-    @Builder.Default
-    private Boolean enabled = (Boolean) true;
-    
-    @Column(name = "role", nullable = false)
-    @Builder.Default
-    private String role = "USER";
-}
+public class User {
+    private Long userId;
 
+    // Authentication
+    private String email;
+    private String passwordHash;
+
+    // Profile
+    private String fullName;
+    private String phone;
+    private String gender;
+    private LocalDate dateOfBirth;
+    private String address;
+    private String avatarUrl;
+
+    // Account Management
+    private UserRole role;
+    private UserStatus status;
+
+    // Account Type
+    private Boolean isPermanent;
+    private LocalDate expireDate;
+
+    // Security
+    private Boolean isFirstLogin;
+    private LocalDateTime lastLoginAt;
+    private Integer failedLoginAttempts;
+    private LocalDateTime lockedUntil;
+    private LocalDateTime passwordChangedAt;
+
+    // Timestamps
+    private LocalDateTime createdAt;
+    private Long createdBy;
+    private LocalDateTime updatedAt;
+    private Long updatedBy;
+
+    // Domain Methods
+    public boolean isActive() {
+        return UserStatus.ACTIVE.equals(this.status);
+    }
+
+    public boolean isPendingVerification() {
+        return UserStatus.PENDING_VERIFICATION.equals(this.status);
+    }
+
+    public boolean isLocked() {
+        return UserStatus.LOCKED.equals(this.status) ||
+                (lockedUntil != null && lockedUntil.isAfter(LocalDateTime.now()));
+    }
+
+    public boolean canLogin() {
+        return (isActive() || isPendingVerification()) && !isLocked();
+    }
+
+    public void incrementFailedLoginAttempts() {
+        this.failedLoginAttempts = (this.failedLoginAttempts == null ? 0 : this.failedLoginAttempts) + 1;
+
+        // Lock account after 5 failed attempts
+        if (this.failedLoginAttempts >= 5) {
+            this.status = UserStatus.LOCKED;
+            this.lockedUntil = LocalDateTime.now().plusMinutes(15);
+        }
+    }
+
+    public void resetFailedLoginAttempts() {
+        this.failedLoginAttempts = 0;
+        this.lockedUntil = null;
+    }
+
+    public void markAsVerified() {
+        this.status = UserStatus.ACTIVE;
+        this.isFirstLogin = false;
+    }
+}
