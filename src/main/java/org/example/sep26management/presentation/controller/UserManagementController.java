@@ -31,10 +31,6 @@ public class UserManagementController {
 
     private final UserManagementService userManagementService;
 
-    /**
-     * UC-MUA-02: View List User
-     * GET /api/v1/users
-     */
     @GetMapping
     public ResponseEntity<ApiResponse<UserListResponse>> getUserList(
             @RequestParam(required = false) String keyword,
@@ -43,140 +39,154 @@ public class UserManagementController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
-        log.info("Fetching user list - page: {}, size: {}", page, size);
+        try {
+            log.info("Fetching user list - page: {}, size: {}", page, size);
 
-        ApiResponse<UserListResponse> response = userManagementService.getUserList(
-                keyword,
-                role,
-                status,
-                page,
-                size
-        );
+            ApiResponse<UserListResponse> response = userManagementService.getUserList(
+                    keyword,
+                    role,
+                    status,
+                    page,
+                    size
+            );
 
-        return ResponseEntity.ok(response);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error getting user list: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to get user list: " + e.getMessage()));
+        }
     }
 
-    /**
-     * Get User by ID
-     * GET /api/v1/users/{id}
-     */
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<UserProfileResponse>> getUserById(
-            @PathVariable Long id
-    ) {
-        log.info("Fetching user by ID: {}", id);
+    public ResponseEntity<ApiResponse<UserProfileResponse>> getUserById(@PathVariable Long id) {
+        try {
+            log.info("Fetching user by ID: {}", id);
 
-        ApiResponse<UserProfileResponse> response = userManagementService.getUserById(id);
-        return ResponseEntity.ok(response);
+            ApiResponse<UserProfileResponse> response = userManagementService.getUserById(id);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error getting user by ID: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to get user: " + e.getMessage()));
+        }
     }
 
-    /**
-     * UC-MUA-01: Create Account User
-     * POST /api/v1/users
-     */
     @PostMapping
     public ResponseEntity<ApiResponse<UserProfileResponse>> createUser(
             @Valid @RequestBody CreateUserRequest request,
             HttpServletRequest httpRequest
     ) {
-        Long currentUserId = getCurrentUserId();
-        String ipAddress = getClientIpAddress(httpRequest);
-        String userAgent = httpRequest.getHeader("User-Agent");
+        try {
+            Long currentUserId = getCurrentUserId();
+            String ipAddress = getClientIpAddress(httpRequest);
+            String userAgent = httpRequest.getHeader("User-Agent");
 
-        log.info("Creating new user with email: {}", request.getEmail());
+            log.info("Creating new user with email: {}", request.getEmail());
 
-        ApiResponse<UserProfileResponse> response = userManagementService.createUser(
-                request,
-                currentUserId,
-                ipAddress,
-                userAgent
-        );
+            ApiResponse<UserProfileResponse> response = userManagementService.createUser(
+                    request,
+                    currentUserId,
+                    ipAddress,
+                    userAgent
+            );
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (Exception e) {
+            log.error("Error creating user: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to create user: " + e.getMessage()));
+        }
     }
 
-    /**
-     * UC-MUA-03: Assign Role
-     * PATCH /api/v1/users/{id}/role
-     */
     @PatchMapping("/{id}/role")
     public ResponseEntity<ApiResponse<UserProfileResponse>> assignRole(
             @PathVariable Long id,
             @Valid @RequestBody AssignRoleRequest request,
             HttpServletRequest httpRequest
     ) {
-        Long currentUserId = getCurrentUserId();
-        String ipAddress = getClientIpAddress(httpRequest);
-        String userAgent = httpRequest.getHeader("User-Agent");
+        try {
+            Long currentUserId = getCurrentUserId();
+            String ipAddress = getClientIpAddress(httpRequest);
+            String userAgent = httpRequest.getHeader("User-Agent");
 
-        log.info("Assigning role {} to user ID: {}", request.getRole(), id);
+            log.info("Assigning role {} to user ID: {}", request.getRole(), id);
 
-        ApiResponse<UserProfileResponse> response = userManagementService.assignRole(
-                id,
-                request,
-                currentUserId,
-                ipAddress,
-                userAgent
-        );
+            ApiResponse<UserProfileResponse> response = userManagementService.assignRole(
+                    id,
+                    request,
+                    currentUserId,
+                    ipAddress,
+                    userAgent
+            );
 
-        return ResponseEntity.ok(response);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error assigning role: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to assign role: " + e.getMessage()));
+        }
     }
 
-    /**
-     * UC-MUA-04: Active / Inactive User
-     * PATCH /api/v1/users/{id}/status
-     */
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateUserStatus(
             @PathVariable Long id,
             @Valid @RequestBody UpdateUserStatusRequest request,
             HttpServletRequest httpRequest
     ) {
-        Long currentUserId = getCurrentUserId();
-        String ipAddress = getClientIpAddress(httpRequest);
-        String userAgent = httpRequest.getHeader("User-Agent");
+        try {
+            Long currentUserId = getCurrentUserId();
+            String ipAddress = getClientIpAddress(httpRequest);
+            String userAgent = httpRequest.getHeader("User-Agent");
 
-        log.info("Updating status for user ID: {} to {}", id, request.getStatus());
+            log.info("Updating status for user ID: {} to {}", id, request.getStatus());
 
-        ApiResponse<UserProfileResponse> response = userManagementService.updateUserStatus(
-                id,
-                request,
-                currentUserId,
-                ipAddress,
-                userAgent
-        );
+            ApiResponse<UserProfileResponse> response = userManagementService.updateUserStatus(
+                    id,
+                    request,
+                    currentUserId,
+                    ipAddress,
+                    userAgent
+            );
 
-        return ResponseEntity.ok(response);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error updating user status: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to update status: " + e.getMessage()));
+        }
     }
-
-    // ============================================
-    // HELPER METHODS
-    // ============================================
 
     private Long getCurrentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
-        if (authentication != null && authentication.getDetails() instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> details = (Map<String, Object>) authentication.getDetails();
-            return (Long) details.get("userId");
+        if (authentication == null) {
+            throw new RuntimeException("Not authenticated");
         }
 
-        throw new RuntimeException("User not authenticated");
-    }
+        Object details = authentication.getDetails();
+        if (details instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> detailsMap = (Map<String, Object>) details;
+            Object userIdObj = detailsMap.get("userId");
 
+            if (userIdObj instanceof Long) {
+                return (Long) userIdObj;
+            } else if (userIdObj instanceof Integer) {
+                return ((Integer) userIdObj).longValue();
+            } else if (userIdObj != null) {
+                return Long.parseLong(userIdObj.toString());
+            }
+        }
+
+        throw new RuntimeException("User ID not found in authentication");
+    }
 
     private String getClientIpAddress(HttpServletRequest request) {
         String xForwardedFor = request.getHeader("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
             return xForwardedFor.split(",")[0].trim();
         }
-
-        String xRealIp = request.getHeader("X-Real-IP");
-        if (xRealIp != null && !xRealIp.isEmpty()) {
-            return xRealIp;
-        }
-
         return request.getRemoteAddr();
     }
 }

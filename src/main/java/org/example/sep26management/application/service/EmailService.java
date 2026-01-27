@@ -5,11 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 
 @Service
 @RequiredArgsConstructor
@@ -21,9 +18,6 @@ public class EmailService {
     @Value("${spring.mail.username}")
     private String fromEmail;
 
-    /**
-     * Send OTP email
-     */
     @Async
     public void sendOtpEmail(String toEmail, String otpCode, String purpose) {
         try {
@@ -36,14 +30,12 @@ public class EmailService {
             mailSender.send(message);
             log.info("OTP email sent successfully to: {}", toEmail);
         } catch (Exception e) {
-            log.error("Failed to send OTP email to: {}", toEmail, e);
-            throw new RuntimeException("Failed to send email");
+            // Chỉ log error, KHÔNG throw exception
+            log.error("Failed to send OTP email to: {} - Error: {}", toEmail, e.getMessage());
+            log.warn("OTP code for testing: {}", otpCode); // For testing without real email
         }
     }
 
-    /**
-     * Send welcome email to new user
-     */
     @Async
     public void sendWelcomeEmail(String toEmail, String tempPassword, String role) {
         try {
@@ -56,13 +48,11 @@ public class EmailService {
             mailSender.send(message);
             log.info("Welcome email sent successfully to: {}", toEmail);
         } catch (Exception e) {
-            log.error("Failed to send welcome email to: {}", toEmail, e);
+            log.error("Failed to send welcome email to: {} - Error: {}", toEmail, e.getMessage());
+            log.warn("Temp password for testing: {}", tempPassword); // For testing
         }
     }
 
-    /**
-     * Send status change notification
-     */
     @Async
     public void sendStatusChangeEmail(String toEmail, String statusText) {
         try {
@@ -75,13 +65,9 @@ public class EmailService {
             mailSender.send(message);
             log.info("Status change email sent successfully to: {}", toEmail);
         } catch (Exception e) {
-            log.error("Failed to send status change email to: {}", toEmail, e);
+            log.error("Failed to send status change email to: {} - Error: {}", toEmail, e.getMessage());
         }
     }
-
-    // ============================================
-    // EMAIL BODY BUILDERS
-    // ============================================
 
     private String buildOtpEmailBody(String otpCode, String purpose) {
         return String.format("""
