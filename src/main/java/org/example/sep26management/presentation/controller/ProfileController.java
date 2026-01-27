@@ -105,6 +105,7 @@ public class ProfileController {
         throw new RuntimeException("User not authenticated");
     }
 
+
     private String getClientIpAddress(HttpServletRequest request) {
         String xForwardedFor = request.getHeader("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
