@@ -40,6 +40,7 @@ public class Sep26ManagementApplication {
 
     /**
      * Initialize demo data for testing
+     *
      * Only runs in dev profile
      */
     @Bean
