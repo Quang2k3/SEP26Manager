@@ -1,22 +1,24 @@
 spring:
   application:
-    name: sep26-warehouse-management
+    name: Warehouse Management System
+
+  profiles:
+    active: dev
 
   datasource:
     url: jdbc:postgresql://localhost:5432/sep26
     username: postgres
     password: tranhuyhoang
+    
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10
       minimum-idle: 5
       connection-timeout: 30000
-      idle-timeout: 600000
-      max-lifetime: 1800000
 
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
@@ -41,37 +43,86 @@ spring:
           protocol: smtp
     default-encoding: UTF-8
 
-# JWT Configuration
-jwt:
-  secret: ${JWT_SECRET:Sep26WarehouseManagementSecretKeyForJWTTokenGeneration2026}
-  expiration-ms: 300000 # 5 minutes
-  remember-me-expiration-ms: 604800000 # 7 days
+# Application Configuration
+app:
+  default-password: Warehouse@123  # ✅ THÊM DÒNG NÀY
 
-# OTP Configuration
+jwt:
+  secret: Sep26WarehouseManagementSecretKeyForJWTTokenGeneration2026MinimumLength256BitsRequired
+  expiration-ms: 300000
+  remember-me-expiration-ms: 604800000
+
 otp:
   length: 6
   expiration-minutes: 3
   max-attempts: 5
   resend-limit-per-hour: 5
 
-# File Upload
 file:
   upload:
     dir: ${user.home}/warehouse-uploads
-    max-size: 5242880 # 5MB
+    max-size: 5242880
 
-# Logging
-logging:
-  level:
-    org.example.sep26management: DEBUG
-    org.springframework.security: DEBUG
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
-
-# Server
 server:
   port: 8080
   servlet:
     context-path: /api
+
+logging:
+  level:
+    org.example.sep26management: INFO
+    org.springframework.security: INFO
+    org.hibernate.SQL: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+---
+# Development Profile
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+
+logging:
+  level:
+    org.example.sep26management: DEBUG
+    org.springframework.web: DEBUG
+
+---
+# Test Profile
+spring:
+  config:
+    activate:
+      on-profile: test
+
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+---
+# Production Profile
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: validate
+
+logging:
+  level:
+    org.example.sep26management: WARN
