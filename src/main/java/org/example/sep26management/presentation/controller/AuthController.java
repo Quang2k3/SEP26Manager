@@ -27,6 +27,7 @@ public class AuthController {
     private final AuthService authService;
     private final JwtTokenProvider jwtTokenProvider;
 
+
     /**
      * UC-AUTH-01: Login
      * POST /api/v1/auth/login
