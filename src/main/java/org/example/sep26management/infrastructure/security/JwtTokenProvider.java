@@ -1,55 +1,54 @@
 package org.example.sep26management.infrastructure.security;
 
 import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
-import org.example.sep26management.domain.entity.User;
-import org.example.sep26management.domain.enums.UserRole;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
-import java.nio.charset.StandardCharsets;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
 
 @Component
 @Slf4j
 public class JwtTokenProvider {
 
-    @Value("${jwt.secret}")
+    @Value("${app.jwt.secret}")
     private String jwtSecret;
 
-    @Value("${jwt.expiration-ms}")
-    private long jwtExpirationMs;
+    @Value("${app.jwt.expiration:3600000}")
+    private Long jwtExpiration;
 
-    @Value("${jwt.remember-me-expiration-ms}")
-    private long jwtRememberMeExpirationMs;
+    @Value("${app.jwt.remember-me-expiration:604800000}")
+    private Long rememberMeExpiration;
 
+    /**
+     * Decode BASE64 secret key (HS512 requires >= 512 bits)
+     */
     private SecretKey getSigningKey() {
-        byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
+        byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
+
+        // Debug when DEV (optional)
+        log.debug("JWT signing key length (bytes): {}", keyBytes.length);
+
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
     /**
-     * Generate JWT token for user
+     * Generate JWT token
      */
-    public String generateToken(User user, boolean rememberMe) {
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", user.getUserId());
-        claims.put("email", user.getEmail());
-        claims.put("role", user.getRole().name());
-        claims.put("fullName", user.getFullName());
-
-        long expiration = rememberMe ? jwtRememberMeExpirationMs : jwtExpirationMs;
-
+    public String generateToken(Long userId, String email, String role, boolean rememberMe) {
         Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + expiration);
+        Date expiryDate = new Date(
+                now.getTime() + (rememberMe ? rememberMeExpiration : jwtExpiration)
+        );
 
         return Jwts.builder()
-                .setClaims(claims)
-                .setSubject(user.getEmail())
+                .setSubject(email)
+                .claim("userId", userId)
+                .claim("email", email)
+                .claim("role", role)
                 .setIssuedAt(now)
                 .setExpiration(expiryDate)
                 .signWith(getSigningKey(), SignatureAlgorithm.HS512)
@@ -57,55 +56,48 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Get email from JWT token
-     */
-    public String getEmailFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
-
-        return claims.getSubject();
-    }
-
-    /**
-     * Get user ID from JWT token
+     * Extract userId from token
      */
     public Long getUserIdFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
+        Claims claims = parseClaims(token);
+        Object userIdObj = claims.get("userId");
 
-        return claims.get("userId", Long.class);
+        if (userIdObj instanceof Integer) {
+            return ((Integer) userIdObj).longValue();
+        }
+        if (userIdObj instanceof Long) {
+            return (Long) userIdObj;
+        }
+        if (userIdObj != null) {
+            return Long.parseLong(userIdObj.toString());
+        }
+
+        throw new RuntimeException("UserId not found in JWT token");
     }
 
     /**
-     * Get role from JWT token
+     * Extract email from token
      */
-    public UserRole getRoleFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
+    public String getEmailFromToken(String token) {
+        return parseClaims(token).getSubject();
+    }
 
-        String role = claims.get("role", String.class);
-        return UserRole.valueOf(role);
+    /**
+     * Extract role from token
+     */
+    public String getRoleFromToken(String token) {
+        return parseClaims(token).get("role", String.class);
     }
 
     /**
      * Validate JWT token
      */
-    public boolean validateToken(String token) {
+    public boolean validateToken(String authToken) {
         try {
-            Jwts.parserBuilder()
-                    .setSigningKey(getSigningKey())
-                    .build()
-                    .parseClaimsJws(token);
+            parseClaims(authToken);
             return true;
+        } catch (SecurityException ex) {
+            log.error("Invalid JWT signature");
         } catch (MalformedJwtException ex) {
             log.error("Invalid JWT token");
         } catch (ExpiredJwtException ex) {
@@ -119,15 +111,13 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Get expiration date from token
+     * Parse JWT claims
      */
-    public Date getExpirationDateFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
+    private Claims parseClaims(String token) {
+        return Jwts.parserBuilder()
                 .setSigningKey(getSigningKey())
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
-
-        return claims.getExpiration();
     }
 }

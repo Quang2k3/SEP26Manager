@@ -5,8 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.request.*;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.LoginResponse;
-import org.example.sep26management.domain.entity.Otp;
-import org.example.sep26management.domain.entity.User;
+import org.example.sep26management.application.mapper.UserMapper;
 import org.example.sep26management.domain.enums.OtpType;
 import org.example.sep26management.domain.enums.UserStatus;
 import org.example.sep26management.infrastructure.exception.BusinessException;
@@ -37,98 +36,55 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final EmailService emailService;
     private final AuditLogService auditLogService;
+    private final UserMapper userMapper;
 
-    @Value("${otp.expiration-minutes}")
+    @Value("${otp.expiration-minutes:3}")
     private int otpExpirationMinutes;
 
-    @Value("${otp.max-attempts}")
+    @Value("${otp.max-attempts:5}")
     private int otpMaxAttempts;
 
-    @Value("${otp.resend-limit-per-hour}")
+    @Value("${otp.resend-limit-per-hour:5}")
     private int otpResendLimitPerHour;
 
-    /**
-     * UC-AUTH-01: Login with JWT
-     */
     public LoginResponse login(LoginRequest request, String ipAddress, String userAgent) {
         log.info("Login attempt for email: {}", request.getEmail());
 
-        // Step 4: Verify credentials
         UserEntity user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> {
                     auditLogService.logFailedLogin(request.getEmail(), "User not found", ipAddress);
                     return new UnauthorizedException("Invalid account or password.");
                 });
 
-        // Step 5: Check account eligibility (BR-AUTH-01)
         if (!canLogin(user)) {
             auditLogService.logFailedLogin(user.getEmail(), "Account not eligible", ipAddress);
             throw new UnauthorizedException("Account is disabled.");
         }
 
-        // Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
-
-            // Lock after 5 failed attempts
-            if (user.getFailedLoginAttempts() >= 5) {
-                user.setStatus(UserStatus.LOCKED);
-                user.setLockedUntil(LocalDateTime.now().plusMinutes(15));
-                userRepository.save(user);
-                auditLogService.logFailedLogin(user.getEmail(), "Account locked due to failed attempts", ipAddress);
-                throw new UnauthorizedException("Account is disabled.");
-            }
-
-            userRepository.save(user);
-            auditLogService.logFailedLogin(user.getEmail(), "Invalid password", ipAddress);
+            handleFailedLogin(user, ipAddress);
             throw new UnauthorizedException("Invalid account or password.");
         }
 
-        // Reset failed attempts on successful password verification
         user.setFailedLoginAttempts(0);
         user.setLockedUntil(null);
         user.setLastLoginAt(LocalDateTime.now());
-        userRepository.save(user);
+        user = userRepository.save(user);
 
-        // Check if first login
         if (Boolean.TRUE.equals(user.getIsFirstLogin())) {
-            // Generate OTP for first login verification
-            String otpCode = generateOtp(user.getEmail(), OtpType.FIRST_LOGIN);
-            emailService.sendOtpEmail(user.getEmail(), otpCode, "First Login Verification");
-
-            auditLogService.logAction(
-                    user.getUserId(),
-                    "LOGIN_REQUIRES_VERIFICATION",
-                    "USER",
-                    user.getUserId(),
-                    "First login - OTP sent",
-                    ipAddress,
-                    userAgent
-            );
-
-            // Return response indicating verification required
-            return LoginResponse.builder()
-                    .requiresVerification(true)
-                    .user(LoginResponse.UserInfoDTO.builder()
-                            .userId(user.getUserId())
-                            .email(user.getEmail())
-                            .fullName(user.getFullName())
-                            .role(user.getRole())
-                            .build())
-                    .build();
+            return handleFirstLogin(user, ipAddress, userAgent);
         }
 
-        // Step 7: Generate JWT token
-        User domainUser = mapToDomain(user);
         String token = jwtTokenProvider.generateToken(
-                domainUser,
+                user.getUserId(),
+                user.getEmail(),
+                user.getRole().name(),
                 Boolean.TRUE.equals(request.getRememberMe())
         );
 
-        // Calculate expiration
         long expiresIn = Boolean.TRUE.equals(request.getRememberMe())
-                ? 7 * 24 * 60 * 60 * 1000L // 7 days
-                : 5 * 60 * 1000L; // 5 minutes
+                ? 7 * 24 * 60 * 60 * 1000L
+                : 60 * 60 * 1000L;
 
         auditLogService.logAction(
                 user.getUserId(),
@@ -137,28 +93,16 @@ public class AuthService {
                 user.getUserId(),
                 "Successful login",
                 ipAddress,
-                userAgent
+                userAgent,
+                null,
+                null
         );
 
-        // Step 8: Return success response
-        return LoginResponse.builder()
-                .token(token)
-                .tokenType("Bearer")
-                .expiresIn(expiresIn)
-                .requiresVerification(false)
-                .user(LoginResponse.UserInfoDTO.builder()
-                        .userId(user.getUserId())
-                        .email(user.getEmail())
-                        .fullName(user.getFullName())
-                        .role(user.getRole())
-                        .avatarUrl(user.getAvatarUrl())
-                        .build())
-                .build();
+        log.info("Login successful for user: {}", user.getEmail());
+
+        return buildLoginResponse(user, token, expiresIn, false);
     }
 
-    /**
-     * UC-AUTH-03: Complete First Login (Verify OTP)
-     */
     public LoginResponse verifyFirstLoginOtp(
             String email,
             VerifyOtpRequest request,
@@ -170,11 +114,219 @@ public class AuthService {
         UserEntity user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new BusinessException("User not found"));
 
-        // Find valid OTP
-        OtpEntity otp = otpRepository.findValidOtp(email, OtpType.FIRST_LOGIN, LocalDateTime.now())
+        OtpEntity otp = verifyOtp(email, request.getOtpCode(), OtpType.FIRST_LOGIN);
+
+        otp.setIsUsed(true);
+        otp.setVerifiedAt(LocalDateTime.now());
+        otpRepository.save(otp);
+
+        user.setStatus(UserStatus.ACTIVE);
+        user.setIsFirstLogin(false);
+        user = userRepository.save(user);
+
+        String token = jwtTokenProvider.generateToken(
+                user.getUserId(),
+                user.getEmail(),
+                user.getRole().name(),
+                false
+        );
+
+        auditLogService.logAction(
+                user.getUserId(),
+                "FIRST_LOGIN_VERIFY",
+                "USER",
+                user.getUserId(),
+                "First login verification successful",
+                ipAddress,
+                userAgent,
+                null,
+                null
+        );
+
+        log.info("First login verified for user: {}", user.getEmail());
+
+        return buildLoginResponse(user, token, 60 * 60 * 1000L, false);
+    }
+
+    public ApiResponse<Void> sendResetPasswordOtp(ForgotPasswordRequest request) {
+        log.info("Password reset requested for email: {}", request.getEmail());
+        checkOtpRateLimit(request.getEmail(), OtpType.RESET_PASSWORD);
+        String otpCode = generateOtp(request.getEmail(), OtpType.RESET_PASSWORD);
+        emailService.sendOtpEmail(request.getEmail(), otpCode, "Password Reset");
+        log.info("Reset password OTP sent to: {}", request.getEmail());
+        return ApiResponse.success("The OTP has been sent to your email.");
+    }
+
+    public ApiResponse<Void> verifyResetPasswordOtp(String email, VerifyOtpRequest request) {
+        log.info("Verifying reset password OTP for email: {}", email);
+        OtpEntity otp = verifyOtp(email, request.getOtpCode(), OtpType.RESET_PASSWORD);
+        userRepository.findByEmail(email)
+                .orElseThrow(() -> new BusinessException("Account does not exist"));
+        otp.setVerifiedAt(LocalDateTime.now());
+        otpRepository.save(otp);
+        log.info("Reset password OTP verified for: {}", email);
+        return ApiResponse.success("The OTP has been verified successfully.");
+    }
+
+    public ApiResponse<Void> resetPassword(String email, ResetPasswordRequest request) {
+        log.info("Resetting password for email: {}", email);
+
+        if (!request.getNewPassword().equals(request.getConfirmPassword())) {
+            throw new BusinessException("The confirmed password does not match.");
+        }
+
+        UserEntity user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BusinessException("Account does not exist"));
+
+        OtpEntity otp = otpRepository.findValidOtp(email, OtpType.RESET_PASSWORD, LocalDateTime.now())
+                .orElseThrow(() -> new BusinessException("OTP verification required"));
+
+        if (otp.getVerifiedAt() == null) {
+            throw new BusinessException("OTP not verified");
+        }
+
+        if (otp.getIsUsed()) {
+            throw new BusinessException("This reset link has expired");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setPasswordChangedAt(LocalDateTime.now());
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+
+        otp.setIsUsed(true);
+        otpRepository.save(otp);
+
+        auditLogService.logAction(
+                user.getUserId(),
+                "PASSWORD_RESET",
+                "USER",
+                user.getUserId(),
+                "Password reset successful",
+                null,
+                null,
+                null,
+                "Password reset via OTP"
+        );
+
+        log.info("Password reset successful for: {}", email);
+        return ApiResponse.success("The password has been reset successfully. Please login again.");
+    }
+
+    public ApiResponse<Void> resendOtp(String email, OtpType otpType) {
+        log.info("Resending OTP for email: {} type: {}", email, otpType);
+        checkOtpRateLimit(email, otpType);
+
+        Optional<OtpEntity> existingOtp = otpRepository.findValidOtp(email, otpType, LocalDateTime.now());
+        if (existingOtp.isPresent() && !existingOtp.get().getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new BusinessException("Current OTP is still valid. Please wait until it expires.");
+        }
+
+        String otpCode = generateOtp(email, otpType);
+        String subject = otpType == OtpType.FIRST_LOGIN ? "First Login Verification" : "Password Reset";
+        emailService.sendOtpEmail(email, otpCode, subject);
+
+        log.info("OTP resent to: {}", email);
+        return ApiResponse.success("The OTP has been sent to your email.");
+    }
+
+    public ApiResponse<Void> logout(Long userId, String ipAddress, String userAgent) {
+        log.info("Logout for user ID: {}", userId);
+
+        auditLogService.logAction(
+                userId,
+                "LOGOUT",
+                "USER",
+                userId,
+                "User logged out",
+                ipAddress,
+                userAgent,
+                null,
+                null
+        );
+
+        log.info("Logout successful for user ID: {}", userId);
+        return ApiResponse.success("Logged out successfully");
+    }
+
+    private LoginResponse handleFirstLogin(UserEntity user, String ipAddress, String userAgent) {
+        String otpCode = generateOtp(user.getEmail(), OtpType.FIRST_LOGIN);
+        emailService.sendOtpEmail(user.getEmail(), otpCode, "First Login Verification");
+
+        auditLogService.logAction(
+                user.getUserId(),
+                "LOGIN_REQUIRES_VERIFICATION",
+                "USER",
+                user.getUserId(),
+                "First login - OTP sent",
+                ipAddress,
+                userAgent,
+                null,
+                null
+        );
+
+        log.info("First login detected - OTP sent to: {}", user.getEmail());
+
+        return LoginResponse.builder()
+                .requiresVerification(true)
+                .user(LoginResponse.UserInfoDTO.builder()
+                        .userId(user.getUserId())
+                        .email(user.getEmail())
+                        .fullName(user.getFullName())
+                        .role(user.getRole())
+                        .build())
+                .build();
+    }
+
+    private void handleFailedLogin(UserEntity user, String ipAddress) {
+        user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
+
+        if (user.getFailedLoginAttempts() >= 5) {
+            user.setStatus(UserStatus.LOCKED);
+            user.setLockedUntil(LocalDateTime.now().plusMinutes(15));
+            userRepository.save(user);
+            auditLogService.logFailedLogin(user.getEmail(), "Account locked due to failed attempts", ipAddress);
+            throw new UnauthorizedException("Account is disabled.");
+        }
+
+        userRepository.save(user);
+        auditLogService.logFailedLogin(user.getEmail(), "Invalid password", ipAddress);
+    }
+
+    private boolean canLogin(UserEntity user) {
+        if (user.getStatus() == UserStatus.INACTIVE || user.getStatus() == UserStatus.LOCKED) {
+            return false;
+        }
+
+        if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
+            return false;
+        }
+
+        if (Boolean.FALSE.equals(user.getIsPermanent()) &&
+                user.getExpireDate() != null &&
+                user.getExpireDate().isBefore(java.time.LocalDate.now())) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private void checkOtpRateLimit(String email, OtpType otpType) {
+        long recentOtpCount = otpRepository.countRecentOtps(
+                email,
+                otpType,
+                LocalDateTime.now().minusHours(1)
+        );
+
+        if (recentOtpCount >= otpResendLimitPerHour) {
+            throw new BusinessException("OTP email quota exceeded in the current time window.");
+        }
+    }
+
+    private OtpEntity verifyOtp(String email, String otpCode, OtpType otpType) {
+        OtpEntity otp = otpRepository.findValidOtp(email, otpType, LocalDateTime.now())
                 .orElseThrow(() -> new BusinessException("Your OTP has expired. Please request a new one."));
 
-        // Check if OTP is valid
         if (otp.getIsUsed()) {
             throw new BusinessException("This OTP has already been used.");
         }
@@ -187,8 +339,7 @@ public class AuthService {
             throw new BusinessException("Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
         }
 
-        // Verify OTP code
-        if (!otp.getOtpCode().equals(request.getOtpCode())) {
+        if (!otp.getOtpCode().equals(otpCode)) {
             otp.setAttemptsRemaining(otp.getAttemptsRemaining() - 1);
             otpRepository.save(otp);
 
@@ -202,260 +353,13 @@ public class AuthService {
             );
         }
 
-        // Mark OTP as used
-        otp.setIsUsed(true);
-        otp.setVerifiedAt(LocalDateTime.now());
-        otpRepository.save(otp);
-
-        // Activate account
-        user.setStatus(UserStatus.ACTIVE);
-        user.setIsFirstLogin(false);
-        userRepository.save(user);
-
-        // Generate JWT token
-        User domainUser = mapToDomain(user);
-        String token = jwtTokenProvider.generateToken(domainUser, false);
-
-        auditLogService.logAction(
-                user.getUserId(),
-                "FIRST_LOGIN_VERIFY",
-                "USER",
-                user.getUserId(),
-                "First login verification successful",
-                ipAddress,
-                userAgent
-        );
-
-        return LoginResponse.builder()
-                .token(token)
-                .tokenType("Bearer")
-                .expiresIn(5 * 60 * 1000L)
-                .requiresVerification(false)
-                .user(LoginResponse.UserInfoDTO.builder()
-                        .userId(user.getUserId())
-                        .email(user.getEmail())
-                        .fullName(user.getFullName())
-                        .role(user.getRole())
-                        .avatarUrl(user.getAvatarUrl())
-                        .build())
-                .build();
-    }
-
-    /**
-     * UC-PERS-01: Forgot Password - Send OTP
-     */
-    public ApiResponse<Void> sendResetPasswordOtp(ForgotPasswordRequest request) {
-        log.info("Password reset requested for email: {}", request.getEmail());
-
-        // Check rate limiting (BR-AUTH-15: Privacy & Obfuscation)
-        // Always send OTP to valid email format, regardless of account existence
-        long recentOtpCount = otpRepository.countRecentOtps(
-                request.getEmail(),
-                OtpType.RESET_PASSWORD,
-                LocalDateTime.now().minusHours(1)
-        );
-
-        if (recentOtpCount >= otpResendLimitPerHour) {
-            throw new BusinessException("OTP email quota exceeded in the current time window.");
-        }
-
-        // Generate and send OTP
-        String otpCode = generateOtp(request.getEmail(), OtpType.RESET_PASSWORD);
-        emailService.sendOtpEmail(request.getEmail(), otpCode, "Password Reset");
-
-        return ApiResponse.success("The OTP has been sent to your email.");
-    }
-
-    /**
-     * Verify Reset Password OTP
-     */
-    public ApiResponse<Void> verifyResetPasswordOtp(
-            String email,
-            VerifyOtpRequest request
-    ) {
-        log.info("Verifying reset password OTP for email: {}", email);
-
-        // Find valid OTP
-        OtpEntity otp = otpRepository.findValidOtp(email, OtpType.RESET_PASSWORD, LocalDateTime.now())
-                .orElseThrow(() -> new BusinessException("Your OTP has expired. Please request a new one."));
-
-        // Check validity
-        if (otp.getIsUsed()) {
-            throw new BusinessException("This OTP has already been used.");
-        }
-
-        if (otp.getExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new BusinessException("Your OTP has expired. Please request a new one.");
-        }
-
-        if (otp.getAttemptsRemaining() <= 0) {
-            throw new BusinessException("Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
-        }
-
-        // Verify OTP code
-        if (!otp.getOtpCode().equals(request.getOtpCode())) {
-            otp.setAttemptsRemaining(otp.getAttemptsRemaining() - 1);
-            otpRepository.save(otp);
-
-            if (otp.getAttemptsRemaining() <= 0) {
-                throw new BusinessException("Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
-            }
-
-            throw new BusinessException(
-                    String.format("Incorrect OTP code. You have %d attempts remaining.",
-                            otp.getAttemptsRemaining())
-            );
-        }
-
-        // Check if account exists (Step 7a)
-        Optional<UserEntity> userOpt = userRepository.findByEmail(email);
-        if (userOpt.isEmpty()) {
-            throw new BusinessException("Account does not exist");
-        }
-
-        // Mark OTP as verified (but not used yet)
-        otp.setVerifiedAt(LocalDateTime.now());
-        otpRepository.save(otp);
-
-        return ApiResponse.success("The OTP has been verified successfully.");
-    }
-
-    /**
-     * Reset Password after OTP verification
-     */
-    public ApiResponse<Void> resetPassword(
-            String email,
-            ResetPasswordRequest request
-    ) {
-        log.info("Resetting password for email: {}", email);
-
-        // Validate password match
-        if (!request.getNewPassword().equals(request.getConfirmPassword())) {
-            throw new BusinessException("The confirmed password does not match.");
-        }
-
-        // Find user
-        UserEntity user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new BusinessException("Account does not exist"));
-
-        // Find verified OTP
-        OtpEntity otp = otpRepository.findValidOtp(email, OtpType.RESET_PASSWORD, LocalDateTime.now())
-                .orElseThrow(() -> new BusinessException("OTP verification required"));
-
-        if (otp.getVerifiedAt() == null) {
-            throw new BusinessException("OTP not verified");
-        }
-
-        if (otp.getIsUsed()) {
-            throw new BusinessException("This reset link has expired");
-        }
-
-        // Update password
-        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
-        user.setPasswordChangedAt(LocalDateTime.now());
-        userRepository.save(user);
-
-        // Mark OTP as used
-        otp.setIsUsed(true);
-        otpRepository.save(otp);
-
-        auditLogService.logAction(
-                user.getUserId(),
-                "PASSWORD_RESET",
-                "USER",
-                user.getUserId(),
-                "Password reset successful",
-                null,
-                null
-        );
-
-        return ApiResponse.success("The password has been reset successfully. Please login again.");
-    }
-
-    /**
-     * Resend OTP
-     */
-    public ApiResponse<Void> resendOtp(String email, OtpType otpType) {
-        log.info("Resending OTP for email: {} type: {}", email, otpType);
-
-        // Check rate limiting
-        long recentOtpCount = otpRepository.countRecentOtps(
-                email,
-                otpType,
-                LocalDateTime.now().minusHours(1)
-        );
-
-        if (recentOtpCount >= otpResendLimitPerHour) {
-            throw new BusinessException("OTP email quota exceeded in the current time window.");
-        }
-
-        // Check if previous OTP is expired
-        Optional<OtpEntity> existingOtp = otpRepository.findValidOtp(email, otpType, LocalDateTime.now());
-        if (existingOtp.isPresent() && !existingOtp.get().getExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new BusinessException("Current OTP is still valid. Please wait until it expires.");
-        }
-
-        // Generate new OTP
-        String otpCode = generateOtp(email, otpType);
-        String subject = otpType == OtpType.FIRST_LOGIN ? "First Login Verification" : "Password Reset";
-        emailService.sendOtpEmail(email, otpCode, subject);
-
-        return ApiResponse.success("The OTP has been sent to your email.");
-    }
-
-    /**
-     * UC-AUTH-02: Logout
-     */
-    public ApiResponse<Void> logout(Long userId, String ipAddress, String userAgent) {
-        log.info("Logout for user ID: {}", userId);
-
-        // Invalidate session (can be implemented with Redis for token blacklist)
-        // For now, just log the action
-
-        auditLogService.logAction(
-                userId,
-                "LOGOUT",
-                "USER",
-                userId,
-                "User logged out",
-                ipAddress,
-                userAgent
-        );
-
-        return ApiResponse.success("Logged out successfully");
-    }
-
-    // ============================================
-    // HELPER METHODS
-    // ============================================
-
-    private boolean canLogin(UserEntity user) {
-        // Check status
-        if (user.getStatus() == UserStatus.INACTIVE || user.getStatus() == UserStatus.LOCKED) {
-            return false;
-        }
-
-        // Check if locked temporarily
-        if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
-            return false;
-        }
-
-        // Check account expiration
-        if (Boolean.FALSE.equals(user.getIsPermanent()) &&
-                user.getExpireDate() != null &&
-                user.getExpireDate().isBefore(java.time.LocalDate.now())) {
-            return false;
-        }
-
-        return true;
+        return otp;
     }
 
     private String generateOtp(String email, OtpType otpType) {
-        // Generate 6-digit OTP
         Random random = new Random();
         String otpCode = String.format("%06d", random.nextInt(1000000));
 
-        // Save to database
         OtpEntity otp = OtpEntity.builder()
                 .email(email)
                 .otpCode(otpCode)
@@ -466,34 +370,28 @@ public class AuthService {
                 .build();
 
         otpRepository.save(otp);
-
+        log.info("OTP generated for {} (type: {}): {}", email, otpType, otpCode);
         return otpCode;
     }
 
-    private User mapToDomain(UserEntity entity) {
-        return User.builder()
-                .userId(entity.getUserId())
-                .email(entity.getEmail())
-                .passwordHash(entity.getPasswordHash())
-                .fullName(entity.getFullName())
-                .phone(entity.getPhone())
-                .gender(entity.getGender())
-                .dateOfBirth(entity.getDateOfBirth())
-                .address(entity.getAddress())
-                .avatarUrl(entity.getAvatarUrl())
-                .role(entity.getRole())
-                .status(entity.getStatus())
-                .isPermanent(entity.getIsPermanent())
-                .expireDate(entity.getExpireDate())
-                .isFirstLogin(entity.getIsFirstLogin())
-                .lastLoginAt(entity.getLastLoginAt())
-                .failedLoginAttempts(entity.getFailedLoginAttempts())
-                .lockedUntil(entity.getLockedUntil())
-                .passwordChangedAt(entity.getPasswordChangedAt())
-                .createdAt(entity.getCreatedAt())
-                .createdBy(entity.getCreatedBy())
-                .updatedAt(entity.getUpdatedAt())
-                .updatedBy(entity.getUpdatedBy())
+    private LoginResponse buildLoginResponse(
+            UserEntity user,
+            String token,
+            Long expiresIn,
+            boolean requiresVerification
+    ) {
+        return LoginResponse.builder()
+                .token(token)
+                .tokenType("Bearer")
+                .expiresIn(expiresIn)
+                .requiresVerification(requiresVerification)
+                .user(LoginResponse.UserInfoDTO.builder()
+                        .userId(user.getUserId())
+                        .email(user.getEmail())
+                        .fullName(user.getFullName())
+                        .role(user.getRole())
+                        .avatarUrl(user.getAvatarUrl())
+                        .build())
                 .build();
     }
 }

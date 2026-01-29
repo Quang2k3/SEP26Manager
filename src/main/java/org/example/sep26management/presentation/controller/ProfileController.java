@@ -43,7 +43,7 @@ public class ProfileController {
 
     @PutMapping
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
-            @Valid @ModelAttribute UpdateProfileRequest request,
+            @Valid @RequestBody UpdateProfileRequest request,
             HttpServletRequest httpRequest
     ) {
         try {

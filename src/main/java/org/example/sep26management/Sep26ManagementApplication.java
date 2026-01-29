@@ -9,9 +9,10 @@ import org.springframework.scheduling.annotation.EnableAsync;
 
 @SpringBootApplication
 @EnableJpaRepositories(basePackages = "org.example.sep26management.infrastructure.persistence.repository")
-@EntityScan(basePackages = "org.example.sep26management.infrastructure.persistence.entity")  // ✅ THÊM DÒNG NÀY
+@EntityScan(basePackages = "org.example.sep26management.infrastructure.persistence.entity")
 @EnableAsync
 @Slf4j
+
 public class Sep26ManagementApplication {
 
     public static void main(String[] args) {

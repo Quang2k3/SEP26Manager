@@ -8,12 +8,11 @@ import org.example.sep26management.application.dto.request.UpdateUserStatusReque
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.UserListResponse;
 import org.example.sep26management.application.dto.response.UserProfileResponse;
-import org.example.sep26management.domain.enums.OtpType;
+import org.example.sep26management.application.mapper.UserMapper;
 import org.example.sep26management.domain.enums.UserRole;
 import org.example.sep26management.domain.enums.UserStatus;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
-import org.example.sep26management.infrastructure.exception.UnauthorizedException;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,13 +38,11 @@ public class UserManagementService {
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
     private final AuditLogService auditLogService;
+    private final UserMapper userMapper;
 
-    @Value("${app.default-password}")
+    @Value("${app.default-password:Warehouse@123}")
     private String defaultPassword;
 
-    /**
-     * UC-MUA-01: Create Account User
-     */
     public ApiResponse<UserProfileResponse> createUser(
             CreateUserRequest request,
             Long currentUserId,
@@ -54,12 +51,10 @@ public class UserManagementService {
     ) {
         log.info("Creating new user with email: {}", request.getEmail());
 
-        // Step 5: Validate email uniqueness (BR-USER-07)
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new BusinessException("Email already exists");
         }
 
-        // Validate expire date if not permanent
         if (Boolean.FALSE.equals(request.getIsPermanent()) && request.getExpireDate() == null) {
             throw new BusinessException("Expire date is required for non-permanent account");
         }
@@ -68,12 +63,11 @@ public class UserManagementService {
             throw new BusinessException("Expire date must be in the future");
         }
 
-        // Step 6: Generate defaults (BR-USER-08, BR-USER-09)
         UserEntity user = UserEntity.builder()
                 .email(request.getEmail())
-                .passwordHash(passwordEncoder.encode("Warehouse@123")) // BR-USER-08: Default password
+                .passwordHash(passwordEncoder.encode(defaultPassword))
                 .role(request.getRole())
-                .status(UserStatus.INACTIVE) // BR-USER-09: Initial state
+                .status(UserStatus.INACTIVE)
                 .isPermanent(request.getIsPermanent())
                 .expireDate(request.getExpireDate())
                 .isFirstLogin(true)
@@ -82,17 +76,14 @@ public class UserManagementService {
                 .updatedBy(currentUserId)
                 .build();
 
-        // Step 7: Create account and default profile (BR-USER-12)
-        userRepository.save(user);
+        user = userRepository.save(user);
 
-        // Send welcome email with credentials
         emailService.sendWelcomeEmail(
                 user.getEmail(),
-                "Warehouse@123",
+                defaultPassword,
                 user.getRole().getDisplayName()
         );
 
-        // Log audit
         auditLogService.logAction(
                 currentUserId,
                 "CREATE_USER",
@@ -100,26 +91,18 @@ public class UserManagementService {
                 user.getUserId(),
                 "Created new user: " + user.getEmail(),
                 ipAddress,
-                userAgent
+                userAgent,
+                null,
+                String.format("Email: %s, Role: %s", user.getEmail(), user.getRole())
         );
 
-        // Build response
-        UserProfileResponse response = UserProfileResponse.builder()
-                .userId(user.getUserId())
-                .email(user.getEmail())
-                .role(user.getRole())
-                .status(user.getStatus())
-                .isPermanent(user.getIsPermanent())
-                .expireDate(user.getExpireDate())
-                .createdAt(user.getCreatedAt())
-                .build();
+        log.info("User created successfully: {}", user.getEmail());
+
+        UserProfileResponse response = userMapper.toProfileResponse(user);
 
         return ApiResponse.success("Create Account Success", response);
     }
 
-    /**
-     * UC-MUA-02: View List User
-     */
     @Transactional(readOnly = true)
     public ApiResponse<UserListResponse> getUserList(
             String keyword,
@@ -131,24 +114,26 @@ public class UserManagementService {
         log.info("Fetching user list - keyword: {}, role: {}, status: {}, page: {}, size: {}",
                 keyword, role, status, page, size);
 
-        // Step 3: Load accounts with pagination (BR-USER-13)
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<UserEntity> userPage = userRepository.searchUsers(keyword, role, status, pageable);
 
-        // Step 4: Map to DTOs
         List<UserListResponse.UserItemDTO> users = userPage.getContent().stream()
-                .map(user -> UserListResponse.UserItemDTO.builder()
-                        .userId(user.getUserId())
-                        .email(user.getEmail())
-                        .fullName(user.getFullName())
-                        .phone(user.getPhone())
-                        .role(user.getRole())
-                        .status(user.getStatus())
-                        .isPermanent(user.getIsPermanent())
-                        .expireDate(user.getExpireDate())
-                        .createdAt(user.getCreatedAt())
-                        .lastLoginAt(user.getLastLoginAt())
-                        .build())
+                .map(user -> {
+                    UserProfileResponse profile = userMapper.toProfileResponse(user);
+
+                    return UserListResponse.UserItemDTO.builder()
+                            .userId(profile.getUserId())
+                            .email(profile.getEmail())
+                            .fullName(profile.getFullName())
+                            .phone(profile.getPhone())
+                            .role(profile.getRole())
+                            .status(profile.getStatus())
+                            .isPermanent(profile.getIsPermanent())
+                            .expireDate(profile.getExpireDate())
+                            .createdAt(profile.getCreatedAt())
+                            .lastLoginAt(profile.getLastLoginAt())
+                            .build();
+                })
                 .collect(Collectors.toList());
 
         UserListResponse response = UserListResponse.builder()
@@ -159,12 +144,11 @@ public class UserManagementService {
                 .pageSize(size)
                 .build();
 
+        log.info("Retrieved {} users (page {}/{})", users.size(), page + 1, userPage.getTotalPages());
+
         return ApiResponse.success("Users retrieved successfully", response);
     }
 
-    /**
-     * UC-MUA-03: Assign Role
-     */
     public ApiResponse<UserProfileResponse> assignRole(
             Long userId,
             AssignRoleRequest request,
@@ -174,24 +158,19 @@ public class UserManagementService {
     ) {
         log.info("Assigning role {} to user ID: {}", request.getRole(), userId);
 
-        // Find user
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        // Store old role for audit
         UserRole oldRole = user.getRole();
 
-        // Validate: Cannot change own role
         if (userId.equals(currentUserId)) {
             throw new BusinessException("Cannot change your own role");
         }
 
-        // Step 4: Update role (BR-USER-15)
         user.setRole(request.getRole());
         user.setUpdatedBy(currentUserId);
-        userRepository.save(user);
+        user = userRepository.save(user);
 
-        // Log audit
         auditLogService.logAction(
                 currentUserId,
                 "UPDATE_USER_ROLE",
@@ -199,24 +178,18 @@ public class UserManagementService {
                 userId,
                 String.format("Changed role from %s to %s", oldRole, request.getRole()),
                 ipAddress,
-                userAgent
+                userAgent,
+                "Role: " + oldRole,
+                "Role: " + request.getRole()
         );
 
-        // Build response
-        UserProfileResponse response = UserProfileResponse.builder()
-                .userId(user.getUserId())
-                .email(user.getEmail())
-                .fullName(user.getFullName())
-                .role(user.getRole())
-                .status(user.getStatus())
-                .build();
+        log.info("Role assigned successfully for user: {}", user.getEmail());
+
+        UserProfileResponse response = userMapper.toProfileResponse(user);
 
         return ApiResponse.success("User role has been updated successfully.", response);
     }
 
-    /**
-     * UC-MUA-04: Active / Inactive User
-     */
     public ApiResponse<UserProfileResponse> updateUserStatus(
             Long userId,
             UpdateUserStatusRequest request,
@@ -226,35 +199,28 @@ public class UserManagementService {
     ) {
         log.info("Updating status for user ID: {} to {}", userId, request.getStatus());
 
-        // Find user
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        // Validate: Cannot change own status
         if (userId.equals(currentUserId)) {
             throw new BusinessException("Cannot change your own account status");
         }
 
-        // Store old status for audit
         UserStatus oldStatus = user.getStatus();
 
-        // Update status
         user.setStatus(request.getStatus());
         user.setUpdatedBy(currentUserId);
 
-        // If activating, reset failed login attempts
         if (request.getStatus() == UserStatus.ACTIVE) {
             user.setFailedLoginAttempts(0);
             user.setLockedUntil(null);
         }
 
-        userRepository.save(user);
+        user = userRepository.save(user);
 
-        // Send notification email
         String statusText = request.getStatus() == UserStatus.ACTIVE ? "activated" : "deactivated";
         emailService.sendStatusChangeEmail(user.getEmail(), statusText);
 
-        // Log audit
         auditLogService.logAction(
                 currentUserId,
                 "UPDATE_USER_STATUS",
@@ -262,17 +228,14 @@ public class UserManagementService {
                 userId,
                 String.format("Changed status from %s to %s", oldStatus, request.getStatus()),
                 ipAddress,
-                userAgent
+                userAgent,
+                "Status: " + oldStatus,
+                "Status: " + request.getStatus()
         );
 
-        // Build response
-        UserProfileResponse response = UserProfileResponse.builder()
-                .userId(user.getUserId())
-                .email(user.getEmail())
-                .fullName(user.getFullName())
-                .role(user.getRole())
-                .status(user.getStatus())
-                .build();
+        log.info("Status updated successfully for user: {}", user.getEmail());
+
+        UserProfileResponse response = userMapper.toProfileResponse(user);
 
         String message = request.getStatus() == UserStatus.ACTIVE
                 ? "User account has been activated successfully."
@@ -281,9 +244,6 @@ public class UserManagementService {
         return ApiResponse.success(message, response);
     }
 
-    /**
-     * Get user by ID
-     */
     @Transactional(readOnly = true)
     public ApiResponse<UserProfileResponse> getUserById(Long userId) {
         log.info("Fetching user by ID: {}", userId);
@@ -291,22 +251,9 @@ public class UserManagementService {
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        UserProfileResponse response = UserProfileResponse.builder()
-                .userId(user.getUserId())
-                .email(user.getEmail())
-                .fullName(user.getFullName())
-                .phone(user.getPhone())
-                .gender(user.getGender())
-                .dateOfBirth(user.getDateOfBirth())
-                .address(user.getAddress())
-                .avatarUrl(user.getAvatarUrl())
-                .role(user.getRole())
-                .status(user.getStatus())
-                .isPermanent(user.getIsPermanent())
-                .expireDate(user.getExpireDate())
-                .lastLoginAt(user.getLastLoginAt())
-                .createdAt(user.getCreatedAt())
-                .build();
+        UserProfileResponse response = userMapper.toProfileResponse(user);
+
+        log.info("User retrieved: {}", user.getEmail());
 
         return ApiResponse.success("User retrieved successfully", response);
     }
