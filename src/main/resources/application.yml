@@ -47,10 +47,11 @@ spring:
 app:
   default-password: postgres
 
-jwt:
-  secret: Sep26WarehouseManagementSecretKeyForJWTTokenGeneration2026MinimumLength256BitsRequired
-  expiration-ms: 300000
-  remember-me-expiration-ms: 604800000
+  jwt:
+    secret: 9xUc3TNqLOYTH91rKxxXsjkNGaLwwGDXmm6BJiC+9iuNFuAHrWB4XLRcxTADA4mBwdm1Gv+YlQs4dXCOeY1H2w==
+    expiration: 3600000
+    remember-me-expiration: 604800000
+
 
 otp:
   length: 6
