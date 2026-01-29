@@ -63,7 +63,8 @@ public class SecurityConfig {
 
                         // Manager only endpoints
                         .requestMatchers("/api/v1/users/**").hasRole("MANAGER")
-                        .requestMatchers("/api/v1/zones/**").hasRole("MANAGER") // Zone Management
+                        .requestMatchers("/api/v1/zones/**").hasRole("MANAGER")
+                        .requestMatchers("/api/v1/category-zone-mappings/**").hasRole("MANAGER") // Zone Management
 
                         // Authenticated endpoints
                         .anyRequest().authenticated())
