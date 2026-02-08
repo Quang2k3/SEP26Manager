@@ -24,7 +24,9 @@ import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -51,8 +53,7 @@ public class ProfileService {
             Long userId,
             ChangePasswordRequest request,
             String ipAddress,
-            String userAgent
-    ) {
+            String userAgent) {
         log.info("Changing password for user ID: {}", userId);
 
         // Find user
@@ -88,8 +89,7 @@ public class ProfileService {
                 userId,
                 "Password changed successfully",
                 ipAddress,
-                userAgent
-        );
+                userAgent);
 
         // Step 8: Return success (BR-PERS-04: maintain current session)
         return ApiResponse.success("Password changed successfully");
@@ -105,6 +105,13 @@ public class ProfileService {
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
+        // Extract role codes from user
+        Set<String> roleCodes = user.getRoles() != null
+                ? user.getRoles().stream()
+                        .map(role -> role.getRoleCode())
+                        .collect(Collectors.toSet())
+                : Set.of();
+
         UserProfileResponse response = UserProfileResponse.builder()
                 .userId(user.getUserId())
                 .email(user.getEmail())
@@ -114,7 +121,7 @@ public class ProfileService {
                 .dateOfBirth(user.getDateOfBirth())
                 .address(user.getAddress())
                 .avatarUrl(user.getAvatarUrl())
-                .role(user.getRole())
+                .roleCodes(roleCodes)
                 .status(user.getStatus())
                 .isPermanent(user.getIsPermanent())
                 .expireDate(user.getExpireDate())
@@ -132,8 +139,7 @@ public class ProfileService {
             Long userId,
             UpdateProfileRequest request,
             String ipAddress,
-            String userAgent
-    ) {
+            String userAgent) {
         log.info("Updating profile for user ID: {}", userId);
 
         // Step 2: Retrieve current profile
@@ -178,8 +184,14 @@ public class ProfileService {
                 userAgent,
                 buildOldValue(oldFullName, oldPhone, oldGender, oldAddress, oldAvatarUrl),
                 buildNewValue(user.getFullName(), user.getPhone(), user.getGender(),
-                        user.getAddress(), user.getAvatarUrl())
-        );
+                        user.getAddress(), user.getAvatarUrl()));
+
+        // Extract role codes
+        Set<String> roleCodes = user.getRoles() != null
+                ? user.getRoles().stream()
+                        .map(role -> role.getRoleCode())
+                        .collect(Collectors.toSet())
+                : Set.of();
 
         // Build response
         UserProfileResponse response = UserProfileResponse.builder()
@@ -191,7 +203,7 @@ public class ProfileService {
                 .dateOfBirth(user.getDateOfBirth())
                 .address(user.getAddress())
                 .avatarUrl(user.getAvatarUrl())
-                .role(user.getRole())
+                .roleCodes(roleCodes)
                 .status(user.getStatus())
                 .build();
 
@@ -268,15 +280,14 @@ public class ProfileService {
     }
 
     private String buildOldValue(String fullName, String phone, String gender,
-                                 String address, String avatarUrl) {
+            String address, String avatarUrl) {
         return String.format(
                 "{\"fullName\":\"%s\",\"phone\":\"%s\",\"gender\":\"%s\",\"address\":\"%s\",\"avatarUrl\":\"%s\"}",
-                fullName, phone, gender, address, avatarUrl
-        );
+                fullName, phone, gender, address, avatarUrl);
     }
 
     private String buildNewValue(String fullName, String phone, String gender,
-                                 String address, String avatarUrl) {
+            String address, String avatarUrl) {
         return buildOldValue(fullName, phone, gender, address, avatarUrl);
     }
 }

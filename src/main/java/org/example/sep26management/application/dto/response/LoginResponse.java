@@ -2,7 +2,8 @@ package org.example.sep26management.application.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
-import org.example.sep26management.domain.enums.UserRole;
+
+import java.util.Set;
 
 @Getter
 @Setter
@@ -26,7 +27,7 @@ public class LoginResponse {
         private Long userId;
         private String email;
         private String fullName;
-        private UserRole role;
+        private Set<String> roleCodes; // Changed from UserRole to Set<String>
         private String avatarUrl;
     }
 }

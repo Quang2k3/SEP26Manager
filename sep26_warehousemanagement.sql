@@ -1,1434 +1,1130 @@
--- ============================================
--- WAREHOUSE MANAGEMENT SYSTEM - FULL DATABASE SCHEMA
--- Version: 1.0.0
+-- ============================================================
+-- WAREHOUSE MANAGEMENT SYSTEM - PRODUCTION DATABASE
 -- Database: PostgreSQL 14+
--- Purpose: Chemical Warehouse Management (SWAT, GRASSE)
--- ============================================
+-- Author: Warehouse Management Team
+-- Date: 2026-01-29
+-- ============================================================
 
--- ============================================
--- ============================================
--- RESET DATABASE STRUCTURE (SAFE WAY)
--- ============================================
+-- Drop existing database if needed (CAUTION!)
+-- DROP DATABASE IF EXISTS warehouse_db;
 
-DROP SCHEMA IF EXISTS public CASCADE;
-CREATE SCHEMA public;
+-- Create database
+-- CREATE DATABASE warehouse_db
+--     WITH 
+--     OWNER = postgres
+--     ENCODING = 'UTF8'
+--     LC_COLLATE = 'en_US.UTF-8'
+--     LC_CTYPE = 'en_US.UTF-8'
+--     TABLESPACE = pg_default
+--     CONNECTION LIMIT = -1;
 
-GRANT ALL ON SCHEMA public TO postgres;
-GRANT ALL ON SCHEMA public TO public;
+-- Connect to database
+-- \c warehouse_db;
 
-
--- ============================================
+-- ============================================================
 -- EXTENSIONS
--- ============================================
+-- ============================================================
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- ============================================
--- ENUMS (Optional - for type safety)
--- ============================================
-CREATE TYPE user_role_enum AS ENUM ('MANAGER', 'ACCOUNTANT', 'KEEPER');
-CREATE TYPE user_status_enum AS ENUM ('ACTIVE', 'INACTIVE', 'PENDING_VERIFICATION', 'LOCKED');
-CREATE TYPE gender_enum AS ENUM ('MALE', 'FEMALE', 'OTHER');
-CREATE TYPE otp_type_enum AS ENUM ('FIRST_LOGIN', 'RESET_PASSWORD');
-CREATE TYPE document_type_enum AS ENUM ('INBOUND', 'OUTBOUND', 'RETURN', 'STOCK_CHECK', 'ADJUSTMENT');
-CREATE TYPE document_status_enum AS ENUM ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'RECEIVED', 'CONFIRMED', 'CANCELLED');
-CREATE TYPE transaction_type_enum AS ENUM ('IMPORT', 'EXPORT', 'RETURN', 'ADJUSTMENT', 'RESERVE', 'RELEASE');
-CREATE TYPE alert_type_enum AS ENUM ('LOW_STOCK', 'OUT_OF_STOCK', 'OVERSTOCK', 'NEAR_EXPIRY', 'EXPIRED');
-CREATE TYPE alert_severity_enum AS ENUM ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW');
-CREATE TYPE lot_status_enum AS ENUM ('ACTIVE', 'EXPIRED', 'RECALLED', 'DEPLETED');
+-- ============================================================
+-- 0) ENUM SYSTEM (FOUNDATION)
+-- ============================================================
 
--- ============================================
--- TABLE 1: USERS
--- ============================================
+CREATE TABLE enum_types (
+    enum_type_id BIGSERIAL PRIMARY KEY,
+    enum_type_code VARCHAR(100) NOT NULL UNIQUE,
+    enum_type_name VARCHAR(200) NOT NULL,
+    description TEXT,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_enum_type_code ON enum_types(enum_type_code);
+
+COMMENT ON TABLE enum_types IS 'Master table for all enum types in system';
+
+CREATE TABLE enum_values (
+    enum_value_id BIGSERIAL PRIMARY KEY,
+    enum_type_id BIGINT NOT NULL REFERENCES enum_types(enum_type_id) ON DELETE CASCADE,
+    value_code VARCHAR(100) NOT NULL,
+    value_name VARCHAR(200) NOT NULL,
+    value_name_vi VARCHAR(200),
+    display_order INT NOT NULL DEFAULT 0,
+    color_code VARCHAR(20),
+    icon VARCHAR(50),
+    badge_style VARCHAR(100),
+    is_default BOOLEAN DEFAULT FALSE,
+    is_terminal BOOLEAN DEFAULT FALSE,
+    description TEXT,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(enum_type_id, value_code)
+);
+
+CREATE INDEX idx_enum_type_value ON enum_values(enum_type_id, value_code);
+CREATE INDEX idx_enum_display_order ON enum_values(enum_type_id, display_order);
+CREATE INDEX idx_enum_active ON enum_values(enum_type_id, active);
+
+COMMENT ON TABLE enum_values IS 'Actual enum values for each type';
+
+CREATE TABLE enum_transitions (
+    transition_id BIGSERIAL PRIMARY KEY,
+    enum_type_id BIGINT NOT NULL REFERENCES enum_types(enum_type_id) ON DELETE CASCADE,
+    from_value_code VARCHAR(100) NOT NULL,
+    to_value_code VARCHAR(100) NOT NULL,
+    required_permission VARCHAR(100),
+    required_role VARCHAR(100),
+    is_allowed BOOLEAN NOT NULL DEFAULT TRUE,
+    description TEXT,
+    UNIQUE(enum_type_id, from_value_code, to_value_code)
+);
+
+CREATE INDEX idx_enum_transitions ON enum_transitions(enum_type_id, from_value_code, to_value_code);
+
+COMMENT ON TABLE enum_transitions IS 'Define valid status transitions (state machine)';
+
+-- ============================================================
+-- 1) TENANT / ORG
+-- ============================================================
+
+CREATE TABLE warehouses (
+    warehouse_id BIGSERIAL PRIMARY KEY,
+    warehouse_code VARCHAR(50) NOT NULL UNIQUE,
+    warehouse_name VARCHAR(200) NOT NULL,
+    address TEXT,
+    timezone VARCHAR(50) NOT NULL DEFAULT 'Asia/Ho_Chi_Minh',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_warehouse_code ON warehouses(warehouse_code);
+CREATE INDEX idx_warehouse_active ON warehouses(active);
+
+COMMENT ON TABLE warehouses IS 'Warehouse master data';
+
+-- ============================================================
+-- 2) USERS / RBAC
+-- ============================================================
+
 CREATE TABLE users (
     user_id BIGSERIAL PRIMARY KEY,
-    
-    -- Authentication
-    email VARCHAR(100) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    
-    -- Profile
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
     full_name VARCHAR(200),
     phone VARCHAR(20),
     gender VARCHAR(10),
     date_of_birth DATE,
     address TEXT,
     avatar_url TEXT,
-    
-    -- Account Management
-    role VARCHAR(50) NOT NULL DEFAULT 'KEEPER',
     status VARCHAR(50) NOT NULL DEFAULT 'INACTIVE',
-    
-    -- Account Type
-    is_permanent BOOLEAN DEFAULT TRUE,
+    is_first_login BOOLEAN NOT NULL DEFAULT TRUE,
+    is_permanent BOOLEAN NOT NULL DEFAULT TRUE,
     expire_date DATE,
-    
-    -- Security
-    is_first_login BOOLEAN DEFAULT TRUE,
     last_login_at TIMESTAMP,
-    failed_login_attempts INTEGER DEFAULT 0,
+    failed_login_attempts INT NOT NULL DEFAULT 0,
     locked_until TIMESTAMP,
     password_changed_at TIMESTAMP,
-    
-    -- Timestamps
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by BIGINT,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_by BIGINT,
-    
-    -- Constraints
-    CONSTRAINT chk_email_format CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$'),
-    CONSTRAINT chk_phone_format CHECK (phone IS NULL OR phone ~ '^[0-9]{9,15}$'),
-    CONSTRAINT chk_role CHECK (role IN ('MANAGER', 'ACCOUNTANT', 'KEEPER')),
-    CONSTRAINT chk_status CHECK (status IN ('ACTIVE', 'INACTIVE', 'PENDING_VERIFICATION', 'LOCKED')),
-    CONSTRAINT chk_gender CHECK (gender IS NULL OR gender IN ('MALE', 'FEMALE', 'OTHER')),
-    CONSTRAINT chk_expire_date CHECK (is_permanent = TRUE OR expire_date IS NOT NULL)
+    updated_by BIGINT
 );
 
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_status ON users(status);
-CREATE INDEX idx_users_role ON users(role);
-CREATE INDEX idx_users_created_at ON users(created_at DESC);
+CREATE INDEX idx_user_email ON users(email);
+CREATE INDEX idx_user_status ON users(status);
+CREATE INDEX idx_user_expire_date ON users(expire_date) WHERE expire_date IS NOT NULL;
 
-COMMENT ON TABLE users IS 'User accounts with authentication and profile information';
-COMMENT ON COLUMN users.role IS 'User role: MANAGER, ACCOUNTANT, KEEPER';
-COMMENT ON COLUMN users.status IS 'Account status: ACTIVE, INACTIVE, PENDING_VERIFICATION, LOCKED';
+COMMENT ON TABLE users IS 'System users';
 
--- ============================================
--- TABLE 2: OTP (One-Time Password)
--- ============================================
-CREATE TABLE otps (
-    otp_id BIGSERIAL PRIMARY KEY,
-    
-    email VARCHAR(100) NOT NULL,
-    otp_code VARCHAR(6) NOT NULL,
-    otp_type VARCHAR(50) NOT NULL,
-    
-    -- Security
-    attempts_remaining INTEGER DEFAULT 5,
-    is_used BOOLEAN DEFAULT FALSE,
-    
-    -- Timestamps
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL,
-    verified_at TIMESTAMP,
-    
-    -- Constraints
-    CONSTRAINT chk_otp_code CHECK (otp_code ~ '^[0-9]{6}$'),
-    CONSTRAINT chk_otp_type CHECK (otp_type IN ('FIRST_LOGIN', 'RESET_PASSWORD')),
-    CONSTRAINT chk_otp_expiry CHECK (expires_at > created_at)
+CREATE TABLE roles (
+    role_id BIGSERIAL PRIMARY KEY,
+    role_code VARCHAR(50) NOT NULL UNIQUE,
+    role_name VARCHAR(200) NOT NULL,
+    description TEXT,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_otps_email_type ON otps(email, otp_type);
-CREATE INDEX idx_otps_expires_at ON otps(expires_at);
-CREATE INDEX idx_otps_created_at ON otps(created_at DESC);
+CREATE INDEX idx_role_code ON roles(role_code);
 
-COMMENT ON TABLE otps IS 'One-Time Passwords for email verification';
+COMMENT ON TABLE roles IS 'User roles';
 
--- ============================================
--- TABLE 3: ACTIVE_SESSIONS
--- ============================================
-CREATE TABLE active_sessions (
-    session_id VARCHAR(255) PRIMARY KEY,
+CREATE TABLE permissions (
+    permission_id BIGSERIAL PRIMARY KEY,
+    permission_code VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_permission_code ON permissions(permission_code);
+
+COMMENT ON TABLE permissions IS 'System permissions';
+
+CREATE TABLE role_permissions (
+    role_id BIGINT NOT NULL REFERENCES roles(role_id) ON DELETE CASCADE,
+    permission_id BIGINT NOT NULL REFERENCES permissions(permission_id) ON DELETE CASCADE,
+    PRIMARY KEY (role_id, permission_id)
+);
+
+CREATE INDEX idx_role_permissions_role ON role_permissions(role_id);
+CREATE INDEX idx_role_permissions_permission ON role_permissions(permission_id);
+
+CREATE TABLE user_roles (
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    jwt_token TEXT NOT NULL,
-    ip_address VARCHAR(50),
-    user_agent TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL,
-    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    role_id BIGINT NOT NULL REFERENCES roles(role_id) ON DELETE CASCADE,
+    assigned_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, role_id)
 );
 
-CREATE UNIQUE INDEX idx_active_sessions_user ON active_sessions(user_id);
-CREATE INDEX idx_active_sessions_expires ON active_sessions(expires_at);
+CREATE INDEX idx_user_roles_user ON user_roles(user_id);
+CREATE INDEX idx_user_roles_role ON user_roles(role_id);
 
-COMMENT ON TABLE active_sessions IS 'Active user sessions for single session enforcement';
+CREATE TABLE user_warehouses (
+    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    assigned_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    assigned_by BIGINT REFERENCES users(user_id),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (user_id, warehouse_id)
+);
 
--- ============================================
--- TABLE 4: CATEGORIES
--- ============================================
+CREATE INDEX idx_user_warehouses_user ON user_warehouses(user_id);
+CREATE INDEX idx_user_warehouses_warehouse ON user_warehouses(warehouse_id);
+
+COMMENT ON TABLE user_warehouses IS 'User warehouse access control';
+
+-- ============================================================
+-- 3) ATTACHMENTS
+-- ============================================================
+
+CREATE TABLE attachments (
+    attachment_id BIGSERIAL PRIMARY KEY,
+    file_name VARCHAR(500) NOT NULL,
+    file_type VARCHAR(100),
+    file_size BIGINT,
+    storage_url TEXT NOT NULL,
+    checksum VARCHAR(100),
+    uploaded_by BIGINT REFERENCES users(user_id),
+    uploaded_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_attachment_uploaded_by ON attachments(uploaded_by);
+
+COMMENT ON TABLE attachments IS 'File attachments (SDS, photos, documents)';
+
+-- ============================================================
+-- 4) PRODUCT / SKU MASTER
+-- ============================================================
+
 CREATE TABLE categories (
     category_id BIGSERIAL PRIMARY KEY,
-    category_code VARCHAR(50) UNIQUE NOT NULL,
+    category_code VARCHAR(50) NOT NULL UNIQUE,
     category_name VARCHAR(200) NOT NULL,
-    description TEXT,
     parent_category_id BIGINT REFERENCES categories(category_id),
-    display_order INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT REFERENCES users(user_id),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_by BIGINT REFERENCES users(user_id)
-);
-
-CREATE INDEX idx_categories_code ON categories(category_code);
-CREATE INDEX idx_categories_parent ON categories(parent_category_id);
-CREATE INDEX idx_categories_active ON categories(is_active);
-
-COMMENT ON TABLE categories IS 'Product categories (SWAT, GRASSE, etc.)';
-
--- ============================================
--- TABLE 5: WAREHOUSE_LOCATIONS
--- ============================================
-CREATE TABLE warehouse_locations (
-    location_id BIGSERIAL PRIMARY KEY,
-    location_code VARCHAR(50) UNIQUE NOT NULL,
-    location_name VARCHAR(200),
-    location_type VARCHAR(50) NOT NULL,
-    parent_location_id BIGINT REFERENCES warehouse_locations(location_id),
-    
-    -- Physical attributes
-    capacity_volume DECIMAL(15,2),
-    capacity_weight DECIMAL(15,2),
-    
-    -- Safety for chemicals
-    is_hazardous_zone BOOLEAN DEFAULT FALSE,
-    ventilation_available BOOLEAN DEFAULT FALSE,
-    fire_suppression_available BOOLEAN DEFAULT FALSE,
-    temperature_controlled BOOLEAN DEFAULT FALSE,
-    
-    -- Metadata
     description TEXT,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT REFERENCES users(user_id),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Constraints
-    CONSTRAINT chk_location_type CHECK (location_type IN ('ZONE', 'AISLE', 'RACK', 'SHELF', 'BIN'))
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_location_code ON warehouse_locations(location_code);
-CREATE INDEX idx_location_parent ON warehouse_locations(parent_location_id);
-CREATE INDEX idx_location_type ON warehouse_locations(location_type);
-CREATE INDEX idx_location_hazardous ON warehouse_locations(is_hazardous_zone);
+CREATE INDEX idx_category_code ON categories(category_code);
+CREATE INDEX idx_category_parent ON categories(parent_category_id);
 
-COMMENT ON TABLE warehouse_locations IS 'Warehouse storage locations hierarchy';
+COMMENT ON TABLE categories IS 'Product categories';
 
--- ============================================
--- TABLE 6: SKUS (Stock Keeping Unit)
--- ============================================
+CREATE TABLE sds_documents (
+    sds_id BIGSERIAL PRIMARY KEY,
+    sds_code VARCHAR(100) NOT NULL,
+    version VARCHAR(50) NOT NULL,
+    issued_date DATE,
+    language VARCHAR(10),
+    attachment_id BIGINT REFERENCES attachments(attachment_id),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(sds_code, version)
+);
+
+CREATE INDEX idx_sds_code_version ON sds_documents(sds_code, version);
+
+COMMENT ON TABLE sds_documents IS 'Safety Data Sheets';
+
 CREATE TABLE skus (
     sku_id BIGSERIAL PRIMARY KEY,
-    sku_code VARCHAR(100) UNIQUE NOT NULL,
-    product_name VARCHAR(300) NOT NULL,
     category_id BIGINT REFERENCES categories(category_id),
-    
-    -- Chemical information
-    chemical_formula VARCHAR(200),
-    hazard_class VARCHAR(100),
-    is_hazardous BOOLEAN DEFAULT FALSE,
-    storage_temp_min DECIMAL(5,2),
-    storage_temp_max DECIMAL(5,2),
-    incompatible_chemicals TEXT[],
-    
-    -- Unit and packaging
-    unit VARCHAR(50) NOT NULL,
-    unit_volume DECIMAL(10,2),
-    unit_weight DECIMAL(10,2),
-    
-    -- Inventory thresholds
-    min_quantity INTEGER DEFAULT 10,
-    max_quantity INTEGER DEFAULT 1000,
-    reorder_point INTEGER DEFAULT 20,
-    
-    -- ABC Classification
-    abc_class VARCHAR(1) DEFAULT 'C',
-    cycle_count_frequency_days INTEGER DEFAULT 180,
-    last_cycle_count_date DATE,
-    next_cycle_count_date DATE,
-    
-    -- Barcode
-    barcode VARCHAR(100) UNIQUE,
-    barcode_type VARCHAR(20),
-    
-    -- Pricing
-    cost_price DECIMAL(15,2),
-    selling_price DECIMAL(15,2),
-    
-    -- Metadata
+    sku_code VARCHAR(100) NOT NULL UNIQUE,
+    sku_name VARCHAR(300) NOT NULL,
     description TEXT,
+    brand VARCHAR(200),
+    package_type VARCHAR(100),
+    volume_ml NUMERIC(12,2),
+    weight_g NUMERIC(12,2),
+    barcode VARCHAR(100) UNIQUE,
+    unit VARCHAR(50) NOT NULL,
+    origin_country VARCHAR(100),
+    scent VARCHAR(200),
     image_url TEXT,
-    status VARCHAR(50) DEFAULT 'ACTIVE',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT REFERENCES users(user_id),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_by BIGINT REFERENCES users(user_id),
-    
-    -- Constraints
-    CONSTRAINT chk_sku_unit CHECK (unit IN ('CAN', 'BOTTLE', 'BOX', 'PALLET', 'PIECE')),
-    CONSTRAINT chk_sku_status CHECK (status IN ('ACTIVE', 'INACTIVE', 'DISCONTINUED')),
-    CONSTRAINT chk_sku_abc_class CHECK (abc_class IN ('A', 'B', 'C')),
-    CONSTRAINT chk_sku_thresholds CHECK (min_quantity <= reorder_point AND reorder_point <= max_quantity)
+    storage_temp_min NUMERIC(5,2),
+    storage_temp_max NUMERIC(5,2),
+    shelf_life_days INT,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    deleted_at TIMESTAMP,
+    deleted_by BIGINT REFERENCES users(user_id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_skus_code ON skus(sku_code);
-CREATE INDEX idx_skus_category ON skus(category_id);
-CREATE INDEX idx_skus_barcode ON skus(barcode);
-CREATE INDEX idx_skus_abc_class ON skus(abc_class);
-CREATE INDEX idx_skus_status ON skus(status);
-CREATE INDEX idx_skus_name ON skus USING gin(to_tsvector('english', product_name));
+CREATE INDEX idx_sku_code ON skus(sku_code);
+CREATE INDEX idx_sku_barcode ON skus(barcode) WHERE barcode IS NOT NULL;
+CREATE INDEX idx_sku_category_active ON skus(category_id, active);
+CREATE INDEX idx_sku_active ON skus(active) WHERE deleted_at IS NULL;
 
-COMMENT ON TABLE skus IS 'Product master data (SKU - Stock Keeping Unit)';
+COMMENT ON TABLE skus IS 'Stock Keeping Units (Product Master)';
 
--- ============================================
--- TABLE 7: INVENTORY_LOTS
--- ============================================
+CREATE TABLE sku_thresholds (
+    threshold_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id) ON DELETE CASCADE,
+    min_qty NUMERIC(12,2) NOT NULL DEFAULT 0,
+    max_qty NUMERIC(12,2),
+    reorder_point NUMERIC(12,2),
+    reorder_qty NUMERIC(12,2),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    note TEXT,
+    created_by BIGINT REFERENCES users(user_id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_by BIGINT REFERENCES users(user_id),
+    UNIQUE(warehouse_id, sku_id)
+);
+
+CREATE INDEX idx_sku_threshold_warehouse ON sku_thresholds(warehouse_id);
+CREATE INDEX idx_sku_threshold_sku ON sku_thresholds(sku_id);
+
+COMMENT ON TABLE sku_thresholds IS 'SKU inventory thresholds per warehouse';
+
+-- ============================================================
+-- 5) PARTNERS
+-- ============================================================
+
+CREATE TABLE suppliers (
+    supplier_id BIGSERIAL PRIMARY KEY,
+    supplier_code VARCHAR(50) NOT NULL UNIQUE,
+    supplier_name VARCHAR(300) NOT NULL,
+    tax_code VARCHAR(50),
+    email VARCHAR(255),
+    phone VARCHAR(20),
+    address TEXT,
+    certifications TEXT,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_supplier_code ON suppliers(supplier_code);
+
+COMMENT ON TABLE suppliers IS 'Supplier master data';
+
+CREATE TABLE customers (
+    customer_id BIGSERIAL PRIMARY KEY,
+    customer_code VARCHAR(50) NOT NULL UNIQUE,
+    customer_name VARCHAR(300) NOT NULL,
+    email VARCHAR(255),
+    phone VARCHAR(20),
+    address TEXT,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_customer_code ON customers(customer_code);
+
+COMMENT ON TABLE customers IS 'Customer master data';
+
+CREATE TABLE carriers (
+    carrier_id BIGSERIAL PRIMARY KEY,
+    carrier_code VARCHAR(50) NOT NULL UNIQUE,
+    carrier_name VARCHAR(300) NOT NULL,
+    phone VARCHAR(20),
+    email VARCHAR(255),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_carrier_code ON carriers(carrier_code);
+
+COMMENT ON TABLE carriers IS 'Shipping carrier master data';
+
+-- ============================================================
+-- 6) LOCATION MODEL
+-- ============================================================
+
+CREATE TABLE zones (
+    zone_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    zone_code VARCHAR(50) NOT NULL,
+    zone_name VARCHAR(200),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(warehouse_id, zone_code)
+);
+
+CREATE INDEX idx_zone_warehouse ON zones(warehouse_id);
+
+COMMENT ON TABLE zones IS 'Warehouse zones';
+
+CREATE TABLE locations (
+    location_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    zone_id BIGINT REFERENCES zones(zone_id),
+    location_code VARCHAR(100) NOT NULL,
+    location_type VARCHAR(50) NOT NULL,
+    parent_location_id BIGINT REFERENCES locations(location_id),
+    max_weight_kg NUMERIC(12,2),
+    max_volume_m3 NUMERIC(12,3),
+    is_picking_face BOOLEAN NOT NULL DEFAULT FALSE,
+    is_staging BOOLEAN NOT NULL DEFAULT FALSE,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(warehouse_id, location_code)
+);
+
+CREATE INDEX idx_location_warehouse ON locations(warehouse_id);
+CREATE INDEX idx_location_zone ON locations(zone_id);
+CREATE INDEX idx_location_type ON locations(location_type);
+CREATE INDEX idx_location_staging ON locations(warehouse_id, is_staging);
+
+COMMENT ON TABLE locations IS 'Storage locations';
+
+CREATE TABLE storage_policies (
+    policy_id BIGSERIAL PRIMARY KEY,
+    policy_code VARCHAR(50) NOT NULL UNIQUE,
+    policy_name VARCHAR(200) NOT NULL,
+    description TEXT,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_storage_policy_code ON storage_policies(policy_code);
+
+COMMENT ON TABLE storage_policies IS 'Storage policy definitions';
+
+CREATE TABLE storage_policy_rules (
+    rule_id BIGSERIAL PRIMARY KEY,
+    policy_id BIGINT NOT NULL REFERENCES storage_policies(policy_id) ON DELETE CASCADE,
+    zone_id BIGINT REFERENCES zones(zone_id),
+    location_type VARCHAR(50),
+    min_distance_m NUMERIC(8,2),
+    max_stack_height INT,
+    max_qty_per_bin NUMERIC(12,2),
+    note TEXT
+);
+
+CREATE INDEX idx_policy_rules_policy ON storage_policy_rules(policy_id);
+
+COMMENT ON TABLE storage_policy_rules IS 'Storage policy rules';
+
+-- ============================================================
+-- 7) PROCUREMENT: RECEIVING
+-- ============================================================
+
+CREATE TABLE receiving_orders (
+    receiving_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
+    receiving_code VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'DRAFT',
+    source_type VARCHAR(50) NOT NULL,
+    source_warehouse_id BIGINT REFERENCES warehouses(warehouse_id),
+    supplier_id BIGINT REFERENCES suppliers(supplier_id),
+    source_reference_code VARCHAR(100),
+    received_at TIMESTAMP,
+    created_by BIGINT NOT NULL REFERENCES users(user_id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    putaway_created_at TIMESTAMP,
+    putaway_done_by BIGINT REFERENCES users(user_id),
+    putaway_done_at TIMESTAMP,
+    approved_by BIGINT REFERENCES users(user_id),
+    approved_at TIMESTAMP,
+    confirmed_by BIGINT REFERENCES users(user_id),
+    confirmed_at TIMESTAMP,
+    note TEXT,
+    UNIQUE(warehouse_id, receiving_code)
+);
+
+CREATE INDEX idx_receiving_warehouse ON receiving_orders(warehouse_id);
+CREATE INDEX idx_receiving_status ON receiving_orders(status);
+CREATE INDEX idx_receiving_supplier ON receiving_orders(supplier_id);
+CREATE INDEX idx_receiving_created_at ON receiving_orders(created_at);
+
+COMMENT ON TABLE receiving_orders IS 'Inbound receiving orders';
+
+CREATE TABLE receiving_items (
+    receiving_item_id BIGSERIAL PRIMARY KEY,
+    receiving_id BIGINT NOT NULL REFERENCES receiving_orders(receiving_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    expected_qty NUMERIC(12,2),
+    received_qty NUMERIC(12,2) NOT NULL,
+    lot_number VARCHAR(100),
+    manufacture_date DATE,
+    expiry_date DATE,
+    weight_kg NUMERIC(12,2),
+    note TEXT,
+    qc_required BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX idx_receiving_items_receiving ON receiving_items(receiving_id);
+CREATE INDEX idx_receiving_items_sku ON receiving_items(sku_id);
+
+COMMENT ON TABLE receiving_items IS 'Receiving order line items';
+
+-- ============================================================
+-- 7.x) PUTAWAY TASKS
+-- ============================================================
+
+CREATE TABLE putaway_tasks (
+    putaway_task_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    receiving_id BIGINT NOT NULL REFERENCES receiving_orders(receiving_id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
+    from_location_id BIGINT REFERENCES locations(location_id),
+    assigned_to BIGINT REFERENCES users(user_id),
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_by BIGINT NOT NULL REFERENCES users(user_id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    note TEXT,
+    UNIQUE(warehouse_id, receiving_id)
+);
+
+CREATE INDEX idx_putaway_task_warehouse ON putaway_tasks(warehouse_id);
+CREATE INDEX idx_putaway_task_receiving ON putaway_tasks(receiving_id);
+CREATE INDEX idx_putaway_task_assigned ON putaway_tasks(assigned_to, status);
+
+COMMENT ON TABLE putaway_tasks IS 'Putaway tasks for received goods';
+
+CREATE TABLE putaway_task_items (
+    putaway_task_item_id BIGSERIAL PRIMARY KEY,
+    putaway_task_id BIGINT NOT NULL REFERENCES putaway_tasks(putaway_task_id) ON DELETE CASCADE,
+    receiving_item_id BIGINT NOT NULL REFERENCES receiving_items(receiving_item_id),
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    lot_id BIGINT,
+    quantity NUMERIC(12,2) NOT NULL,
+    putaway_qty NUMERIC(12,2) NOT NULL DEFAULT 0,
+    suggested_location_id BIGINT REFERENCES locations(location_id),
+    actual_location_id BIGINT REFERENCES locations(location_id),
+    note TEXT,
+    UNIQUE(putaway_task_id, receiving_item_id)
+);
+
+CREATE INDEX idx_putaway_item_task ON putaway_task_items(putaway_task_id);
+CREATE INDEX idx_putaway_item_sku_lot ON putaway_task_items(sku_id, lot_id);
+
+COMMENT ON TABLE putaway_task_items IS 'Putaway task line items';
+
+-- ============================================================
+-- 8) SALES / DISPATCH
+-- ============================================================
+
+CREATE TABLE sales_orders (
+    so_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
+    customer_id BIGINT NOT NULL REFERENCES customers(customer_id),
+    so_code VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'DRAFT',
+    required_ship_date DATE,
+    created_by BIGINT REFERENCES users(user_id),
+    approved_by BIGINT REFERENCES users(user_id),
+    approved_at TIMESTAMP,
+    note TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(warehouse_id, so_code)
+);
+
+CREATE INDEX idx_so_warehouse ON sales_orders(warehouse_id);
+CREATE INDEX idx_so_customer ON sales_orders(customer_id);
+CREATE INDEX idx_so_status ON sales_orders(status);
+
+COMMENT ON TABLE sales_orders IS 'Sales orders';
+
+CREATE TABLE sales_order_items (
+    so_item_id BIGSERIAL PRIMARY KEY,
+    so_id BIGINT NOT NULL REFERENCES sales_orders(so_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    ordered_qty NUMERIC(12,2) NOT NULL,
+    note TEXT
+);
+
+CREATE INDEX idx_so_items_so ON sales_order_items(so_id);
+CREATE INDEX idx_so_items_sku ON sales_order_items(sku_id);
+
+COMMENT ON TABLE sales_order_items IS 'Sales order line items';
+
+CREATE TABLE shipments (
+    shipment_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
+    so_id BIGINT NOT NULL REFERENCES sales_orders(so_id),
+    shipment_code VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'DRAFT',
+    ship_to_name VARCHAR(300),
+    ship_to_phone VARCHAR(20),
+    ship_to_address TEXT,
+    carrier_id BIGINT REFERENCES carriers(carrier_id),
+    tracking_number VARCHAR(200),
+    shipped_at TIMESTAMP,
+    created_by BIGINT NOT NULL REFERENCES users(user_id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    dispatched_by BIGINT REFERENCES users(user_id),
+    note TEXT,
+    UNIQUE(warehouse_id, shipment_code)
+);
+
+CREATE INDEX idx_shipment_warehouse ON shipments(warehouse_id);
+CREATE INDEX idx_shipment_so ON shipments(so_id);
+CREATE INDEX idx_shipment_status ON shipments(status);
+
+COMMENT ON TABLE shipments IS 'Outbound shipments';
+
+CREATE TABLE shipment_items (
+    shipment_item_id BIGSERIAL PRIMARY KEY,
+    shipment_id BIGINT NOT NULL REFERENCES shipments(shipment_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    lot_id BIGINT,
+    from_location_id BIGINT REFERENCES locations(location_id),
+    quantity NUMERIC(12,2) NOT NULL,
+    note TEXT
+);
+
+CREATE INDEX idx_shipment_items_shipment ON shipment_items(shipment_id);
+CREATE INDEX idx_shipment_items_sku_lot ON shipment_items(sku_id, lot_id);
+CREATE INDEX idx_shipment_items_location ON shipment_items(from_location_id);
+
+COMMENT ON TABLE shipment_items IS 'Shipment line items';
+
+-- ============================================================
+-- 9) WAREHOUSE OPERATIONS: LOTS + QC + QUARANTINE
+-- ============================================================
+
 CREATE TABLE inventory_lots (
     lot_id BIGSERIAL PRIMARY KEY,
     sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
     lot_number VARCHAR(100) NOT NULL,
-    
-    -- Dates
-    manufacture_date DATE NOT NULL,
-    expiry_date DATE NOT NULL,
-    received_date DATE NOT NULL,
-    
-    -- Quantities
-    quantity_received INTEGER NOT NULL,
-    quantity_available INTEGER NOT NULL,
-    quantity_reserved INTEGER DEFAULT 0,
-    
-    -- Source
-    supplier_name VARCHAR(200),
-    supplier_batch_number VARCHAR(100),
-    inbound_document_id BIGINT,
-    
-    -- Status
-    status VARCHAR(50) DEFAULT 'ACTIVE',
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Constraints
-    CONSTRAINT chk_lot_status CHECK (status IN ('ACTIVE', 'EXPIRED', 'RECALLED', 'DEPLETED')),
-    CONSTRAINT chk_lot_quantities CHECK (
-        quantity_available >= 0 AND 
-        quantity_reserved >= 0 AND
-        quantity_available + quantity_reserved <= quantity_received
-    ),
-    CONSTRAINT chk_lot_dates CHECK (expiry_date > manufacture_date),
+    manufacture_date DATE,
+    expiry_date DATE,
+    qc_status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    quarantine_status VARCHAR(50) NOT NULL DEFAULT 'NONE',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    receiving_item_id BIGINT REFERENCES receiving_items(receiving_item_id),
     UNIQUE(sku_id, lot_number)
 );
 
-CREATE INDEX idx_lots_sku ON inventory_lots(sku_id);
-CREATE INDEX idx_lots_number ON inventory_lots(lot_number);
-CREATE INDEX idx_lots_expiry ON inventory_lots(expiry_date);
-CREATE INDEX idx_lots_status ON inventory_lots(status);
-CREATE INDEX idx_lots_available ON inventory_lots(quantity_available) WHERE quantity_available > 0;
+CREATE INDEX idx_lot_sku ON inventory_lots(sku_id);
+CREATE INDEX idx_lot_number ON inventory_lots(lot_number);
+CREATE INDEX idx_lot_expiry ON inventory_lots(expiry_date) WHERE expiry_date IS NOT NULL;
+CREATE INDEX idx_lot_qc_status ON inventory_lots(qc_status);
 
-COMMENT ON TABLE inventory_lots IS 'Lot/Batch tracking for products with expiry dates';
+COMMENT ON TABLE inventory_lots IS 'Inventory lot tracking';
 
--- ============================================
--- TABLE 8: INVENTORY
--- ============================================
-CREATE TABLE inventory (
-    inventory_id BIGSERIAL PRIMARY KEY,
-    sku_id BIGINT NOT NULL UNIQUE REFERENCES skus(sku_id),
-    
-    available INTEGER DEFAULT 0,
-    reserved INTEGER DEFAULT 0,
-    in_transit INTEGER DEFAULT 0,
-    defective INTEGER DEFAULT 0,
-    quarantine INTEGER DEFAULT 0,
-    
-    total_value DECIMAL(15,2) DEFAULT 0,
-    
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Constraints
-    CONSTRAINT chk_inventory_quantities CHECK (
-        available >= 0 AND 
-        reserved >= 0 AND 
-        in_transit >= 0 AND 
-        defective >= 0 AND
-        quarantine >= 0
-    )
+CREATE TABLE qc_inspections (
+    inspection_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    lot_id BIGINT NOT NULL REFERENCES inventory_lots(lot_id),
+    inspection_code VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    inspected_by BIGINT REFERENCES users(user_id),
+    inspected_at TIMESTAMP,
+    remarks TEXT,
+    attachment_id BIGINT REFERENCES attachments(attachment_id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(warehouse_id, inspection_code)
 );
 
-CREATE INDEX idx_inventory_sku ON inventory(sku_id);
-CREATE INDEX idx_inventory_available ON inventory(available);
+CREATE INDEX idx_qc_warehouse ON qc_inspections(warehouse_id);
+CREATE INDEX idx_qc_lot ON qc_inspections(lot_id);
+CREATE INDEX idx_qc_status ON qc_inspections(status);
 
-COMMENT ON TABLE inventory IS 'Aggregated inventory by SKU';
+COMMENT ON TABLE qc_inspections IS 'Quality control inspections';
 
--- ============================================
--- TABLE 9: INVENTORY_BY_LOCATION
--- ============================================
-CREATE TABLE inventory_by_location (
-    id BIGSERIAL PRIMARY KEY,
+CREATE TABLE quarantine_holds (
+    hold_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    lot_id BIGINT NOT NULL REFERENCES inventory_lots(lot_id),
+    hold_reason VARCHAR(500) NOT NULL,
+    hold_note TEXT,
+    hold_by BIGINT REFERENCES users(user_id),
+    hold_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    release_by BIGINT REFERENCES users(user_id),
+    release_at TIMESTAMP,
+    release_note TEXT
+);
+
+CREATE INDEX idx_quarantine_warehouse ON quarantine_holds(warehouse_id);
+CREATE INDEX idx_quarantine_lot ON quarantine_holds(lot_id);
+
+COMMENT ON TABLE quarantine_holds IS 'Quarantine holds';
+
+-- ============================================================
+-- 10) INVENTORY: LEDGER-FIRST
+-- ============================================================
+
+CREATE TABLE inventory_transactions (
+    txn_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
     sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
-    location_id BIGINT NOT NULL REFERENCES warehouse_locations(location_id),
     lot_id BIGINT REFERENCES inventory_lots(lot_id),
-    
-    quantity INTEGER NOT NULL DEFAULT 0,
-    
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_by BIGINT REFERENCES users(user_id),
-    
-    UNIQUE(sku_id, location_id, lot_id),
-    CONSTRAINT chk_inv_loc_quantity CHECK (quantity >= 0)
+    location_id BIGINT NOT NULL REFERENCES locations(location_id),
+    quantity NUMERIC(12,2) NOT NULL,
+    txn_type VARCHAR(50) NOT NULL,
+    reference_table VARCHAR(100),
+    reference_id BIGINT,
+    reason_code VARCHAR(100),
+    created_by BIGINT NOT NULL REFERENCES users(user_id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_inv_loc_sku ON inventory_by_location(sku_id);
-CREATE INDEX idx_inv_loc_location ON inventory_by_location(location_id);
-CREATE INDEX idx_inv_loc_lot ON inventory_by_location(lot_id);
+CREATE INDEX idx_inv_txn_warehouse ON inventory_transactions(warehouse_id);
+CREATE INDEX idx_inv_txn_sku_lot_loc ON inventory_transactions(warehouse_id, sku_id, lot_id, location_id);
+CREATE INDEX idx_inv_txn_reference ON inventory_transactions(reference_table, reference_id);
+CREATE INDEX idx_inv_txn_created_at ON inventory_transactions(created_at);
 
-COMMENT ON TABLE inventory_by_location IS 'Inventory tracking by location and lot';
+COMMENT ON TABLE inventory_transactions IS 'Inventory transaction ledger (single source of truth)';
 
--- ============================================
--- TABLE 10: DOCUMENTS
--- ============================================
-CREATE TABLE documents (
-    document_id BIGSERIAL PRIMARY KEY,
-    document_code VARCHAR(50) UNIQUE NOT NULL,
-    doc_type VARCHAR(50) NOT NULL,
-    sub_type VARCHAR(50),
-    
-    status VARCHAR(50) DEFAULT 'DRAFT',
-    
-    reference_code VARCHAR(100),
-    notes TEXT,
-    
-    -- Timestamps
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE inventory_snapshot (
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    lot_id BIGINT REFERENCES inventory_lots(lot_id),
+    lot_id_safe BIGINT GENERATED ALWAYS AS (COALESCE(lot_id, 0)) STORED,
+    location_id BIGINT NOT NULL REFERENCES locations(location_id),
+    quantity NUMERIC(12,2) NOT NULL DEFAULT 0,
+    reserved_qty NUMERIC(12,2) NOT NULL DEFAULT 0,
+    last_updated TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (warehouse_id, sku_id, lot_id_safe, location_id)
+);
+
+CREATE INDEX idx_inv_snapshot_warehouse ON inventory_snapshot(warehouse_id);
+CREATE INDEX idx_inv_snapshot_sku ON inventory_snapshot(sku_id);
+CREATE INDEX idx_inv_snapshot_location ON inventory_snapshot(location_id);
+CREATE INDEX idx_inv_snapshot_lot ON inventory_snapshot(lot_id) WHERE lot_id IS NOT NULL;
+
+COMMENT ON TABLE inventory_snapshot IS 'Current inventory snapshot (derived from transactions)';
+
+CREATE TABLE reservations (
+    reservation_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    lot_id BIGINT REFERENCES inventory_lots(lot_id),
+    quantity NUMERIC(12,2) NOT NULL,
+    reference_table VARCHAR(100),
+    reference_id BIGINT,
+    status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_reservation_warehouse ON reservations(warehouse_id);
+CREATE INDEX idx_reservation_sku_lot ON reservations(sku_id, lot_id);
+CREATE INDEX idx_reservation_reference ON reservations(reference_table, reference_id);
+CREATE INDEX idx_reservation_status ON reservations(status);
+
+COMMENT ON TABLE reservations IS 'Inventory reservations';
+
+-- ============================================================
+-- 11) TRANSFER / RETURNS / ADJUSTMENTS
+-- ============================================================
+
+CREATE TABLE transfers (
+    transfer_id BIGSERIAL PRIMARY KEY,
+    from_warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id),
+    to_warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id),
+    transfer_code VARCHAR(100) NOT NULL UNIQUE,
+    status VARCHAR(50) NOT NULL DEFAULT 'DRAFT',
     created_by BIGINT REFERENCES users(user_id),
-    
-    submitted_at TIMESTAMP,
-    submitted_by BIGINT REFERENCES users(user_id),
-    
-    approved_at TIMESTAMP,
     approved_by BIGINT REFERENCES users(user_id),
-    approval_notes TEXT,
-    
-    confirmed_at TIMESTAMP,
-    confirmed_by BIGINT REFERENCES users(user_id),
-    
-    rejected_at TIMESTAMP,
-    rejected_by BIGINT REFERENCES users(user_id),
-    rejection_reason TEXT,
-    
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Constraints
-    CONSTRAINT chk_doc_type CHECK (doc_type IN ('INBOUND', 'OUTBOUND', 'RETURN', 'STOCK_CHECK', 'ADJUSTMENT')),
-    CONSTRAINT chk_doc_status CHECK (status IN ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'RECEIVED', 'CONFIRMED', 'CANCELLED'))
+    approved_at TIMESTAMP,
+    shipped_at TIMESTAMP,
+    received_at TIMESTAMP,
+    note TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_doc_code ON documents(document_code);
-CREATE INDEX idx_doc_type ON documents(doc_type);
-CREATE INDEX idx_doc_status ON documents(status);
-CREATE INDEX idx_doc_created_at ON documents(created_at DESC);
-CREATE INDEX idx_doc_created_by ON documents(created_by);
+CREATE INDEX idx_transfer_from ON transfers(from_warehouse_id);
+CREATE INDEX idx_transfer_to ON transfers(to_warehouse_id);
+CREATE INDEX idx_transfer_status ON transfers(status);
 
-COMMENT ON TABLE documents IS 'All warehouse documents (inbound, outbound, returns, stock checks)';
+COMMENT ON TABLE transfers IS 'Inter-warehouse transfers';
 
--- ============================================
--- TABLE 11: DOCUMENT_ITEMS
--- ============================================
-CREATE TABLE document_items (
-    item_id BIGSERIAL PRIMARY KEY,
-    document_id BIGINT NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
+CREATE TABLE transfer_items (
+    transfer_item_id BIGSERIAL PRIMARY KEY,
+    transfer_id BIGINT NOT NULL REFERENCES transfers(transfer_id) ON DELETE CASCADE,
     sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
     lot_id BIGINT REFERENCES inventory_lots(lot_id),
-    location_id BIGINT REFERENCES warehouse_locations(location_id),
-    
-    quantity INTEGER NOT NULL,
-    unit_price DECIMAL(15,2),
-    total_price DECIMAL(15,2),
-    
-    -- For stock checks
-    expected_qty INTEGER,
-    actual_qty INTEGER,
-    discrepancy INTEGER,
-    
-    notes TEXT,
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    CONSTRAINT chk_doc_item_quantity CHECK (quantity > 0)
+    quantity NUMERIC(12,2) NOT NULL
 );
 
-CREATE INDEX idx_doc_items_doc ON document_items(document_id);
-CREATE INDEX idx_doc_items_sku ON document_items(sku_id);
-CREATE INDEX idx_doc_items_lot ON document_items(lot_id);
+CREATE INDEX idx_transfer_items_transfer ON transfer_items(transfer_id);
+CREATE INDEX idx_transfer_items_sku ON transfer_items(sku_id);
 
-COMMENT ON TABLE document_items IS 'Line items for documents';
+COMMENT ON TABLE transfer_items IS 'Transfer line items';
 
--- ============================================
--- TABLE 12: PICKING_TASKS
--- ============================================
+CREATE TABLE adjustments (
+    adjustment_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
+    adjustment_code VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'DRAFT',
+    reason VARCHAR(500) NOT NULL,
+    created_by BIGINT REFERENCES users(user_id),
+    approved_by BIGINT REFERENCES users(user_id),
+    approved_at TIMESTAMP,
+    posted_at TIMESTAMP,
+    note TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(warehouse_id, adjustment_code)
+);
+
+CREATE INDEX idx_adjustment_warehouse ON adjustments(warehouse_id);
+CREATE INDEX idx_adjustment_status ON adjustments(status);
+
+COMMENT ON TABLE adjustments IS 'Inventory adjustments';
+
+CREATE TABLE adjustment_items (
+    adjustment_item_id BIGSERIAL PRIMARY KEY,
+    adjustment_id BIGINT NOT NULL REFERENCES adjustments(adjustment_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    lot_id BIGINT REFERENCES inventory_lots(lot_id),
+    location_id BIGINT NOT NULL REFERENCES locations(location_id),
+    delta_qty NUMERIC(12,2) NOT NULL,
+    note TEXT
+);
+
+CREATE INDEX idx_adjustment_items_adjustment ON adjustment_items(adjustment_id);
+CREATE INDEX idx_adjustment_items_sku ON adjustment_items(sku_id);
+
+COMMENT ON TABLE adjustment_items IS 'Adjustment line items';
+
+CREATE TABLE returns (
+    return_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
+    return_code VARCHAR(100) NOT NULL,
+    return_type VARCHAR(50) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'DRAFT',
+    reference_table VARCHAR(100),
+    reference_id BIGINT,
+    created_by BIGINT REFERENCES users(user_id),
+    approved_by BIGINT REFERENCES users(user_id),
+    approved_at TIMESTAMP,
+    note TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(warehouse_id, return_code)
+);
+
+CREATE INDEX idx_return_warehouse ON returns(warehouse_id);
+CREATE INDEX idx_return_status ON returns(status);
+CREATE INDEX idx_return_type ON returns(return_type);
+
+COMMENT ON TABLE returns IS 'Returns (customer/supplier)';
+
+CREATE TABLE return_items (
+    return_item_id BIGSERIAL PRIMARY KEY,
+    return_id BIGINT NOT NULL REFERENCES returns(return_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    lot_id BIGINT REFERENCES inventory_lots(lot_id),
+    quantity NUMERIC(12,2) NOT NULL,
+    note TEXT
+);
+
+CREATE INDEX idx_return_items_return ON return_items(return_id);
+CREATE INDEX idx_return_items_sku ON return_items(sku_id);
+
+COMMENT ON TABLE return_items IS 'Return line items';
+
+-- ============================================================
+-- 12) PICKING / PACKING
+-- ============================================================
+
 CREATE TABLE picking_tasks (
-    task_id BIGSERIAL PRIMARY KEY,
-    task_code VARCHAR(50) UNIQUE NOT NULL,
-    document_id BIGINT NOT NULL REFERENCES documents(document_id),
-    
+    picking_task_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    so_id BIGINT REFERENCES sales_orders(so_id),
+    shipment_id BIGINT REFERENCES shipments(shipment_id),
+    status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
+    priority INT NOT NULL DEFAULT 3,
     assigned_to BIGINT REFERENCES users(user_id),
-    status VARCHAR(50) DEFAULT 'PENDING',
-    
-    estimated_time_minutes INTEGER,
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_picking_task_warehouse ON picking_tasks(warehouse_id);
+CREATE INDEX idx_picking_task_shipment ON picking_tasks(shipment_id);
+CREATE INDEX idx_picking_task_assigned ON picking_tasks(assigned_to, status);
+
+COMMENT ON TABLE picking_tasks IS 'Picking tasks';
+
+CREATE TABLE picking_task_items (
+    picking_task_item_id BIGSERIAL PRIMARY KEY,
+    picking_task_id BIGINT NOT NULL REFERENCES picking_tasks(picking_task_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    lot_id BIGINT REFERENCES inventory_lots(lot_id),
+    from_location_id BIGINT NOT NULL REFERENCES locations(location_id),
+    required_qty NUMERIC(12,2) NOT NULL,
+    picked_qty NUMERIC(12,2) NOT NULL DEFAULT 0
+);
+
+CREATE INDEX idx_picking_item_task ON picking_task_items(picking_task_id);
+CREATE INDEX idx_picking_item_sku_lot ON picking_task_items(sku_id, lot_id);
+
+COMMENT ON TABLE picking_task_items IS 'Picking task line items';
+
+-- ============================================================
+-- 13) CYCLE COUNT / STOCKTAKE
+-- ============================================================
+
+CREATE TABLE stocktakes (
+    stocktake_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
+    stocktake_code VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'PLANNED',
+    start_at TIMESTAMP,
+    end_at TIMESTAMP,
     created_by BIGINT REFERENCES users(user_id),
-    
-    CONSTRAINT chk_picking_status CHECK (status IN ('PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'))
+    posted_by BIGINT REFERENCES users(user_id),
+    posted_at TIMESTAMP,
+    note TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(warehouse_id, stocktake_code)
 );
 
-CREATE INDEX idx_picking_task_doc ON picking_tasks(document_id);
-CREATE INDEX idx_picking_task_assigned ON picking_tasks(assigned_to);
-CREATE INDEX idx_picking_task_status ON picking_tasks(status);
+CREATE INDEX idx_stocktake_warehouse ON stocktakes(warehouse_id);
+CREATE INDEX idx_stocktake_status ON stocktakes(status);
 
-COMMENT ON TABLE picking_tasks IS 'Picking tasks for warehouse execution';
+COMMENT ON TABLE stocktakes IS 'Stocktake / cycle count';
 
--- ============================================
--- TABLE 13: PICKING_ITEMS
--- ============================================
-CREATE TABLE picking_items (
-    item_id BIGSERIAL PRIMARY KEY,
-    task_id BIGINT NOT NULL REFERENCES picking_tasks(task_id) ON DELETE CASCADE,
-    document_item_id BIGINT NOT NULL REFERENCES document_items(item_id),
-    
-    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
-    location_id BIGINT NOT NULL REFERENCES warehouse_locations(location_id),
-    lot_id BIGINT REFERENCES inventory_lots(lot_id),
-    
-    quantity_required INTEGER NOT NULL,
-    quantity_picked INTEGER DEFAULT 0,
-    
-    picking_sequence INTEGER,
-    status VARCHAR(50) DEFAULT 'PENDING',
-    
-    picked_at TIMESTAMP,
-    picked_by BIGINT REFERENCES users(user_id),
-    
-    CONSTRAINT chk_picking_item_status CHECK (status IN ('PENDING', 'PICKED', 'SHORT_PICKED'))
-);
-
-CREATE INDEX idx_picking_items_task ON picking_items(task_id);
-CREATE INDEX idx_picking_items_location ON picking_items(location_id);
-CREATE INDEX idx_picking_items_sequence ON picking_items(picking_sequence);
-
-COMMENT ON TABLE picking_items IS 'Individual items to pick in a picking task';
-
--- ============================================
--- TABLE 14: PACKING_BOXES
--- ============================================
-CREATE TABLE packing_boxes (
-    box_id BIGSERIAL PRIMARY KEY,
-    box_code VARCHAR(50) UNIQUE NOT NULL,
-    document_id BIGINT NOT NULL REFERENCES documents(document_id),
-    
-    box_type VARCHAR(50),
-    weight_kg DECIMAL(10,2),
-    dimensions VARCHAR(50),
-    
-    tracking_number VARCHAR(100),
-    carrier VARCHAR(100),
-    
-    status VARCHAR(50) DEFAULT 'PACKING',
-    
-    packed_by BIGINT REFERENCES users(user_id),
-    packed_at TIMESTAMP,
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    CONSTRAINT chk_packing_status CHECK (status IN ('PACKING', 'SEALED', 'SHIPPED'))
-);
-
-CREATE INDEX idx_packing_box_doc ON packing_boxes(document_id);
-CREATE INDEX idx_packing_box_tracking ON packing_boxes(tracking_number);
-
-COMMENT ON TABLE packing_boxes IS 'Packing boxes for outbound shipments';
-
--- ============================================
--- TABLE 15: PACKING_ITEMS
--- ============================================
-CREATE TABLE packing_items (
-    id BIGSERIAL PRIMARY KEY,
-    box_id BIGINT NOT NULL REFERENCES packing_boxes(box_id) ON DELETE CASCADE,
+CREATE TABLE stocktake_items (
+    stocktake_item_id BIGSERIAL PRIMARY KEY,
+    stocktake_id BIGINT NOT NULL REFERENCES stocktakes(stocktake_id) ON DELETE CASCADE,
+    location_id BIGINT NOT NULL REFERENCES locations(location_id),
     sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
     lot_id BIGINT REFERENCES inventory_lots(lot_id),
-    quantity INTEGER NOT NULL
+    expected_qty NUMERIC(12,2),
+    counted_qty NUMERIC(12,2),
+    discrepancy_qty NUMERIC(12,2),
+    counted_by BIGINT REFERENCES users(user_id),
+    counted_at TIMESTAMP,
+    note TEXT
 );
 
-CREATE INDEX idx_packing_items_box ON packing_items(box_id);
+CREATE INDEX idx_stocktake_items_stocktake ON stocktake_items(stocktake_id);
+CREATE INDEX idx_stocktake_items_location ON stocktake_items(location_id);
+CREATE INDEX idx_stocktake_items_sku ON stocktake_items(sku_id);
 
-COMMENT ON TABLE packing_items IS 'Items packed in each box';
+COMMENT ON TABLE stocktake_items IS 'Stocktake line items';
 
--- ============================================
--- TABLE 16: INVENTORY_TRANSACTIONS
--- ============================================
-CREATE TABLE inventory_transactions (
-    transaction_id BIGSERIAL PRIMARY KEY,
-    transaction_code VARCHAR(50) UNIQUE NOT NULL,
-    
-    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
-    lot_id BIGINT REFERENCES inventory_lots(lot_id),
-    location_id BIGINT REFERENCES warehouse_locations(location_id),
-    
-    trans_type VARCHAR(50) NOT NULL,
-    
-    quantity_change INTEGER NOT NULL,
-    quantity_before INTEGER NOT NULL,
-    quantity_after INTEGER NOT NULL,
-    
-    document_id BIGINT REFERENCES documents(document_id),
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+-- ============================================================
+-- 14) ALERTS / INCIDENTS / ENVIRONMENT
+-- ============================================================
+
+CREATE TABLE expiry_rules (
+    rule_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
+    warn_days INT NOT NULL DEFAULT 30,
+    severity VARCHAR(50) NOT NULL DEFAULT 'MEDIUM',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_by BIGINT REFERENCES users(user_id),
-    
-    CONSTRAINT chk_trans_type CHECK (trans_type IN ('IMPORT', 'EXPORT', 'RETURN', 'ADJUSTMENT', 'RESERVE', 'RELEASE'))
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(warehouse_id)
 );
 
-CREATE INDEX idx_trans_sku ON inventory_transactions(sku_id);
-CREATE INDEX idx_trans_lot ON inventory_transactions(lot_id);
-CREATE INDEX idx_trans_type ON inventory_transactions(trans_type);
-CREATE INDEX idx_trans_date ON inventory_transactions(created_at DESC);
-CREATE INDEX idx_trans_document ON inventory_transactions(document_id);
+CREATE INDEX idx_expiry_rules_warehouse ON expiry_rules(warehouse_id);
 
-COMMENT ON TABLE inventory_transactions IS 'Immutable log of all inventory movements';
+COMMENT ON TABLE expiry_rules IS 'Expiry alert rules';
 
--- ============================================
--- TABLE 17: INVENTORY_ALERTS
--- ============================================
 CREATE TABLE inventory_alerts (
     alert_id BIGSERIAL PRIMARY KEY,
-    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
-    lot_id BIGINT REFERENCES inventory_lots(lot_id),
-    
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,
     alert_type VARCHAR(50) NOT NULL,
-    severity VARCHAR(20) NOT NULL,
-    
+    severity VARCHAR(50) NOT NULL DEFAULT 'MEDIUM',
+    sku_id BIGINT REFERENCES skus(sku_id),
+    lot_id BIGINT REFERENCES inventory_lots(lot_id),
+    location_id BIGINT REFERENCES locations(location_id),
     message TEXT NOT NULL,
-    current_value INTEGER,
-    threshold_value INTEGER,
-    
-    status VARCHAR(50) DEFAULT 'ACTIVE',
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    acknowledged_at TIMESTAMP,
-    acknowledged_by BIGINT REFERENCES users(user_id),
+    status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     resolved_at TIMESTAMP,
-    
-    CONSTRAINT chk_alert_type CHECK (alert_type IN ('LOW_STOCK', 'OUT_OF_STOCK', 'OVERSTOCK', 'NEAR_EXPIRY', 'EXPIRED')),
-    CONSTRAINT chk_alert_severity CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')),
-    CONSTRAINT chk_alert_status CHECK (status IN ('ACTIVE', 'ACKNOWLEDGED', 'RESOLVED'))
+    resolved_by BIGINT REFERENCES users(user_id),
+    dedupe_key VARCHAR(200),
+    reference_table VARCHAR(100),
+    reference_id BIGINT
 );
 
-CREATE INDEX idx_alerts_sku ON inventory_alerts(sku_id);
-CREATE INDEX idx_alerts_type ON inventory_alerts(alert_type);
-CREATE INDEX idx_alerts_status ON inventory_alerts(status);
-CREATE INDEX idx_alerts_severity ON inventory_alerts(severity);
-CREATE INDEX idx_alerts_created ON inventory_alerts(created_at DESC);
+CREATE INDEX idx_alert_warehouse_status_type ON inventory_alerts(warehouse_id, status, alert_type);
+CREATE INDEX idx_alert_sku_type_status ON inventory_alerts(sku_id, alert_type, status);
+CREATE INDEX idx_alert_dedupe ON inventory_alerts(dedupe_key) WHERE dedupe_key IS NOT NULL;
 
-COMMENT ON TABLE inventory_alerts IS 'System-generated alerts for inventory issues';
+COMMENT ON TABLE inventory_alerts IS 'Inventory alerts (expiry, low stock, etc.)';
 
--- ============================================
--- TABLE 18: AUDIT_LOGS
--- ============================================
-CREATE TABLE audit_logs (
-    log_id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT REFERENCES users(user_id),
-    action VARCHAR(100) NOT NULL,
-    
-    entity_type VARCHAR(100),
-    entity_id BIGINT,
-    
+CREATE TABLE incidents (
+    incident_id BIGSERIAL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
+    incident_code VARCHAR(100) NOT NULL,
+    incident_type VARCHAR(50) NOT NULL,
+    severity VARCHAR(50) NOT NULL DEFAULT 'HIGH',
+    occurred_at TIMESTAMP NOT NULL,
+    location_id BIGINT REFERENCES locations(location_id),
     description TEXT,
-    
-    ip_address VARCHAR(50),
-    user_agent TEXT,
-    
-    old_value TEXT,
-    new_value TEXT,
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    CONSTRAINT chk_action CHECK (action IN (
-        'LOGIN', 'LOGOUT', 'LOGIN_FAILED', 'FIRST_LOGIN_VERIFY', 
-        'PASSWORD_RESET', 'PASSWORD_CHANGE',
-        'CREATE_USER', 'UPDATE_USER_ROLE', 'UPDATE_USER_STATUS', 'UPDATE_PROFILE',
-        'CREATE_SKU', 'UPDATE_SKU', 'DELETE_SKU',
-        'CREATE_DOCUMENT', 'APPROVE_DOCUMENT', 'REJECT_DOCUMENT', 'CONFIRM_DOCUMENT',
-        'CREATE_LOCATION', 'UPDATE_LOCATION',
-        'INVENTORY_ADJUSTMENT'
-    ))
+    reported_by BIGINT REFERENCES users(user_id),
+    attachment_id BIGINT REFERENCES attachments(attachment_id),
+    status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(warehouse_id, incident_code)
 );
 
-CREATE INDEX idx_audit_user ON audit_logs(user_id);
-CREATE INDEX idx_audit_action ON audit_logs(action);
-CREATE INDEX idx_audit_entity ON audit_logs(entity_type, entity_id);
-CREATE INDEX idx_audit_created_at ON audit_logs(created_at DESC);
+CREATE INDEX idx_incident_warehouse ON incidents(warehouse_id);
+CREATE INDEX idx_incident_status ON incidents(status);
+CREATE INDEX idx_incident_type ON incidents(incident_type);
 
-COMMENT ON TABLE audit_logs IS 'Audit trail for all system actions';
+COMMENT ON TABLE incidents IS 'Safety incidents';
 
--- ============================================
--- TABLE 19: SUPPLIERS (Optional - for future)
--- ============================================
-CREATE TABLE suppliers (
-    supplier_id BIGSERIAL PRIMARY KEY,
-    supplier_code VARCHAR(50) UNIQUE NOT NULL,
-    supplier_name VARCHAR(200) NOT NULL,
-    contact_person VARCHAR(200),
-    email VARCHAR(100),
-    phone VARCHAR(20),
-    address TEXT,
-    tax_code VARCHAR(50),
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT REFERENCES users(user_id),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+-- ============================================================
+-- 15) AUDIT
+-- ============================================================
+
+CREATE TABLE audit_logs (
+    audit_id BIGSERIAL PRIMARY KEY,
+    entity_name VARCHAR(200) NOT NULL,
+    entity_id BIGINT NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    old_data JSONB,
+    new_data JSONB,
+    action_by BIGINT NOT NULL REFERENCES users(user_id),
+    action_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_suppliers_code ON suppliers(supplier_code);
-CREATE INDEX idx_suppliers_active ON suppliers(is_active);
+CREATE INDEX idx_audit_entity ON audit_logs(entity_name, entity_id);
+CREATE INDEX idx_audit_action_by ON audit_logs(action_by);
+CREATE INDEX idx_audit_action_at ON audit_logs(action_at);
 
-COMMENT ON TABLE suppliers IS 'Supplier master data';
+COMMENT ON TABLE audit_logs IS 'Audit trail for all changes';
 
--- ============================================
--- TABLE 20: PURCHASE_ORDERS (Optional - for future)
--- ============================================
-CREATE TABLE purchase_orders (
-    po_id BIGSERIAL PRIMARY KEY,
-    po_code VARCHAR(50) UNIQUE NOT NULL,
-    supplier_id BIGINT REFERENCES suppliers(supplier_id),
-    
-    status VARCHAR(50) DEFAULT 'DRAFT',
-    total_value DECIMAL(15,2),
-    
-    expected_delivery_date DATE,
-    actual_delivery_date DATE,
-    
-    notes TEXT,
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT REFERENCES users(user_id),
-    
-    approved_at TIMESTAMP,
-    approved_by BIGINT REFERENCES users(user_id),
-    
-    CONSTRAINT chk_po_status CHECK (status IN ('DRAFT', 'SENT', 'CONFIRMED', 'RECEIVED', 'CANCELLED'))
-);
+-- ============================================================
+-- INSERT INITIAL ENUM DATA
+-- ============================================================
 
-CREATE INDEX idx_po_code ON purchase_orders(po_code);
-CREATE INDEX idx_po_supplier ON purchase_orders(supplier_id);
-CREATE INDEX idx_po_status ON purchase_orders(status);
+-- USER_STATUS
+INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 
+('USER_STATUS', 'User Status', 'Status of user accounts');
 
-COMMENT ON TABLE purchase_orders IS 'Purchase orders to suppliers';
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code, icon, is_default) VALUES 
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'USER_STATUS'), 'ACTIVE', 'Active', 'Hoạt động', 1, '#28a745', 'fa-check-circle', true),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'USER_STATUS'), 'INACTIVE', 'Inactive', 'Không hoạt động', 2, '#6c757d', 'fa-times-circle', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'USER_STATUS'), 'LOCKED', 'Locked', 'Bị khóa', 3, '#dc3545', 'fa-lock', false);
 
--- ============================================
--- FUNCTIONS & TRIGGERS
--- ============================================
+-- RECEIVING_STATUS
+INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 
+('RECEIVING_STATUS', 'Receiving Order Status', 'Status flow for receiving orders');
 
--- Auto-update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code, is_terminal) VALUES 
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'DRAFT', 'Draft', 'Nháp', 1, '#6c757d', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'SUBMITTED', 'Submitted', 'Đã gửi', 2, '#17a2b8', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'APPROVED', 'Approved', 'Đã duyệt', 3, '#007bff', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'POSTED', 'Posted', 'Đã ghi nhận', 4, '#28a745', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'PUTAWAY_DONE', 'Putaway Done', 'Đã cất kho', 5, '#20c997', true),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'CANCELLED', 'Cancelled', 'Đã hủy', 6, '#dc3545', true);
 
--- Apply trigger to all tables with updated_at
-CREATE TRIGGER trigger_users_updated_at
-    BEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+-- SALES_ORDER_STATUS
+INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 
+('SALES_ORDER_STATUS', 'Sales Order Status', 'Status flow for sales orders');
 
-CREATE TRIGGER trigger_categories_updated_at
-    BEFORE UPDATE ON categories
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code) VALUES 
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'SALES_ORDER_STATUS'), 'DRAFT', 'Draft', 'Nháp', 1, '#6c757d'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'SALES_ORDER_STATUS'), 'APPROVED', 'Approved', 'Đã duyệt', 2, '#007bff'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'SALES_ORDER_STATUS'), 'PICKING', 'Picking', 'Đang lấy hàng', 3, '#ffc107'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'SALES_ORDER_STATUS'), 'SHIPPED', 'Shipped', 'Đã giao', 4, '#28a745'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'SALES_ORDER_STATUS'), 'CLOSED', 'Closed', 'Đã đóng', 5, '#20c997'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'SALES_ORDER_STATUS'), 'CANCELLED', 'Cancelled', 'Đã hủy', 6, '#dc3545');
 
-CREATE TRIGGER trigger_skus_updated_at
-    BEFORE UPDATE ON skus
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+-- QC_STATUS
+INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 
+('QC_STATUS', 'Quality Control Status', 'QC inspection status');
 
-CREATE TRIGGER trigger_inventory_lots_updated_at
-    BEFORE UPDATE ON inventory_lots
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code) VALUES 
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'QC_STATUS'), 'NOT_REQUIRED', 'Not Required', 'Không yêu cầu', 1, '#6c757d'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'QC_STATUS'), 'PENDING', 'Pending', 'Chờ kiểm tra', 2, '#ffc107'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'QC_STATUS'), 'PASSED', 'Passed', 'Đạt', 3, '#28a745'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'QC_STATUS'), 'FAILED', 'Failed', 'Không đạt', 4, '#dc3545');
 
-CREATE TRIGGER trigger_documents_updated_at
-    BEFORE UPDATE ON documents
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+-- ALERT_TYPE
+INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 
+('ALERT_TYPE', 'Alert Type', 'Types of inventory alerts');
 
--- Auto-generate document code
-CREATE OR REPLACE FUNCTION generate_document_code()
-RETURNS TRIGGER AS $$
-DECLARE
-    prefix VARCHAR(10);
-    date_part VARCHAR(8);
-    sequence_num INTEGER;
-    new_code VARCHAR(50);
-BEGIN
-    -- Determine prefix based on doc_type
-    prefix := CASE NEW.doc_type
-        WHEN 'INBOUND' THEN 'IMP'
-        WHEN 'OUTBOUND' THEN 'EXP'
-        WHEN 'RETURN' THEN 'RET'
-        WHEN 'STOCK_CHECK' THEN 'CHK'
-        WHEN 'ADJUSTMENT' THEN 'ADJ'
-        ELSE 'DOC'
-    END;
-    
-    -- Date part: YYYYMMDD
-    date_part := TO_CHAR(CURRENT_DATE, 'YYYYMMDD');
-    
-    -- Get sequence for today
-    SELECT COUNT(*) + 1 INTO sequence_num
-    FROM documents
-    WHERE doc_type = NEW.doc_type
-      AND DATE(created_at) = CURRENT_DATE;
-    
-    -- Generate code: PREFIX-YYYYMMDD-NNNN
-    new_code := prefix || '-' || date_part || '-' || LPAD(sequence_num::TEXT, 4, '0');
-    
-    NEW.document_code := new_code;
-    
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code, icon) VALUES 
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'ALERT_TYPE'), 'EXPIRY', 'Expiry', 'Sắp hết hạn', 1, '#dc3545', 'fa-calendar-times'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'ALERT_TYPE'), 'LOW_STOCK', 'Low Stock', 'Tồn kho thấp', 2, '#ffc107', 'fa-exclamation-triangle'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'ALERT_TYPE'), 'OVERSTOCK', 'Overstock', 'Tồn kho cao', 3, '#17a2b8', 'fa-boxes'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'ALERT_TYPE'), 'REORDER', 'Reorder', 'Cần đặt hàng', 4, '#fd7e14', 'fa-shopping-cart');
 
-CREATE TRIGGER trigger_generate_document_code
-    BEFORE INSERT ON documents
-    FOR EACH ROW
-    WHEN (NEW.document_code IS NULL OR NEW.document_code = '')
-    EXECUTE FUNCTION generate_document_code();
+-- ALERT_SEVERITY
+INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 
+('ALERT_SEVERITY', 'Alert Severity', 'Severity levels for alerts');
 
--- Auto-generate transaction code
-CREATE OR REPLACE FUNCTION generate_transaction_code()
-RETURNS TRIGGER AS $$
-DECLARE
-    new_code VARCHAR(50);
-    sequence_num INTEGER;
-BEGIN
-    -- Get sequence for today
-    SELECT COUNT(*) + 1 INTO sequence_num
-    FROM inventory_transactions
-    WHERE DATE(created_at) = CURRENT_DATE;
-    
-    -- Generate code: TXN-YYYYMMDD-NNNNNN
-    new_code := 'TXN-' || TO_CHAR(CURRENT_DATE, 'YYYYMMDD') || '-' || LPAD(sequence_num::TEXT, 6, '0');
-    
-    NEW.transaction_code := new_code;
-    
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code) VALUES 
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'ALERT_SEVERITY'), 'LOW', 'Low', 'Thấp', 1, '#6c757d'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'ALERT_SEVERITY'), 'MEDIUM', 'Medium', 'Trung bình', 2, '#ffc107'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'ALERT_SEVERITY'), 'HIGH', 'High', 'Cao', 3, '#fd7e14'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'ALERT_SEVERITY'), 'CRITICAL', 'Critical', 'Nghiêm trọng', 4, '#dc3545');
 
-CREATE TRIGGER trigger_generate_transaction_code
-    BEFORE INSERT ON inventory_transactions
-    FOR EACH ROW
-    WHEN (NEW.transaction_code IS NULL OR NEW.transaction_code = '')
-    EXECUTE FUNCTION generate_transaction_code();
+-- TXN_TYPE
+INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 
+('TXN_TYPE', 'Transaction Type', 'Inventory transaction types');
 
--- Update inventory.last_updated when inventory_by_location changes
-CREATE OR REPLACE FUNCTION update_inventory_timestamp()
-RETURNS TRIGGER AS $$
-BEGIN
-    UPDATE inventory
-    SET last_updated = CURRENT_TIMESTAMP
-    WHERE sku_id = COALESCE(NEW.sku_id, OLD.sku_id);
-    
-    RETURN COALESCE(NEW, OLD);
-END;
-$$ LANGUAGE plpgsql;
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code) VALUES 
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'TXN_TYPE'), 'RECEIPT', 'Receipt', 'Nhập kho', 1, '#28a745'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'TXN_TYPE'), 'ISSUE', 'Issue', 'Xuất kho', 2, '#dc3545'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'TXN_TYPE'), 'MOVE', 'Move', 'Chuyển kho', 3, '#17a2b8'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'TXN_TYPE'), 'ADJUST', 'Adjust', 'Điều chỉnh', 4, '#ffc107'),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'TXN_TYPE'), 'COUNT', 'Count', 'Kiểm kê', 5, '#6f42c1');
 
-CREATE TRIGGER trigger_update_inventory_timestamp
-    AFTER INSERT OR UPDATE OR DELETE ON inventory_by_location
-    FOR EACH ROW
-    EXECUTE FUNCTION update_inventory_timestamp();
+-- ============================================================
+-- INSERT SAMPLE DATA
+-- ============================================================
 
--- ============================================
--- UTILITY FUNCTIONS
--- ============================================
+-- Sample Warehouse
+INSERT INTO warehouses (warehouse_code, warehouse_name, address, timezone) VALUES 
+('WH001', 'Main Warehouse', '123 Industrial Park, Ho Chi Minh City', 'Asia/Ho_Chi_Minh'),
+('WH002', 'North Warehouse', '456 Hanoi Road, Hanoi', 'Asia/Ho_Chi_Minh');
 
--- Clean expired OTPs
-CREATE OR REPLACE FUNCTION clean_expired_otps()
-RETURNS INTEGER AS $$
-DECLARE
-    deleted_count INTEGER;
-BEGIN
-    DELETE FROM otps 
-    WHERE expires_at < CURRENT_TIMESTAMP - INTERVAL '1 day';
-    
-    GET DIAGNOSTICS deleted_count = ROW_COUNT;
-    RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql;
+-- Sample Roles
+INSERT INTO roles (role_code, role_name, description) VALUES 
+('ADMIN', 'Administrator', 'Full system access'),
+('MANAGER', 'Warehouse Manager', 'Manage warehouse operations'),
+('KEEPER', 'Warehouse Keeper', 'Daily warehouse operations'),
+('ACCOUNTANT', 'Accountant', 'Financial and reporting'),
+('QA', 'Quality Assurance', 'Quality control');
 
--- Clean expired sessions
-CREATE OR REPLACE FUNCTION clean_expired_sessions()
-RETURNS INTEGER AS $$
-DECLARE
-    deleted_count INTEGER;
-BEGIN
-    DELETE FROM active_sessions 
-    WHERE expires_at < CURRENT_TIMESTAMP;
-    
-    GET DIAGNOSTICS deleted_count = ROW_COUNT;
-    RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql;
+-- Sample Admin User (password: Admin@123)
+INSERT INTO users (email, password_hash, full_name, status, is_first_login, is_permanent) VALUES 
+('admin@warehouse.com', '$2a$10$N9qo8uLOickgx2ZMRZoMye1ozeQ9r.2kCT.L3ejE6VQqL0cVIyqQO', 'System Administrator', 'ACTIVE', false, true);
 
--- Calculate ABC classification
-CREATE OR REPLACE FUNCTION calculate_abc_classification()
-RETURNS void AS $$
-DECLARE
-    total_sales DECIMAL(15,2);
-    sku_record RECORD;
-    cumulative_percent DECIMAL(5,2) := 0;
-BEGIN
-    -- Calculate total sales value (last 12 months)
-    SELECT COALESCE(SUM(di.quantity * di.unit_price), 0) INTO total_sales
-    FROM document_items di
-    JOIN documents d ON di.document_id = d.document_id
-    WHERE d.doc_type = 'OUTBOUND'
-      AND d.status = 'CONFIRMED'
-      AND d.created_at >= CURRENT_DATE - INTERVAL '12 months';
-    
-    IF total_sales = 0 THEN
-        RETURN;
-    END IF;
-    
-    -- Loop SKUs ordered by sales value DESC
-    FOR sku_record IN 
-        SELECT 
-            s.sku_id,
-            COALESCE(SUM(di.quantity * di.unit_price), 0) AS sales_value,
-            COALESCE(SUM(di.quantity * di.unit_price) / NULLIF(total_sales, 0) * 100, 0) AS percent_of_total
-        FROM skus s
-        LEFT JOIN document_items di ON s.sku_id = di.sku_id
-        LEFT JOIN documents d ON di.document_id = d.document_id
-        WHERE d.doc_type = 'OUTBOUND' 
-          AND d.status = 'CONFIRMED'
-          AND d.created_at >= CURRENT_DATE - INTERVAL '12 months'
-        GROUP BY s.sku_id
-        ORDER BY sales_value DESC
-    LOOP
-        cumulative_percent := cumulative_percent + sku_record.percent_of_total;
-        
-        IF cumulative_percent <= 80 THEN
-            -- Top 80% sales → Class A
-            UPDATE skus 
-            SET abc_class = 'A', 
-                cycle_count_frequency_days = 30
-            WHERE sku_id = sku_record.sku_id;
-        ELSIF cumulative_percent <= 95 THEN
-            -- Next 15% → Class B
-            UPDATE skus 
-            SET abc_class = 'B', 
-                cycle_count_frequency_days = 90
-            WHERE sku_id = sku_record.sku_id;
-        ELSE
-            -- Bottom 5% → Class C
-            UPDATE skus 
-            SET abc_class = 'C', 
-                cycle_count_frequency_days = 180
-            WHERE sku_id = sku_record.sku_id;
-        END IF;
-    END LOOP;
-END;
-$$ LANGUAGE plpgsql;
+-- Assign Admin Role
+INSERT INTO user_roles (user_id, role_id) VALUES 
+((SELECT user_id FROM users WHERE email = 'admin@warehouse.com'), 
+ (SELECT role_id FROM roles WHERE role_code = 'ADMIN'));
 
--- ============================================
--- SEED DATA
--- ============================================
+-- Sample Category
+INSERT INTO categories (category_code, category_name, description) VALUES 
+('CLEAN', 'Cleaning Products', 'Household and industrial cleaning products'),
+('CHEM', 'Chemicals', 'Industrial chemicals');
 
--- Insert default admin user (password: Admin@123)
-INSERT INTO users (
-    email, 
-    password_hash, 
-    full_name, 
-    role, 
-    status, 
-    is_first_login,
-    created_at
-) VALUES (
-    'admin@warehouse.com',
-    '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 
-    -- This is bcrypt hash for "Admin@123"
-    'System Administrator',
-    'MANAGER',
-    'ACTIVE',
-    FALSE,
-    CURRENT_TIMESTAMP
-);
-
--- Insert categories
-INSERT INTO categories (category_code, category_name, description, display_order) VALUES
-('SWAT', 'SWAT - Hóa chất tẩy rửa', 'Dòng sản phẩm tẩy rửa công nghiệp SWAT', 1),
-('SWAT_CLEAN', 'SWAT - Nước giặt xả', 'Nước giặt xả các loại', 2),
-('SWAT_FLOOR', 'SWAT - Nước lau sàn', 'Nước lau sàn đa năng', 3),
-('SWAT_GLASS', 'SWAT - Nước lau kính', 'Nước lau kính chuyên dụng', 4),
-('SWAT_BATH', 'SWAT - Tẩy nhà tắm', 'Tẩy rửa nhà tắm và toilet', 5),
-('SWAT_BLEACH', 'SWAT - Nước tẩy trắng', 'Nước tẩy trắng quần áo', 6),
-('SWAT_HAND', 'SWAT - Nước rửa tay', 'Nước rửa tay diệt khuẩn', 7),
-('SWAT_DISH', 'SWAT - Nước rửa chén', 'Nước rửa chén bát', 8),
-('GRASSE', 'GRASSE - Chăm sóc cá nhân', 'Dòng sản phẩm chăm sóc cá nhân GRASSE', 9),
-('GRASSE_SHAMPOO', 'GRASSE - Dầu gội', 'Dầu gội các loại', 10),
-('GRASSE_CONDITIONER', 'GRASSE - Dầu xả', 'Dầu xả tóc', 11),
-('GRASSE_TREATMENT', 'GRASSE - Dưỡng tóc', 'Kem ủ và dưỡng tóc', 12),
-('GRASSE_SHOWER', 'GRASSE - Sữa tắm', 'Sữa tắm các loại', 13),
-('GRASSE_SPRAY', 'GRASSE - Xịt quần áo', 'Xịt thơm quần áo', 14);
-
--- Insert sample warehouse locations
-INSERT INTO warehouse_locations (location_code, location_name, location_type, is_hazardous_zone, ventilation_available, fire_suppression_available) VALUES
--- Zone A - For chemicals
-('A', 'Zone A - Chemicals', 'ZONE', TRUE, TRUE, TRUE),
-('A-01', 'Aisle 01', 'AISLE', TRUE, TRUE, TRUE),
-('A-01-01', 'Rack 01', 'RACK', TRUE, TRUE, TRUE),
-('A-01-01-01', 'Shelf 01', 'SHELF', TRUE, TRUE, TRUE),
-('A-01-01-02', 'Shelf 02', 'SHELF', TRUE, TRUE, TRUE),
--- Zone B - For personal care
-('B', 'Zone B - Personal Care', 'ZONE', FALSE, TRUE, FALSE),
-('B-01', 'Aisle 01', 'AISLE', FALSE, TRUE, FALSE),
-('B-01-01', 'Rack 01', 'RACK', FALSE, TRUE, FALSE),
-('B-01-01-01', 'Shelf 01', 'SHELF', FALSE, TRUE, FALSE);
-
--- Update parent relationships
-UPDATE warehouse_locations SET parent_location_id = (SELECT location_id FROM warehouse_locations WHERE location_code = 'A') WHERE location_code = 'A-01';
-UPDATE warehouse_locations SET parent_location_id = (SELECT location_id FROM warehouse_locations WHERE location_code = 'A-01') WHERE location_code = 'A-01-01';
-UPDATE warehouse_locations SET parent_location_id = (SELECT location_id FROM warehouse_locations WHERE location_code = 'A-01-01') WHERE location_code IN ('A-01-01-01', 'A-01-01-02');
-UPDATE warehouse_locations SET parent_location_id = (SELECT location_id FROM warehouse_locations WHERE location_code = 'B') WHERE location_code = 'B-01';
-UPDATE warehouse_locations SET parent_location_id = (SELECT location_id FROM warehouse_locations WHERE location_code = 'B-01') WHERE location_code = 'B-01-01';
-UPDATE warehouse_locations SET parent_location_id = (SELECT location_id FROM warehouse_locations WHERE location_code = 'B-01-01') WHERE location_code = 'B-01-01-01';
-
--- Insert sample SKUs
-INSERT INTO skus (sku_code, product_name, category_id, unit, is_hazardous, min_quantity, max_quantity, reorder_point, cost_price, selling_price, status, created_by) VALUES
-('SWAT-CLEAN-001', 'SWAT - Nước giặt xả 5L', (SELECT category_id FROM categories WHERE category_code = 'SWAT_CLEAN'), 'CAN', TRUE, 20, 500, 50, 85000, 120000, 'ACTIVE', 1),
-('SWAT-FLOOR-001', 'SWAT - Nước lau đa năng 5L', (SELECT category_id FROM categories WHERE category_code = 'SWAT_FLOOR'), 'CAN', TRUE, 20, 500, 50, 75000, 110000, 'ACTIVE', 1),
-('GRASSE-SHAMPOO-001', 'GRASSE - Dầu gội 500ml', (SELECT category_id FROM categories WHERE category_code = 'GRASSE_SHAMPOO'), 'BOTTLE', FALSE, 50, 1000, 100, 45000, 75000, 'ACTIVE', 1),
-('GRASSE-SHOWER-001', 'GRASSE - Sữa tắm 500ml', (SELECT category_id FROM categories WHERE category_code = 'GRASSE_SHOWER'), 'BOTTLE', FALSE, 50, 1000, 100, 40000, 70000, 'ACTIVE', 1);
-
--- ============================================
--- GRANT PERMISSIONS
--- ============================================
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO postgres;
-
--- ============================================
--- DATABASE STATISTICS
--- ============================================
-SELECT 
-    'Database created successfully!' AS status,
-    COUNT(*) AS total_tables
-FROM information_schema.tables
-WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
-
-SELECT 
-    table_name,
-    (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = t.table_name) AS column_count
-FROM information_schema.tables t
-WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-ORDER BY table_name;
-
--- ============================================
--- VERIFICATION QUERIES
--- ============================================
-SELECT 'Users' AS table_name, COUNT(*) AS row_count FROM users
-UNION ALL
-SELECT 'Categories', COUNT(*) FROM categories
-UNION ALL
-SELECT 'Warehouse Locations', COUNT(*) FROM warehouse_locations
-UNION ALL
-SELECT 'SKUs', COUNT(*) FROM skus
-UNION ALL
-SELECT 'All Tables', COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';
-
--- ============================================
--- END OF SCRIPT
--- ============================================-- ============================================
--- COMPLETE POSTGRESQL SETUP FOR ZONE MANAGEMENT
--- Execute this after main schema is created
--- ============================================
-
--- ============================================
--- STEP 1: CREATE ZONES TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS zones (
-    zone_id BIGSERIAL PRIMARY KEY,
-    zone_code VARCHAR(50) UNIQUE NOT NULL,
-    zone_name VARCHAR(200) NOT NULL,
-    warehouse_code VARCHAR(50) NOT NULL,
-    zone_type VARCHAR(50) NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT REFERENCES users(user_id),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_by BIGINT REFERENCES users(user_id),
-    CONSTRAINT chk_zone_type CHECK (zone_type IN ('INBOUND', 'STORAGE', 'OUTBOUND', 'HOLD', 'DEFECT'))
-);
-
-CREATE INDEX idx_zones_code ON zones(zone_code);
-CREATE INDEX idx_zones_type ON zones(zone_type);
-CREATE INDEX idx_zones_warehouse ON zones(warehouse_code);
-CREATE INDEX idx_zones_active ON zones(is_active);
-
-COMMENT ON TABLE zones IS 'Functional zones: ZHC, ZPC, Z-INB, Z-HOLD (MANAGER only)';
-
--- ============================================
--- STEP 2: CREATE CATEGORY_ZONE_MAPPING TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS category_zone_mapping (
-    mapping_id BIGSERIAL PRIMARY KEY,
-    category_id BIGINT NOT NULL REFERENCES categories(category_id) ON DELETE CASCADE,
-    zone_id BIGINT NOT NULL REFERENCES zones(zone_id) ON DELETE CASCADE,
-    priority INTEGER DEFAULT 1,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT REFERENCES users(user_id),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_by BIGINT REFERENCES users(user_id),
-    UNIQUE(category_id, zone_id)
-);
-
-CREATE INDEX idx_category_zone_category ON category_zone_mapping(category_id);
-CREATE INDEX idx_category_zone_zone ON category_zone_mapping(zone_id);
-CREATE INDEX idx_category_zone_active ON category_zone_mapping(is_active);
-
-COMMENT ON TABLE category_zone_mapping IS 'Maps categories to zones (HC→ZHC, PC→ZPC)';
-
--- ============================================
--- STEP 3: ADD TRIGGERS
--- ============================================
-CREATE TRIGGER trigger_zones_updated_at
-    BEFORE UPDATE ON zones
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER trigger_category_zone_mapping_updated_at
-    BEFORE UPDATE ON category_zone_mapping
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- ============================================
--- STEP 4: INSERT SAMPLE ZONES
--- ============================================
-INSERT INTO zones (zone_code, zone_name, warehouse_code, zone_type, created_by, updated_by) 
-VALUES
-    ('ZHC', 'Home Care Storage Zone', 'WH01', 'STORAGE', 1, 1),
-    ('ZPC', 'Personal Care Storage Zone', 'WH01', 'STORAGE', 1, 1),
-    ('Z-INB', 'Inbound Staging Area', 'WH01', 'INBOUND', 1, 1),
-    ('Z-OUT', 'Outbound Staging Area', 'WH01', 'OUTBOUND', 1, 1),
-    ('Z-HOLD', 'Quality Hold Area', 'WH01', 'HOLD', 1, 1),
-    ('Z-DEFECT', 'Defective Items Area', 'WH01', 'DEFECT', 1, 1)
-ON CONFLICT (zone_code) DO NOTHING;
-
--- ============================================
--- STEP 5: INSERT SAMPLE CATEGORIES (Full Hierarchy)
--- ============================================
-
--- Parent categories
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by) 
-VALUES
-    ('HC', 'Home Care', 'Home care products', NULL, 1, 1),
-    ('PC', 'Personal Care', 'Personal care products', NULL, 1, 1)
-ON CONFLICT (category_code) DO NOTHING;
-
--- Child categories for Home Care
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'HC-FLOOR', 'Nước lau sàn', 'Floor cleaning products', category_id, 1, 1
-FROM categories WHERE category_code = 'HC'
-ON CONFLICT (category_code) DO NOTHING;
-
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'HC-DISH', 'Nước rửa bát', 'Dishwashing products', category_id, 1, 1
-FROM categories WHERE category_code = 'HC'
-ON CONFLICT (category_code) DO NOTHING;
-
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'HC-DETERGENT', 'Bột giặt', 'Laundry detergent', category_id, 1, 1
-FROM categories WHERE category_code = 'HC'
-ON CONFLICT (category_code) DO NOTHING;
-
--- Child categories for Personal Care
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'PC-SHAMP', 'Dầu gội', 'Shampoo products', category_id, 1, 1
-FROM categories WHERE category_code = 'PC'
-ON CONFLICT (category_code) DO NOTHING;
-
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'PC-SHOWER', 'Sữa tắm', 'Shower gel products', category_id, 1, 1
-FROM categories WHERE category_code = 'PC'
-ON CONFLICT (category_code) DO NOTHING;
-
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'PC-TOOTHPASTE', 'Kem đánh răng', 'Toothpaste products', category_id, 1, 1
-FROM categories WHERE category_code = 'PC'
-ON CONFLICT (category_code) DO NOTHING;
-
--- ============================================
--- STEP 6: MAP CATEGORIES TO ZONES
--- ============================================
-
--- Map HC (Home Care) → ZHC
-INSERT INTO category_zone_mapping (category_id, zone_id, priority, created_by, updated_by)
-SELECT c.category_id, z.zone_id, 1, 1, 1
-FROM categories c, zones z
-WHERE c.category_code = 'HC' AND z.zone_code = 'ZHC'
-ON CONFLICT (category_id, zone_id) DO NOTHING;
-
--- Map PC (Personal Care) → ZPC
-INSERT INTO category_zone_mapping (category_id, zone_id, priority, created_by, updated_by)
-SELECT c.category_id, z.zone_id, 1, 1, 1
-FROM categories c, zones z
-WHERE c.category_code = 'PC' AND z.zone_code = 'ZPC'
-ON CONFLICT (category_id, zone_id) DO NOTHING;
-
--- ============================================
--- VERIFICATION QUERIES
--- ============================================
-
--- View all zones
-SELECT zone_id, zone_code, zone_name, zone_type, is_active 
-FROM zones 
-ORDER BY zone_code;
-
--- View category hierarchy
-SELECT 
-    c.category_id,
-    c.category_code,
-    c.category_name,
-    COALESCE(p.category_code, 'NULL') as parent_code,
-    p.category_name as parent_name
-FROM categories c
-LEFT JOIN categories p ON c.parent_category_id = p.category_id
-ORDER BY COALESCE(c.parent_category_id, 0), c.category_code;
-
--- View category-zone mappings
-SELECT 
-    c.category_code,
-    c.category_name,
-    z.zone_code,
-    z.zone_name,
-    czm.priority
-FROM category_zone_mapping czm
-JOIN categories c ON czm.category_id = c.category_id
-JOIN zones z ON czm.zone_id = z.zone_id
-WHERE czm.is_active = TRUE
-ORDER BY z.zone_code, c.category_code;
-
--- ============================================
--- USEFUL QUERIES FOR APPLICATION
--- ============================================
-
--- Query 1: Find zone for a category (including inherited from parent)
--- Example: Find zone for 'HC-FLOOR'
-SELECT z.zone_code, z.zone_name
-FROM categories c
-LEFT JOIN categories parent ON c.parent_category_id = parent.category_id
-LEFT JOIN category_zone_mapping czm_direct ON c.category_id = czm_direct.category_id
-LEFT JOIN category_zone_mapping czm_parent ON parent.category_id = czm_parent.category_id
-LEFT JOIN zones z ON COALESCE(czm_direct.zone_id, czm_parent.zone_id) = z.zone_id
-WHERE c.category_code = 'HC-FLOOR'
-  AND z.zone_type = 'STORAGE'
-  AND z.is_active = TRUE;
-
--- Query 2: Find all categories in a zone
-SELECT c.category_code, c.category_name
-FROM zones z
-JOIN category_zone_mapping czm ON z.zone_id = czm.zone_id
-JOIN categories c ON czm.category_id = c.category_id
-WHERE z.zone_code = 'ZHC' AND czm.is_active = TRUE;
-
--- Query 3: Find zone for a SKU (through its category)
--- SELECT z.zone_code, z.zone_name, c.category_name
--- FROM skus s
--- JOIN categories c ON s.category_id = c.category_id
--- LEFT JOIN categories parent ON c.parent_category_id = parent.category_id
--- LEFT JOIN category_zone_mapping czm_direct ON c.category_id = czm_direct.category_id
--- LEFT JOIN category_zone_mapping czm_parent ON parent.category_id = czm_parent.category_id
--- JOIN zones z ON COALESCE(czm_direct.zone_id, czm_parent.zone_id) = z.zone_id
--- WHERE s.sku_code = 'SKU-FLOOR-001'
--- ORDER BY czm_direct.priority, czm_parent.priority
--- LIMIT 1;
-
-
--- ==========================================================================================
--- ============================================
--- ZONE MANAGEMENT - MANUAL DATABASE UPDATE
--- Copy this entire file and paste into your PostgreSQL client
--- Or append to sep26_warehousemanagement.sql
--- ============================================
--- ============================================
--- STEP 1: CREATE ZONES TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS zones (
-    zone_id BIGSERIAL PRIMARY KEY,
-    zone_code VARCHAR(50) UNIQUE NOT NULL,
-    zone_name VARCHAR(200) NOT NULL,
-    warehouse_code VARCHAR(50) NOT NULL,
-    zone_type VARCHAR(50) NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT REFERENCES users(user_id),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_by BIGINT REFERENCES users(user_id),
-    CONSTRAINT chk_zone_type CHECK (zone_type IN ('INBOUND', 'STORAGE', 'OUTBOUND', 'HOLD', 'DEFECT'))
-);
-CREATE INDEX idx_zones_code ON zones(zone_code);
-CREATE INDEX idx_zones_type ON zones(zone_type);
-CREATE INDEX idx_zones_warehouse ON zones(warehouse_code);
-CREATE INDEX idx_zones_active ON zones(is_active);
-COMMENT ON TABLE zones IS 'Functional zones: ZHC, ZPC, Z-INB, Z-HOLD (MANAGER only)';
--- ============================================
--- STEP 2: CREATE CATEGORY_ZONE_MAPPING TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS category_zone_mapping (
-    mapping_id BIGSERIAL PRIMARY KEY,
-    category_id BIGINT NOT NULL REFERENCES categories(category_id) ON DELETE CASCADE,
-    zone_id BIGINT NOT NULL REFERENCES zones(zone_id) ON DELETE CASCADE,
-    priority INTEGER DEFAULT 1,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT REFERENCES users(user_id),
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_by BIGINT REFERENCES users(user_id),
-    UNIQUE(category_id, zone_id)
-);
-CREATE INDEX idx_category_zone_category ON category_zone_mapping(category_id);
-CREATE INDEX idx_category_zone_zone ON category_zone_mapping(zone_id);
-CREATE INDEX idx_category_zone_active ON category_zone_mapping(is_active);
-COMMENT ON TABLE category_zone_mapping IS 'Maps categories to zones (HC→ZHC, PC→ZPC)';
--- ============================================
--- STEP 3: ADD TRIGGERS
--- ============================================
-CREATE TRIGGER trigger_zones_updated_at
-    BEFORE UPDATE ON zones
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER trigger_category_zone_mapping_updated_at
-    BEFORE UPDATE ON category_zone_mapping
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
--- ============================================
--- STEP 4: INSERT SAMPLE ZONES
--- ============================================
-INSERT INTO zones (zone_code, zone_name, warehouse_code, zone_type, created_by, updated_by) 
-VALUES
-    ('ZHC', 'Home Care Storage Zone', 'WH01', 'STORAGE', 1, 1),
-    ('ZPC', 'Personal Care Storage Zone', 'WH01', 'STORAGE', 1, 1),
-    ('Z-INB', 'Inbound Staging Area', 'WH01', 'INBOUND', 1, 1),
-    ('Z-OUT', 'Outbound Staging Area', 'WH01', 'OUTBOUND', 1, 1),
-    ('Z-HOLD', 'Quality Hold Area', 'WH01', 'HOLD', 1, 1),
-    ('Z-DEFECT', 'Defective Items Area', 'WH01', 'DEFECT', 1, 1)
-ON CONFLICT (zone_code) DO NOTHING;
--- ============================================
--- STEP 5: INSERT SAMPLE CATEGORIES (Full Hierarchy)
--- ============================================
--- Parent categories
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by) 
-VALUES
-    ('HC', 'Home Care', 'Home care products', NULL, 1, 1),
-    ('PC', 'Personal Care', 'Personal care products', NULL, 1, 1)
-ON CONFLICT (category_code) DO NOTHING;
--- Child categories for Home Care
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'HC-FLOOR', 'Nước lau sàn', 'Floor cleaning products', category_id, 1, 1
-FROM categories WHERE category_code = 'HC'
-ON CONFLICT (category_code) DO NOTHING;
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'HC-DISH', 'Nước rửa bát', 'Dishwashing products', category_id, 1, 1
-FROM categories WHERE category_code = 'HC'
-ON CONFLICT (category_code) DO NOTHING;
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'HC-DETERGENT', 'Bột giặt', 'Laundry detergent', category_id, 1, 1
-FROM categories WHERE category_code = 'HC'
-ON CONFLICT (category_code) DO NOTHING;
--- Child categories for Personal Care
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'PC-SHAMP', 'Dầu gội', 'Shampoo products', category_id, 1, 1
-FROM categories WHERE category_code = 'PC'
-ON CONFLICT (category_code) DO NOTHING;
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'PC-SHOWER', 'Sữa tắm', 'Shower gel products', category_id, 1, 1
-FROM categories WHERE category_code = 'PC'
-ON CONFLICT (category_code) DO NOTHING;
-INSERT INTO categories (category_code, category_name, description, parent_category_id, created_by, updated_by)
-SELECT 'PC-TOOTHPASTE', 'Kem đánh răng', 'Toothpaste products', category_id, 1, 1
-FROM categories WHERE category_code = 'PC'
-ON CONFLICT (category_code) DO NOTHING;
--- ============================================
--- STEP 6: MAP CATEGORIES TO ZONES
--- ============================================
--- Map HC (Home Care) → ZHC
-INSERT INTO category_zone_mapping (category_id, zone_id, priority, created_by, updated_by)
-SELECT c.category_id, z.zone_id, 1, 1, 1
-FROM categories c, zones z
-WHERE c.category_code = 'HC' AND z.zone_code = 'ZHC'
-ON CONFLICT (category_id, zone_id) DO NOTHING;
--- Map PC (Personal Care) → ZPC
-INSERT INTO category_zone_mapping (category_id, zone_id, priority, created_by, updated_by)
-SELECT c.category_id, z.zone_id, 1, 1, 1
-FROM categories c, zones z
-WHERE c.category_code = 'PC' AND z.zone_code = 'ZPC'
-ON CONFLICT (category_id, zone_id) DO NOTHING;
--- ============================================
--- VERIFICATION QUERIES
--- ============================================
--- View all zones
-SELECT zone_id, zone_code, zone_name, zone_type, is_active 
-FROM zones 
-ORDER BY zone_code;
--- View category hierarchy
-SELECT 
-    c.category_id,
-    c.category_code,
-    c.category_name,
-    COALESCE(p.category_code, 'NULL') as parent_code,
-    p.category_name as parent_name
-FROM categories c
-LEFT JOIN categories p ON c.parent_category_id = p.category_id
-ORDER BY COALESCE(c.parent_category_id, 0), c.category_code;
--- View category-zone mappings
-SELECT 
-    c.category_code,
-    c.category_name,
-    z.zone_code,
-    z.zone_name,
-    czm.priority
-FROM category_zone_mapping czm
-JOIN categories c ON czm.category_id = c.category_id
-JOIN zones z ON czm.zone_id = z.zone_id
-WHERE czm.is_active = TRUE
-ORDER BY z.zone_code, c.category_code;
--- ============================================
--- USEFUL QUERIES FOR APPLICATION
--- ============================================
--- Query 1: Find zone for a category (including inherited from parent)
--- Example: Find zone for 'HC-FLOOR'
-SELECT z.zone_code, z.zone_name
-FROM categories c
-LEFT JOIN categories parent ON c.parent_category_id = parent.category_id
-LEFT JOIN category_zone_mapping czm_direct ON c.category_id = czm_direct.category_id
-LEFT JOIN category_zone_mapping czm_parent ON parent.category_id = czm_parent.category_id
-LEFT JOIN zones z ON COALESCE(czm_direct.zone_id, czm_parent.zone_id) = z.zone_id
-WHERE c.category_code = 'HC-FLOOR'
-  AND z.zone_type = 'STORAGE'
-  AND z.is_active = TRUE;
--- Query 2: Find all categories in a zone
-SELECT c.category_code, c.category_name
-FROM zones z
-JOIN category_zone_mapping czm ON z.zone_id = czm.zone_id
-JOIN categories c ON czm.category_id = c.category_id
-WHERE z.zone_code = 'ZHC' AND czm.is_active = TRUE;
--- Query 3: Find zone for a SKU (through its category)
--- SELECT z.zone_code, z.zone_name, c.category_name
--- FROM skus s
--- JOIN categories c ON s.category_id = c.category_id
--- LEFT JOIN categories parent ON c.parent_category_id = parent.category_id
--- LEFT JOIN category_zone_mapping czm_direct ON c.category_id = czm_direct.category_id
--- LEFT JOIN category_zone_mapping czm_parent ON parent.category_id = czm_parent.category_id
--- JOIN zones z ON COALESCE(czm_direct.zone_id, czm_parent.zone_id) = z.zone_id
--- WHERE s.sku_code = 'SKU-FLOOR-001'
--- ORDER BY czm_direct.priority, czm_parent.priority
--- LIMIT 1;
--- ============================================
--- END OF ZONE MANAGEMENT SCHEMA
--- ============================================
+-- Sample SKU
+INSERT INTO skus (category_id, sku_code, sku_name, description, brand, unit, package_type, active) VALUES 
+((SELECT category_id FROM categories WHERE category_code = 'CLEAN'), 
+ 'SKU001', 'Multi-Purpose Cleaner 500ml', 'Lemon scented multi-purpose cleaner', 'CleanPro', 'bottle', 'Bottle', true);

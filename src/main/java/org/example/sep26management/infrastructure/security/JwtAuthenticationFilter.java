@@ -15,9 +15,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -30,8 +29,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(
             HttpServletRequest request,
             HttpServletResponse response,
-            FilterChain filterChain
-    ) throws ServletException, IOException {
+            FilterChain filterChain) throws ServletException, IOException {
 
         try {
             String jwt = getJwtFromRequest(request);
@@ -39,15 +37,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (StringUtils.hasText(jwt) && jwtTokenProvider.validateToken(jwt)) {
                 String email = jwtTokenProvider.getEmailFromToken(jwt);
                 Long userId = jwtTokenProvider.getUserIdFromToken(jwt);
-                String role = jwtTokenProvider.getRoleFromToken(jwt).name();
+                Set<String> roleCodes = jwtTokenProvider.getRoleCodesFromToken(jwt);
+
+                // Create granted authorities from role codes
+                List<SimpleGrantedAuthority> authorities = roleCodes.stream()
+                        .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
+                        .collect(Collectors.toList());
 
                 // Create authentication object
-                UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(
-                                email,
-                                null,
-                                Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + role))
-                        );
+                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                        email,
+                        null,
+                        authorities);
 
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
@@ -55,7 +56,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Map<String, Object> details = new HashMap<>();
                 details.put("userId", userId);
                 details.put("email", email);
-                details.put("role", role);
+                details.put("roles", roleCodes);
                 authentication.setDetails(details);
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);

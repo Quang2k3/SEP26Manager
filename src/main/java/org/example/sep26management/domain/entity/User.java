@@ -1,11 +1,11 @@
 package org.example.sep26management.domain.entity;
 
 import lombok.*;
-import org.example.sep26management.domain.enums.UserRole;
 import org.example.sep26management.domain.enums.UserStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Set;
 
 @Getter
 @Setter
@@ -28,7 +28,7 @@ public class User {
     private String avatarUrl;
 
     // Account Management
-    private UserRole role;
+    private Set<String> roleCodes; // Dynamic roles from database (e.g., ["ADMIN", "MANAGER"])
     private UserStatus status;
 
     // Account Type

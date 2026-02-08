@@ -4,15 +4,13 @@ import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.domain.entity.User;
-import org.example.sep26management.domain.enums.UserRole;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Component
 @Slf4j
@@ -39,7 +37,8 @@ public class JwtTokenProvider {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getUserId());
         claims.put("email", user.getEmail());
-        claims.put("role", user.getRole().name());
+        // Store role codes as comma-separated string or list
+        claims.put("roles", user.getRoleCodes() != null ? String.join(",", user.getRoleCodes()) : "");
         claims.put("fullName", user.getFullName());
 
         long expiration = rememberMe ? jwtRememberMeExpirationMs : jwtExpirationMs;
@@ -83,17 +82,21 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Get role from JWT token
+     * Get role codes from JWT token
      */
-    public UserRole getRoleFromToken(String token) {
+    public Set<String> getRoleCodesFromToken(String token) {
         Claims claims = Jwts.parserBuilder()
                 .setSigningKey(getSigningKey())
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
 
-        String role = claims.get("role", String.class);
-        return UserRole.valueOf(role);
+        String rolesStr = claims.get("roles", String.class);
+        if (rolesStr == null || rolesStr.isEmpty()) {
+            return new HashSet<>();
+        }
+        return Arrays.stream(rolesStr.split(","))
+                .collect(Collectors.toSet());
     }
 
     /**

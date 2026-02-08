@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -48,16 +49,12 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // Public endpoints
+                        // Public endpoints (Auth endpoints)
                         .requestMatchers(
-                                "/api/v1/auth/login",
-                                "/api/v1/auth/verify-otp",
-                                "/api/v1/auth/forgot-password",
-                                "/api/v1/auth/verify-reset-otp",
-                                "/api/v1/auth/reset-password",
-                                "/api/v1/auth/resend-otp",
+                                "/api/v1/auth/**",
                                 "/api/v1/health",
                                 "/swagger-ui/**",
+                                "/swagger-ui.html",
                                 "/v3/api-docs/**")
                         .permitAll()
 

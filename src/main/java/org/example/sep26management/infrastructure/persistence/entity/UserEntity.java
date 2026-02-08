@@ -2,11 +2,12 @@ package org.example.sep26management.infrastructure.persistence.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.example.sep26management.domain.enums.UserRole;
 import org.example.sep26management.domain.enums.UserStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "users")
@@ -46,9 +47,17 @@ public class UserEntity {
     @Column(name = "avatar_url", columnDefinition = "TEXT")
     private String avatarUrl;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "role", nullable = false, length = 50)
-    private UserRole role;
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"), inverseJoinColumns = @JoinColumn(name = "role_id"))
+    @Builder.Default
+    private Set<RoleEntity> roles = new HashSet<>();
+
+    // ⚠️ WAREHOUSE RELATIONSHIP COMMENTED OUT FOR AUTH TESTING
+    // @ManyToMany(fetch = FetchType.LAZY)
+    // @JoinTable(name = "user_warehouses", joinColumns = @JoinColumn(name =
+    // "user_id"), inverseJoinColumns = @JoinColumn(name = "warehouse_id"))
+    // @Builder.Default
+    // private Set<WarehouseEntity> warehouses = new HashSet<>();
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)

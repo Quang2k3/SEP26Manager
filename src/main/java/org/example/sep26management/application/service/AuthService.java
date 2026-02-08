@@ -16,6 +16,7 @@ import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
 import org.example.sep26management.infrastructure.persistence.repository.OtpJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
 import org.example.sep26management.infrastructure.security.JwtTokenProvider;
+import org.example.sep26management.infrastructure.mapper.UserEntityMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.Random;
 
 @Service
@@ -37,6 +40,7 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final EmailService emailService;
     private final AuditLogService auditLogService;
+    private final UserEntityMapper userEntityMapper; // Add mapper injection
 
     @Value("${otp.expiration-minutes}")
     private int otpExpirationMinutes;
@@ -103,27 +107,32 @@ public class AuthService {
                     user.getUserId(),
                     "First login - OTP sent",
                     ipAddress,
-                    userAgent
-            );
+                    userAgent);
 
             // Return response indicating verification required
+            // Extract role codes
+            Set<String> roleCodes = user.getRoles() != null
+                    ? user.getRoles().stream()
+                            .map(role -> role.getRoleCode())
+                            .collect(Collectors.toSet())
+                    : Set.of();
+
             return LoginResponse.builder()
                     .requiresVerification(true)
                     .user(LoginResponse.UserInfoDTO.builder()
                             .userId(user.getUserId())
                             .email(user.getEmail())
                             .fullName(user.getFullName())
-                            .role(user.getRole())
+                            .roleCodes(roleCodes)
                             .build())
                     .build();
         }
 
-        // Step 7: Generate JWT token
-        User domainUser = mapToDomain(user);
+        // Step 7: Generate JWT token using UserEntityMapper
+        User domainUser = userEntityMapper.toDomain(user);
         String token = jwtTokenProvider.generateToken(
                 domainUser,
-                Boolean.TRUE.equals(request.getRememberMe())
-        );
+                Boolean.TRUE.equals(request.getRememberMe()));
 
         // Calculate expiration
         long expiresIn = Boolean.TRUE.equals(request.getRememberMe())
@@ -137,8 +146,7 @@ public class AuthService {
                 user.getUserId(),
                 "Successful login",
                 ipAddress,
-                userAgent
-        );
+                userAgent);
 
         // Step 8: Return success response
         return LoginResponse.builder()
@@ -150,7 +158,7 @@ public class AuthService {
                         .userId(user.getUserId())
                         .email(user.getEmail())
                         .fullName(user.getFullName())
-                        .role(user.getRole())
+                        .roleCodes(domainUser.getRoleCodes()) // Use from domain model
                         .avatarUrl(user.getAvatarUrl())
                         .build())
                 .build();
@@ -163,8 +171,7 @@ public class AuthService {
             String email,
             VerifyOtpRequest request,
             String ipAddress,
-            String userAgent
-    ) {
+            String userAgent) {
         log.info("Verifying first login OTP for email: {}", email);
 
         UserEntity user = userRepository.findByEmail(email)
@@ -184,7 +191,8 @@ public class AuthService {
         }
 
         if (otp.getAttemptsRemaining() <= 0) {
-            throw new BusinessException("Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
+            throw new BusinessException(
+                    "Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
         }
 
         // Verify OTP code
@@ -193,13 +201,13 @@ public class AuthService {
             otpRepository.save(otp);
 
             if (otp.getAttemptsRemaining() <= 0) {
-                throw new BusinessException("Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
+                throw new BusinessException(
+                        "Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
             }
 
             throw new BusinessException(
                     String.format("The OTP code is incorrect. You have %d attempts remaining.",
-                            otp.getAttemptsRemaining())
-            );
+                            otp.getAttemptsRemaining()));
         }
 
         // Mark OTP as used
@@ -223,8 +231,7 @@ public class AuthService {
                 user.getUserId(),
                 "First login verification successful",
                 ipAddress,
-                userAgent
-        );
+                userAgent);
 
         return LoginResponse.builder()
                 .token(token)
@@ -235,7 +242,7 @@ public class AuthService {
                         .userId(user.getUserId())
                         .email(user.getEmail())
                         .fullName(user.getFullName())
-                        .role(user.getRole())
+                        .roleCodes(domainUser.getRoleCodes()) // Use domain model role codes
                         .avatarUrl(user.getAvatarUrl())
                         .build())
                 .build();
@@ -252,8 +259,7 @@ public class AuthService {
         long recentOtpCount = otpRepository.countRecentOtps(
                 request.getEmail(),
                 OtpType.RESET_PASSWORD,
-                LocalDateTime.now().minusHours(1)
-        );
+                LocalDateTime.now().minusHours(1));
 
         if (recentOtpCount >= otpResendLimitPerHour) {
             throw new BusinessException("OTP email quota exceeded in the current time window.");
@@ -271,8 +277,7 @@ public class AuthService {
      */
     public ApiResponse<Void> verifyResetPasswordOtp(
             String email,
-            VerifyOtpRequest request
-    ) {
+            VerifyOtpRequest request) {
         log.info("Verifying reset password OTP for email: {}", email);
 
         // Find valid OTP
@@ -289,7 +294,8 @@ public class AuthService {
         }
 
         if (otp.getAttemptsRemaining() <= 0) {
-            throw new BusinessException("Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
+            throw new BusinessException(
+                    "Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
         }
 
         // Verify OTP code
@@ -298,13 +304,13 @@ public class AuthService {
             otpRepository.save(otp);
 
             if (otp.getAttemptsRemaining() <= 0) {
-                throw new BusinessException("Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
+                throw new BusinessException(
+                        "Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
             }
 
             throw new BusinessException(
                     String.format("Incorrect OTP code. You have %d attempts remaining.",
-                            otp.getAttemptsRemaining())
-            );
+                            otp.getAttemptsRemaining()));
         }
 
         // Check if account exists (Step 7a)
@@ -325,8 +331,7 @@ public class AuthService {
      */
     public ApiResponse<Void> resetPassword(
             String email,
-            ResetPasswordRequest request
-    ) {
+            ResetPasswordRequest request) {
         log.info("Resetting password for email: {}", email);
 
         // Validate password match
@@ -366,8 +371,7 @@ public class AuthService {
                 user.getUserId(),
                 "Password reset successful",
                 null,
-                null
-        );
+                null);
 
         return ApiResponse.success("The password has been reset successfully. Please login again.");
     }
@@ -382,8 +386,7 @@ public class AuthService {
         long recentOtpCount = otpRepository.countRecentOtps(
                 email,
                 otpType,
-                LocalDateTime.now().minusHours(1)
-        );
+                LocalDateTime.now().minusHours(1));
 
         if (recentOtpCount >= otpResendLimitPerHour) {
             throw new BusinessException("OTP email quota exceeded in the current time window.");
@@ -419,8 +422,7 @@ public class AuthService {
                 userId,
                 "User logged out",
                 ipAddress,
-                userAgent
-        );
+                userAgent);
 
         return ApiResponse.success("Logged out successfully");
     }
@@ -470,30 +472,10 @@ public class AuthService {
         return otpCode;
     }
 
+    // DEPRECATED: Use userEntityMapper.toDomain() directly instead
+    // This method is kept for reference but should not be used
+    @Deprecated
     private User mapToDomain(UserEntity entity) {
-        return User.builder()
-                .userId(entity.getUserId())
-                .email(entity.getEmail())
-                .passwordHash(entity.getPasswordHash())
-                .fullName(entity.getFullName())
-                .phone(entity.getPhone())
-                .gender(entity.getGender())
-                .dateOfBirth(entity.getDateOfBirth())
-                .address(entity.getAddress())
-                .avatarUrl(entity.getAvatarUrl())
-                .role(entity.getRole())
-                .status(entity.getStatus())
-                .isPermanent(entity.getIsPermanent())
-                .expireDate(entity.getExpireDate())
-                .isFirstLogin(entity.getIsFirstLogin())
-                .lastLoginAt(entity.getLastLoginAt())
-                .failedLoginAttempts(entity.getFailedLoginAttempts())
-                .lockedUntil(entity.getLockedUntil())
-                .passwordChangedAt(entity.getPasswordChangedAt())
-                .createdAt(entity.getCreatedAt())
-                .createdBy(entity.getCreatedBy())
-                .updatedAt(entity.getUpdatedAt())
-                .updatedBy(entity.getUpdatedBy())
-                .build();
+        return userEntityMapper.toDomain(entity);
     }
 }
