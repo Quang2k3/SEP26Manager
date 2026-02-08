@@ -6,8 +6,11 @@ import org.example.sep26management.domain.enums.OtpType;
 
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "otps")
+// Temporarily disabled to avoid database schema validation
+// TODO: Re-enable when otps table is available in database
+// Uncomment @Entity and fix table name when ready
+// @Entity
+// @Table(name = "otps")
 @Getter
 @Setter
 @NoArgsConstructor

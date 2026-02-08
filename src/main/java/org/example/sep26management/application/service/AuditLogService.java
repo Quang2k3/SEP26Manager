@@ -28,13 +28,12 @@ public class AuditLogService {
     ) {
         try {
             AuditLogEntity auditLog = AuditLogEntity.builder()
-                    .userId(userId)
+                    .actionBy(userId)
                     .action(action)
-                    .entityType(entityType)
-                    .entityId(entityId)
-                    .description(description)
-                    .ipAddress(ipAddress)
-                    .userAgent(userAgent)
+                    .entityName(entityType != null ? entityType : "UNKNOWN")
+                    .entityId(entityId != null ? entityId : 0L)
+                    .oldData(null)
+                    .newData(description != null ? "{\"description\":\"" + description + "\"}" : null)
                     .build();
 
             auditLogRepository.save(auditLog);
@@ -59,15 +58,12 @@ public class AuditLogService {
     ) {
         try {
             AuditLogEntity auditLog = AuditLogEntity.builder()
-                    .userId(userId)
+                    .actionBy(userId)
                     .action(action)
-                    .entityType(entityType)
-                    .entityId(entityId)
-                    .description(description)
-                    .ipAddress(ipAddress)
-                    .userAgent(userAgent)
-                    .oldValue(oldValue)
-                    .newValue(newValue)
+                    .entityName(entityType != null ? entityType : "UNKNOWN")
+                    .entityId(entityId != null ? entityId : 0L)
+                    .oldData(oldValue != null ? "{\"value\":\"" + oldValue + "\"}" : null)
+                    .newData(newValue != null ? "{\"value\":\"" + newValue + "\"}" : null)
                     .build();
 
             auditLogRepository.save(auditLog);
@@ -83,9 +79,10 @@ public class AuditLogService {
         try {
             AuditLogEntity auditLog = AuditLogEntity.builder()
                     .action("LOGIN_FAILED")
-                    .entityType("USER")
-                    .description("Failed login attempt for: " + email + ". Reason: " + reason)
-                    .ipAddress(ipAddress)
+                    .entityName("USER")
+                    .entityId(0L) // No specific user ID for failed login
+                    .actionBy(0L) // No user ID for failed login
+                    .newData("{\"email\":\"" + email + "\",\"reason\":\"" + reason + "\",\"ipAddress\":\"" + ipAddress + "\"}")
                     .build();
 
             auditLogRepository.save(auditLog);

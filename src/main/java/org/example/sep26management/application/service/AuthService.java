@@ -5,15 +5,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.request.*;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.LoginResponse;
-import org.example.sep26management.domain.entity.Otp;
 import org.example.sep26management.domain.entity.User;
 import org.example.sep26management.domain.enums.OtpType;
 import org.example.sep26management.domain.enums.UserStatus;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.UnauthorizedException;
-import org.example.sep26management.infrastructure.persistence.entity.OtpEntity;
+// Temporarily disabled - otps table not available
+// import org.example.sep26management.infrastructure.persistence.entity.OtpEntity;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
-import org.example.sep26management.infrastructure.persistence.repository.OtpJpaRepository;
+// import org.example.sep26management.infrastructure.persistence.repository.OtpJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
 import org.example.sep26management.infrastructure.security.JwtTokenProvider;
 import org.example.sep26management.infrastructure.mapper.UserEntityMapper;
@@ -24,8 +24,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.Random;
 
 @Service
@@ -35,7 +33,9 @@ import java.util.Random;
 public class AuthService {
 
     private final UserJpaRepository userRepository;
-    private final OtpJpaRepository otpRepository;
+    // Temporarily disabled - otps table not available in database
+    // Uncomment when otps table is created
+    // private final OtpJpaRepository otpRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final EmailService emailService;
@@ -60,6 +60,7 @@ public class AuthService {
         // Step 4: Verify credentials
         UserEntity user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> {
+                    log.warn("Login failed: User not found for email: {}", request.getEmail());
                     auditLogService.logFailedLogin(request.getEmail(), "User not found", ipAddress);
                     return new UnauthorizedException("Invalid account or password.");
                 });
@@ -72,6 +73,8 @@ public class AuthService {
 
         // Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            log.warn("Login failed: Invalid password for email: {}, failed attempts: {}", 
+                    user.getEmail(), user.getFailedLoginAttempts() + 1);
             user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
 
             // Lock after 5 failed attempts
@@ -93,40 +96,6 @@ public class AuthService {
         user.setLockedUntil(null);
         user.setLastLoginAt(LocalDateTime.now());
         userRepository.save(user);
-
-        // Check if first login
-        if (Boolean.TRUE.equals(user.getIsFirstLogin())) {
-            // Generate OTP for first login verification
-            String otpCode = generateOtp(user.getEmail(), OtpType.FIRST_LOGIN);
-            emailService.sendOtpEmail(user.getEmail(), otpCode, "First Login Verification");
-
-            auditLogService.logAction(
-                    user.getUserId(),
-                    "LOGIN_REQUIRES_VERIFICATION",
-                    "USER",
-                    user.getUserId(),
-                    "First login - OTP sent",
-                    ipAddress,
-                    userAgent);
-
-            // Return response indicating verification required
-            // Extract role codes
-            Set<String> roleCodes = user.getRoles() != null
-                    ? user.getRoles().stream()
-                            .map(role -> role.getRoleCode())
-                            .collect(Collectors.toSet())
-                    : Set.of();
-
-            return LoginResponse.builder()
-                    .requiresVerification(true)
-                    .user(LoginResponse.UserInfoDTO.builder()
-                            .userId(user.getUserId())
-                            .email(user.getEmail())
-                            .fullName(user.getFullName())
-                            .roleCodes(roleCodes)
-                            .build())
-                    .build();
-        }
 
         // Step 7: Generate JWT token using UserEntityMapper
         User domainUser = userEntityMapper.toDomain(user);
@@ -165,93 +134,14 @@ public class AuthService {
     }
 
     /**
-     * UC-AUTH-03: Complete First Login (Verify OTP)
-     */
-    public LoginResponse verifyFirstLoginOtp(
-            String email,
-            VerifyOtpRequest request,
-            String ipAddress,
-            String userAgent) {
-        log.info("Verifying first login OTP for email: {}", email);
-
-        UserEntity user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new BusinessException("User not found"));
-
-        // Find valid OTP
-        OtpEntity otp = otpRepository.findValidOtp(email, OtpType.FIRST_LOGIN, LocalDateTime.now())
-                .orElseThrow(() -> new BusinessException("Your OTP has expired. Please request a new one."));
-
-        // Check if OTP is valid
-        if (otp.getIsUsed()) {
-            throw new BusinessException("This OTP has already been used.");
-        }
-
-        if (otp.getExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new BusinessException("The OTP code has expired. You can request a new OTP now.");
-        }
-
-        if (otp.getAttemptsRemaining() <= 0) {
-            throw new BusinessException(
-                    "Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
-        }
-
-        // Verify OTP code
-        if (!otp.getOtpCode().equals(request.getOtpCode())) {
-            otp.setAttemptsRemaining(otp.getAttemptsRemaining() - 1);
-            otpRepository.save(otp);
-
-            if (otp.getAttemptsRemaining() <= 0) {
-                throw new BusinessException(
-                        "Your OTP has expired due to too many incorrect attempts. Please request a new OTP.");
-            }
-
-            throw new BusinessException(
-                    String.format("The OTP code is incorrect. You have %d attempts remaining.",
-                            otp.getAttemptsRemaining()));
-        }
-
-        // Mark OTP as used
-        otp.setIsUsed(true);
-        otp.setVerifiedAt(LocalDateTime.now());
-        otpRepository.save(otp);
-
-        // Activate account
-        user.setStatus(UserStatus.ACTIVE);
-        user.setIsFirstLogin(false);
-        userRepository.save(user);
-
-        // Generate JWT token
-        User domainUser = mapToDomain(user);
-        String token = jwtTokenProvider.generateToken(domainUser, false);
-
-        auditLogService.logAction(
-                user.getUserId(),
-                "FIRST_LOGIN_VERIFY",
-                "USER",
-                user.getUserId(),
-                "First login verification successful",
-                ipAddress,
-                userAgent);
-
-        return LoginResponse.builder()
-                .token(token)
-                .tokenType("Bearer")
-                .expiresIn(5 * 60 * 1000L)
-                .requiresVerification(false)
-                .user(LoginResponse.UserInfoDTO.builder()
-                        .userId(user.getUserId())
-                        .email(user.getEmail())
-                        .fullName(user.getFullName())
-                        .roleCodes(domainUser.getRoleCodes()) // Use domain model role codes
-                        .avatarUrl(user.getAvatarUrl())
-                        .build())
-                .build();
-    }
-
-    /**
      * UC-PERS-01: Forgot Password - Send OTP
+     * TEMPORARILY DISABLED - otps table not available in database
      */
     public ApiResponse<Void> sendResetPasswordOtp(ForgotPasswordRequest request) {
+        log.warn("Password reset OTP requested but OTP functionality is disabled (otps table not available)");
+        throw new BusinessException("Password reset via OTP is temporarily disabled. Please contact administrator.");
+        
+        /* Original implementation - re-enable when otps table is available
         log.info("Password reset requested for email: {}", request.getEmail());
 
         // Check rate limiting (BR-AUTH-15: Privacy & Obfuscation)
@@ -270,14 +160,20 @@ public class AuthService {
         emailService.sendOtpEmail(request.getEmail(), otpCode, "Password Reset");
 
         return ApiResponse.success("The OTP has been sent to your email.");
+        */
     }
 
     /**
      * Verify Reset Password OTP
+     * TEMPORARILY DISABLED - otps table not available in database
      */
     public ApiResponse<Void> verifyResetPasswordOtp(
             String email,
             VerifyOtpRequest request) {
+        log.warn("Password reset OTP verification requested but OTP functionality is disabled");
+        throw new BusinessException("Password reset via OTP is temporarily disabled. Please contact administrator.");
+        
+        /* Original implementation - re-enable when otps table is available
         log.info("Verifying reset password OTP for email: {}", email);
 
         // Find valid OTP
@@ -324,14 +220,20 @@ public class AuthService {
         otpRepository.save(otp);
 
         return ApiResponse.success("The OTP has been verified successfully.");
+        */
     }
 
     /**
      * Reset Password after OTP verification
+     * TEMPORARILY DISABLED - otps table not available in database
      */
     public ApiResponse<Void> resetPassword(
             String email,
             ResetPasswordRequest request) {
+        log.warn("Password reset requested but OTP functionality is disabled");
+        throw new BusinessException("Password reset via OTP is temporarily disabled. Please contact administrator.");
+        
+        /* Original implementation - re-enable when otps table is available
         log.info("Resetting password for email: {}", email);
 
         // Validate password match
@@ -374,12 +276,18 @@ public class AuthService {
                 null);
 
         return ApiResponse.success("The password has been reset successfully. Please login again.");
+        */
     }
 
     /**
      * Resend OTP
+     * TEMPORARILY DISABLED - otps table not available in database
      */
     public ApiResponse<Void> resendOtp(String email, OtpType otpType) {
+        log.warn("Resend OTP requested but OTP functionality is disabled");
+        throw new BusinessException("OTP functionality is temporarily disabled. Please contact administrator.");
+        
+        /* Original implementation - re-enable when otps table is available
         log.info("Resending OTP for email: {} type: {}", email, otpType);
 
         // Check rate limiting
@@ -400,10 +308,11 @@ public class AuthService {
 
         // Generate new OTP
         String otpCode = generateOtp(email, otpType);
-        String subject = otpType == OtpType.FIRST_LOGIN ? "First Login Verification" : "Password Reset";
+        String subject = "Password Reset";
         emailService.sendOtpEmail(email, otpCode, subject);
 
         return ApiResponse.success("The OTP has been sent to your email.");
+        */
     }
 
     /**
@@ -452,6 +361,8 @@ public class AuthService {
         return true;
     }
 
+    // Temporarily disabled - otps table not available
+    /*
     private String generateOtp(String email, OtpType otpType) {
         // Generate 6-digit OTP
         Random random = new Random();
@@ -471,11 +382,5 @@ public class AuthService {
 
         return otpCode;
     }
-
-    // DEPRECATED: Use userEntityMapper.toDomain() directly instead
-    // This method is kept for reference but should not be used
-    @Deprecated
-    private User mapToDomain(UserEntity entity) {
-        return userEntityMapper.toDomain(entity);
-    }
+    */
 }

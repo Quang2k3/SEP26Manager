@@ -50,18 +50,19 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints (Auth endpoints)
+                        // Note: context-path is /api, so controller paths start from /v1/...
                         .requestMatchers(
-                                "/api/v1/auth/**",
-                                "/api/v1/health",
+                                "/v1/auth/**",
+                                "/v1/health",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**")
                         .permitAll()
 
                         // Manager only endpoints
-                        .requestMatchers("/api/v1/users/**").hasRole("MANAGER")
-                        .requestMatchers("/api/v1/zones/**").hasRole("MANAGER")
-                        .requestMatchers("/api/v1/category-zone-mappings/**").hasRole("MANAGER") // Zone Management
+                        .requestMatchers("/v1/users/**").hasRole("MANAGER")
+                        .requestMatchers("/v1/zones/**").hasRole("MANAGER")
+                        .requestMatchers("/v1/category-zone-mappings/**").hasRole("MANAGER") // Zone Management
 
                         // Authenticated endpoints
                         .anyRequest().authenticated())

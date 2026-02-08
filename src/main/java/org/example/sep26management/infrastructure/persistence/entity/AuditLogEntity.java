@@ -16,41 +16,34 @@ public class AuditLogEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "log_id")
+    @Column(name = "audit_id")
     private Long logId;
 
-    @Column(name = "user_id")
-    private Long userId;
+    @Column(name = "entity_name", nullable = false, length = 200)
+    private String entityName;
 
-    @Column(name = "action", nullable = false, length = 100)
-    private String action;
-
-    @Column(name = "entity_type", length = 100)
-    private String entityType;
-
-    @Column(name = "entity_id")
+    @Column(name = "entity_id", nullable = false)
     private Long entityId;
 
-    @Column(name = "description", columnDefinition = "TEXT")
-    private String description;
+    @Column(name = "action", nullable = false, length = 50)
+    private String action;
 
-    @Column(name = "ip_address", length = 50)
-    private String ipAddress;
+    @Column(name = "old_data", columnDefinition = "JSONB")
+    private String oldData;
 
-    @Column(name = "user_agent", columnDefinition = "TEXT")
-    private String userAgent;
+    @Column(name = "new_data", columnDefinition = "JSONB")
+    private String newData;
 
-    @Column(name = "old_value", columnDefinition = "TEXT")
-    private String oldValue;
+    @Column(name = "action_by", nullable = false)
+    private Long actionBy;
 
-    @Column(name = "new_value", columnDefinition = "TEXT")
-    private String newValue;
-
-    @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
+    @Column(name = "action_at", nullable = false, updatable = false)
+    private LocalDateTime actionAt;
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        if (actionAt == null) {
+            actionAt = LocalDateTime.now();
+        }
     }
 }

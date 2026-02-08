@@ -11,7 +11,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-@Repository
+// Temporarily disabled - otps table not available in database
+// TODO: Re-enable when otps table is available
+// @Repository
 public interface OtpJpaRepository extends JpaRepository<OtpEntity, Long> {
 
     @Query("SELECT o FROM OtpEntity o WHERE " +
