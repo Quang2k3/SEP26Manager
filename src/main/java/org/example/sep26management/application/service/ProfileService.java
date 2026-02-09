@@ -6,7 +6,6 @@ import org.example.sep26management.application.dto.request.ChangePasswordRequest
 import org.example.sep26management.application.dto.request.UpdateProfileRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.UserProfileResponse;
-import org.example.sep26management.application.mapper.UserMapper;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
@@ -38,7 +37,6 @@ public class ProfileService {
     private final UserJpaRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
-    private final UserMapper userMapper;
 
     @Value("${file.upload.dir}")
     private String uploadDir;
@@ -48,6 +46,9 @@ public class ProfileService {
 
     private static final List<String> ALLOWED_IMAGE_EXTENSIONS = Arrays.asList("jpg", "jpeg", "png");
 
+    /**
+     * UC-PERS-02: Change Password
+     */
     public ApiResponse<Void> changePassword(
             Long userId,
             ChangePasswordRequest request,
@@ -55,27 +56,32 @@ public class ProfileService {
             String userAgent) {
         log.info("Changing password for user ID: {}", userId);
 
+        // Find user
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
+        // Step 4: Validate current password
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
             throw new BusinessException("Current password is incorrect.");
         }
 
+        // Step 5: Validate new password
+        // 5a: Check if passwords match
         if (!request.getNewPassword().equals(request.getConfirmPassword())) {
             throw new BusinessException("New password and confirmation do not match.");
         }
 
+        // 5c: Check if new password is same as current (BR-PERS-02)
         if (passwordEncoder.matches(request.getNewPassword(), user.getPasswordHash())) {
             throw new BusinessException("New password must be different from current password.");
         }
 
+        // Step 6: Update password
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         user.setPasswordChangedAt(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
-        user.setUpdatedBy(userId);
         userRepository.save(user);
 
+        // Step 7: Log audit
         auditLogService.logAction(
                 userId,
                 "PASSWORD_CHANGE",
@@ -85,11 +91,13 @@ public class ProfileService {
                 ipAddress,
                 userAgent);
 
-        log.info("Password changed successfully for user ID: {}", userId);
-
+        // Step 8: Return success (BR-PERS-04: maintain current session)
         return ApiResponse.success("Password changed successfully");
     }
 
+    /**
+     * UC-PERS-03: View Personal Profile
+     */
     @Transactional(readOnly = true)
     public ApiResponse<UserProfileResponse> getProfile(Long userId) {
         log.info("Fetching profile for user ID: {}", userId);
@@ -124,6 +132,9 @@ public class ProfileService {
         return ApiResponse.success("Profile retrieved successfully", response);
     }
 
+    /**
+     * UC-PERS-04: Update Personal Profile
+     */
     public ApiResponse<UserProfileResponse> updateProfile(
             Long userId,
             UpdateProfileRequest request,
@@ -131,28 +142,38 @@ public class ProfileService {
             String userAgent) {
         log.info("Updating profile for user ID: {}", userId);
 
+        // Step 2: Retrieve current profile
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Unable to load profile information."));
 
-        String oldValues = buildAuditValue(user);
+        // Store old values for audit
+        String oldFullName = user.getFullName();
+        String oldPhone = user.getPhone();
+        String oldGender = user.getGender();
+        String oldAddress = user.getAddress();
+        String oldAvatarUrl = user.getAvatarUrl();
 
+        // Step 4: User modifies data
+        // Step 6: Validate (already done by @Valid annotation in controller)
+
+        // Update basic info
         user.setFullName(request.getFullName());
         user.setPhone(request.getPhone());
         user.setGender(request.getGender());
         user.setDateOfBirth(request.getDateOfBirth());
         user.setAddress(request.getAddress());
-        user.setUpdatedAt(LocalDateTime.now());
         user.setUpdatedBy(userId);
 
+        // Handle avatar upload if provided
         if (request.getAvatar() != null && !request.getAvatar().isEmpty()) {
             String avatarUrl = saveAvatar(request.getAvatar(), userId);
             user.setAvatarUrl(avatarUrl);
         }
 
-        user = userRepository.save(user);
+        // Step 7: Persist changes
+        userRepository.save(user);
 
-        String newValues = buildAuditValue(user);
-
+        // Step 8: Log audit
         auditLogService.logAction(
                 userId,
                 "UPDATE_PROFILE",
@@ -189,16 +210,25 @@ public class ProfileService {
         return ApiResponse.success("Profile updated successfully.", response);
     }
 
+    // ============================================
+    // HELPER METHODS
+    // ============================================
+
     private String saveAvatar(MultipartFile file, Long userId) {
         try {
+            // Step 6b: Avatar Validation
+
+            // Check if file is empty
             if (file.isEmpty()) {
                 throw new BusinessException("The uploaded file is empty.");
             }
 
+            // Check file size (BR-PERS-13)
             if (file.getSize() > maxFileSize) {
                 throw new BusinessException("File size must be less than 5MB");
             }
 
+            // Check file extension
             String originalFilename = file.getOriginalFilename();
             if (originalFilename == null) {
                 throw new BusinessException("Invalid file name");
@@ -206,19 +236,22 @@ public class ProfileService {
 
             String extension = getFileExtension(originalFilename).toLowerCase();
             if (!ALLOWED_IMAGE_EXTENSIONS.contains(extension)) {
-                throw new BusinessException("Please select an image file (jpg, jpeg, png)");
+                throw new BusinessException("Please select an image file");
             }
 
+            // Check content type
             String contentType = file.getContentType();
             if (contentType == null || !contentType.startsWith("image/")) {
                 throw new BusinessException("Please select an image file");
             }
 
+            // Create upload directory if not exists
             Path uploadPath = Paths.get(uploadDir, "avatars");
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
             }
 
+            // Generate unique filename
             String newFilename = String.format("avatar_%d_%s.%s",
                     userId,
                     UUID.randomUUID().toString(),
@@ -226,10 +259,10 @@ public class ProfileService {
 
             Path filePath = uploadPath.resolve(newFilename);
 
+            // Save file
             Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
 
-            log.info("Avatar saved successfully: {}", newFilename);
-
+            // Return relative URL
             return "/uploads/avatars/" + newFilename;
 
         } catch (IOException e) {

@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.request.*;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.LoginResponse;
+import org.example.sep26management.application.dto.response.UserResponse;
 import org.example.sep26management.application.service.AuthService;
 import org.example.sep26management.infrastructure.security.JwtTokenProvider;
 import org.springframework.http.HttpStatus;
@@ -87,20 +88,23 @@ public class AuthController {
          * GET /api/v1/auth/me
          */
         @GetMapping("/me")
-        public ResponseEntity<ApiResponse<Map<String, Object>>> getCurrentUser() {
+        public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser() {
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
-                if (authentication != null && authentication.getDetails() instanceof Map) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> details = (Map<String, Object>) authentication.getDetails();
-
-                        return ResponseEntity.ok(ApiResponse.success(
-                                        "Current user retrieved",
-                                        details));
+                if (authentication == null || !(authentication.getDetails() instanceof Map)) {
+                        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                        .body(ApiResponse.error("Not authenticated"));
                 }
 
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                                .body(ApiResponse.error("Not authenticated"));
+                @SuppressWarnings("unchecked")
+                Map<String, Object> details = (Map<String, Object>) authentication.getDetails();
+                Long userId = (Long) details.get("userId");
+
+                UserResponse user = authService.getCurrentUser(userId);
+
+                return ResponseEntity.ok(ApiResponse.success(
+                                "Current user retrieved successfully",
+                                user));
         }
 
         // ============================================
