@@ -1,7 +1,6 @@
 package org.example.sep26management.infrastructure.security;
 
 import io.jsonwebtoken.*;
-import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.domain.entity.User;
@@ -17,29 +16,22 @@ import java.util.stream.Collectors;
 @Slf4j
 public class JwtTokenProvider {
 
-    @Value("${app.jwt.secret}")
+    @Value("${jwt.secret}")
     private String jwtSecret;
 
-    @Value("${app.jwt.expiration:3600000}")
-    private Long jwtExpiration;
+    @Value("${jwt.expiration-ms}")
+    private long jwtExpirationMs;
 
-    @Value("${app.jwt.remember-me-expiration:604800000}")
-    private Long rememberMeExpiration;
+    @Value("${jwt.remember-me-expiration-ms}")
+    private long jwtRememberMeExpirationMs;
 
-    /**
-     * Decode BASE64 secret key (HS512 requires >= 512 bits)
-     */
     private SecretKey getSigningKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
-
-        // Debug when DEV (optional)
-        log.debug("JWT signing key length (bytes): {}", keyBytes.length);
-
+        byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
     /**
-     * Generate JWT token
+     * Generate JWT token for user
      */
     public String generateToken(User user, boolean rememberMe) {
         Map<String, Object> claims = new HashMap<>();
@@ -52,15 +44,11 @@ public class JwtTokenProvider {
         long expiration = rememberMe ? jwtRememberMeExpirationMs : jwtExpirationMs;
 
         Date now = new Date();
-        Date expiryDate = new Date(
-                now.getTime() + (rememberMe ? rememberMeExpiration : jwtExpiration)
-        );
+        Date expiryDate = new Date(now.getTime() + expiration);
 
         return Jwts.builder()
-                .setSubject(email)
-                .claim("userId", userId)
-                .claim("email", email)
-                .claim("role", role)
+                .setClaims(claims)
+                .setSubject(user.getEmail())
                 .setIssuedAt(now)
                 .setExpiration(expiryDate)
                 .signWith(getSigningKey(), SignatureAlgorithm.HS512)
@@ -68,30 +56,29 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Extract userId from token
+     * Get email from JWT token
      */
-    public Long getUserIdFromToken(String token) {
-        Claims claims = parseClaims(token);
-        Object userIdObj = claims.get("userId");
+    public String getEmailFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
 
-        if (userIdObj instanceof Integer) {
-            return ((Integer) userIdObj).longValue();
-        }
-        if (userIdObj instanceof Long) {
-            return (Long) userIdObj;
-        }
-        if (userIdObj != null) {
-            return Long.parseLong(userIdObj.toString());
-        }
-
-        throw new RuntimeException("UserId not found in JWT token");
+        return claims.getSubject();
     }
 
     /**
-     * Extract email from token
+     * Get user ID from JWT token
      */
-    public String getEmailFromToken(String token) {
-        return parseClaims(token).getSubject();
+    public Long getUserIdFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        return claims.get("userId", Long.class);
     }
 
     /**
@@ -115,12 +102,13 @@ public class JwtTokenProvider {
     /**
      * Validate JWT token
      */
-    public boolean validateToken(String authToken) {
+    public boolean validateToken(String token) {
         try {
-            parseClaims(authToken);
+            Jwts.parserBuilder()
+                    .setSigningKey(getSigningKey())
+                    .build()
+                    .parseClaimsJws(token);
             return true;
-        } catch (SecurityException ex) {
-            log.error("Invalid JWT signature");
         } catch (MalformedJwtException ex) {
             log.error("Invalid JWT token");
         } catch (ExpiredJwtException ex) {
@@ -134,13 +122,15 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Parse JWT claims
+     * Get expiration date from token
      */
-    private Claims parseClaims(String token) {
-        return Jwts.parserBuilder()
+    public Date getExpirationDateFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
                 .setSigningKey(getSigningKey())
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
+
+        return claims.getExpiration();
     }
 }
