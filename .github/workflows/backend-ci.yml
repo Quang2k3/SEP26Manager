@@ -4,12 +4,14 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'backend/**'
+      - 'src/**'
+      - 'pom.xml'
       - '.github/workflows/backend-ci.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'backend/**'
+      - 'src/**'
+      - 'pom.xml'
 
 env:
   JAVA_VERSION: '17'
@@ -22,7 +24,7 @@ jobs:
     
     defaults:
       run:
-        working-directory: ./backend
+        working-directory: .
     
     services:
       postgres:
@@ -77,7 +79,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
-          files: ./backend/target/site/jacoco/jacoco.xml
+          files: ./target/site/jacoco/jacoco.xml
           flags: backend
       
       - name: Build JAR
@@ -87,7 +89,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: spring-boot-jar
-          path: backend/target/*.jar
+          path: target/*.jar
 
   build-docker:
     name: Build & Push Docker Image
@@ -122,7 +124,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          context: .
           file: ./backend/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
