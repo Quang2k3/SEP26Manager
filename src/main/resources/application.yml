@@ -30,15 +30,15 @@ spring:
   mail:
     host: smtp.gmail.com
     port: 587
-    username: ${MAIL_USERNAME:your-email@gmail.com}
-    password: ${MAIL_PASSWORD:your-app-password}
+    username: fake@gmail.com
+    password: fake
     properties:
       mail:
         smtp:
-          auth: true
+          auth: false
           starttls:
-            enable: true
-            required: true
+            enable: false
+            required: false
         transport:
           protocol: smtp
     default-encoding: UTF-8
@@ -47,10 +47,6 @@ spring:
 app:
   default-password: Warehouse@123
 
-jwt:
-  secret: Sep26WarehouseManagementSecretKeyForJWTTokenGeneration2026MinimumLength256BitsRequired
-  expiration-ms: 300000
-  remember-me-expiration-ms: 604800000
 
 otp:
   length: 6
@@ -136,4 +132,9 @@ spring:
 
 logging:
   level:
-    org.example.sep26management: WARN
+    org.example.sep26management: DEBUG
+    org.springframework.security: TRACE
+    org.springframework.web: DEBUG
+    org.hibernate.SQL: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n"

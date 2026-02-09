@@ -41,22 +41,18 @@ public class AuthService {
     private final AuditLogService auditLogService;
     private final UserEntityMapper userEntityMapper; // Add mapper injection
 
-    @Value("${otp.expiration-minutes}")
+    @Value("${otp.expiration-minutes:3}")
     private int otpExpirationMinutes;
 
-    @Value("${otp.max-attempts}")
+    @Value("${otp.max-attempts:5}")
     private int otpMaxAttempts;
 
-    @Value("${otp.resend-limit-per-hour}")
+    @Value("${otp.resend-limit-per-hour:5}")
     private int otpResendLimitPerHour;
 
-    /**
-     * UC-AUTH-01: Login with JWT
-     */
     public LoginResponse login(LoginRequest request, String ipAddress, String userAgent) {
         log.info("Login attempt for email: {}", request.getEmail());
 
-        // Step 4: Verify credentials
         UserEntity user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> {
                     log.warn("Login failed: User not found for email: {}", request.getEmail());
@@ -64,13 +60,11 @@ public class AuthService {
                     return new UnauthorizedException("Invalid account or password.");
                 });
 
-        // Step 5: Check account eligibility (BR-AUTH-01)
         if (!canLogin(user)) {
             auditLogService.logFailedLogin(user.getEmail(), "Account not eligible", ipAddress);
             throw new UnauthorizedException("Account is disabled.");
         }
 
-        // Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             log.warn("Login failed: Invalid password for email: {}, failed attempts: {}",
                     user.getEmail(), user.getFailedLoginAttempts() + 1);
@@ -90,11 +84,10 @@ public class AuthService {
             throw new UnauthorizedException("Invalid account or password.");
         }
 
-        // Reset failed attempts on successful password verification
         user.setFailedLoginAttempts(0);
         user.setLockedUntil(null);
         user.setLastLoginAt(LocalDateTime.now());
-        userRepository.save(user);
+        user = userRepository.save(user);
 
         // Step 7: Generate JWT token using UserEntityMapper
         User domainUser = userEntityMapper.toDomain(user);
@@ -102,10 +95,9 @@ public class AuthService {
                 domainUser,
                 Boolean.TRUE.equals(request.getRememberMe()));
 
-        // Calculate expiration
         long expiresIn = Boolean.TRUE.equals(request.getRememberMe())
-                ? 7 * 24 * 60 * 60 * 1000L // 7 days
-                : 5 * 60 * 1000L; // 5 minutes
+                ? 7 * 24 * 60 * 60 * 1000L
+                : 60 * 60 * 1000L;
 
         auditLogService.logAction(
                 user.getUserId(),
@@ -138,9 +130,6 @@ public class AuthService {
     public ApiResponse<Void> logout(Long userId, String ipAddress, String userAgent) {
         log.info("Logout for user ID: {}", userId);
 
-        // Invalidate session (can be implemented with Redis for token blacklist)
-        // For now, just log the action
-
         auditLogService.logAction(
                 userId,
                 "LOGOUT",
@@ -150,25 +139,63 @@ public class AuthService {
                 ipAddress,
                 userAgent);
 
+        log.info("Logout successful for user ID: {}", userId);
         return ApiResponse.success("Logged out successfully");
     }
 
-    // ============================================
-    // HELPER METHODS
-    // ============================================
+    private LoginResponse handleFirstLogin(UserEntity user, String ipAddress, String userAgent) {
+        String otpCode = generateOtp(user.getEmail(), OtpType.FIRST_LOGIN);
+        emailService.sendOtpEmail(user.getEmail(), otpCode, "First Login Verification");
+
+        auditLogService.logAction(
+                user.getUserId(),
+                "LOGIN_REQUIRES_VERIFICATION",
+                "USER",
+                user.getUserId(),
+                "First login - OTP sent",
+                ipAddress,
+                userAgent,
+                null,
+                null
+        );
+
+        log.info("First login detected - OTP sent to: {}", user.getEmail());
+
+        return LoginResponse.builder()
+                .requiresVerification(true)
+                .user(LoginResponse.UserInfoDTO.builder()
+                        .userId(user.getUserId())
+                        .email(user.getEmail())
+                        .fullName(user.getFullName())
+                        .role(user.getRole())
+                        .build())
+                .build();
+    }
+
+    private void handleFailedLogin(UserEntity user, String ipAddress) {
+        user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
+
+        if (user.getFailedLoginAttempts() >= 5) {
+            user.setStatus(UserStatus.LOCKED);
+            user.setLockedUntil(LocalDateTime.now().plusMinutes(15));
+            userRepository.save(user);
+            auditLogService.logFailedLogin(user.getEmail(), "Account locked due to failed attempts", ipAddress);
+            throw new UnauthorizedException("Account is disabled.");
+        }
+
+        userRepository.save(user);
+        auditLogService.logFailedLogin(user.getEmail(), "Invalid password", ipAddress);
+    }
 
     private boolean canLogin(UserEntity user) {
-        // Check status
         if (user.getStatus() == UserStatus.INACTIVE || user.getStatus() == UserStatus.LOCKED) {
             return false;
         }
 
-        // Check if locked temporarily
         if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
             return false;
         }
 
-        // Check account expiration
         if (Boolean.FALSE.equals(user.getIsPermanent()) &&
                 user.getExpireDate() != null &&
                 user.getExpireDate().isBefore(java.time.LocalDate.now())) {

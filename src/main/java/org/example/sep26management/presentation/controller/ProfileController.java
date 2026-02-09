@@ -26,85 +26,99 @@ public class ProfileController {
 
     private final ProfileService profileService;
 
-    /**
-     * UC-PERS-03: View Personal Profile
-     * GET /api/v1/profile
-     */
     @GetMapping
     public ResponseEntity<ApiResponse<UserProfileResponse>> getProfile() {
-        Long userId = getCurrentUserId();
-        log.info("Fetching profile for user ID: {}", userId);
+        try {
+            Long userId = getCurrentUserId();
+            log.info("Fetching profile for user ID: {}", userId);
 
-        ApiResponse<UserProfileResponse> response = profileService.getProfile(userId);
-        return ResponseEntity.ok(response);
+            ApiResponse<UserProfileResponse> response = profileService.getProfile(userId);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error getting profile: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to get profile: " + e.getMessage()));
+        }
     }
 
-    /**
-     * UC-PERS-04: Update Personal Profile
-     * PUT /api/v1/profile
-     */
     @PutMapping
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
-            @Valid @ModelAttribute UpdateProfileRequest request,
+            @Valid @RequestBody UpdateProfileRequest request,
             HttpServletRequest httpRequest
     ) {
-        Long userId = getCurrentUserId();
-        String ipAddress = getClientIpAddress(httpRequest);
-        String userAgent = httpRequest.getHeader("User-Agent");
+        try {
+            Long userId = getCurrentUserId();
+            String ipAddress = getClientIpAddress(httpRequest);
+            String userAgent = httpRequest.getHeader("User-Agent");
 
-        log.info("Updating profile for user ID: {}", userId);
+            log.info("Updating profile for user ID: {}", userId);
 
-        ApiResponse<UserProfileResponse> response = profileService.updateProfile(
-                userId,
-                request,
-                ipAddress,
-                userAgent
-        );
+            ApiResponse<UserProfileResponse> response = profileService.updateProfile(
+                    userId,
+                    request,
+                    ipAddress,
+                    userAgent
+            );
 
-        return ResponseEntity.ok(response);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error updating profile: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("Failed to update profile: " + e.getMessage()));
+        }
     }
 
-    /**
-     * UC-PERS-02: Change Password
-     * POST /api/v1/profile/change-password
-     */
     @PostMapping("/change-password")
     public ResponseEntity<ApiResponse<Void>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
             HttpServletRequest httpRequest
     ) {
-        Long userId = getCurrentUserId();
-        String ipAddress = getClientIpAddress(httpRequest);
-        String userAgent = httpRequest.getHeader("User-Agent");
+        try {
+            Long userId = getCurrentUserId();
+            String ipAddress = getClientIpAddress(httpRequest);
+            String userAgent = httpRequest.getHeader("User-Agent");
 
-        log.info("Changing password for user ID: {}", userId);
+            log.info("Changing password for user ID: {}", userId);
 
-        ApiResponse<Void> response = profileService.changePassword(
-                userId,
-                request,
-                ipAddress,
-                userAgent
-        );
+            ApiResponse<Void> response = profileService.changePassword(
+                    userId,
+                    request,
+                    ipAddress,
+                    userAgent
+            );
 
-        return ResponseEntity.ok(response);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error changing password: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to change password: " + e.getMessage()));
+        }
     }
-
-    // ============================================
-    // HELPER METHODS
-    // ============================================
 
     private Long getCurrentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
-        if (authentication != null && authentication.getDetails() instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> details = (Map<String, Object>) authentication.getDetails();
-            return (Long) details.get("userId");
+        if (authentication == null) {
+            throw new RuntimeException("Not authenticated");
         }
 
-        throw new RuntimeException("User not authenticated");
-    }
+        Object details = authentication.getDetails();
+        if (details instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> detailsMap = (Map<String, Object>) details;
+            Object userIdObj = detailsMap.get("userId");
 
+            if (userIdObj instanceof Long) {
+                return (Long) userIdObj;
+            } else if (userIdObj instanceof Integer) {
+                return ((Integer) userIdObj).longValue();
+            } else if (userIdObj != null) {
+                return Long.parseLong(userIdObj.toString());
+            }
+        }
+
+        throw new RuntimeException("User ID not found in authentication");
+    }
 
     private String getClientIpAddress(HttpServletRequest request) {
         String xForwardedFor = request.getHeader("X-Forwarded-For");
