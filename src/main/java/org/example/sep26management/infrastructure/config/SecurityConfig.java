@@ -31,22 +31,35 @@ public class SecurityConfig {
 
     @Bean
     public AuthenticationManager authenticationManager(
-            AuthenticationConfiguration authenticationConfiguration
-    ) throws Exception {
+            AuthenticationConfiguration authenticationConfiguration) throws Exception {
         return authenticationConfiguration.getAuthenticationManager();
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(AbstractHttpConfigurer::disable)
-                .cors(AbstractHttpConfigurer::disable)
-                .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                )
+                .cors(cors -> {
+                })
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/**").permitAll()
-                )
+                        // Public endpoints (Auth endpoints)
+                        // Note: context-path is /api, so controller paths start from /v1/...
+                        .requestMatchers(
+                                "/v1/auth/**",
+                                "/v1/health",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/v3/api-docs/**")
+                        .permitAll()
+
+                        // Manager only endpoints
+                        .requestMatchers("/v1/users/**").hasRole("MANAGER")
+                        .requestMatchers("/v1/zones/**").hasRole("MANAGER")
+                        .requestMatchers("/v1/category-zone-mappings/**").hasRole("MANAGER") // Zone Management
+
+                        // Authenticated endpoints
+                        .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

@@ -25,7 +25,9 @@ import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -50,8 +52,7 @@ public class ProfileService {
             Long userId,
             ChangePasswordRequest request,
             String ipAddress,
-            String userAgent
-    ) {
+            String userAgent) {
         log.info("Changing password for user ID: {}", userId);
 
         UserEntity user = userRepository.findById(userId)
@@ -82,10 +83,7 @@ public class ProfileService {
                 userId,
                 "Password changed successfully",
                 ipAddress,
-                userAgent,
-                null,
-                "Password updated"
-        );
+                userAgent);
 
         log.info("Password changed successfully for user ID: {}", userId);
 
@@ -99,9 +97,29 @@ public class ProfileService {
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        UserProfileResponse response = userMapper.toProfileResponse(user);
+        // Extract role codes from user
+        Set<String> roleCodes = user.getRoles() != null
+                ? user.getRoles().stream()
+                        .map(role -> role.getRoleCode())
+                        .collect(Collectors.toSet())
+                : Set.of();
 
-        log.info("Profile retrieved successfully for user: {}", user.getEmail());
+        UserProfileResponse response = UserProfileResponse.builder()
+                .userId(user.getUserId())
+                .email(user.getEmail())
+                .fullName(user.getFullName())
+                .phone(user.getPhone())
+                .gender(user.getGender())
+                .dateOfBirth(user.getDateOfBirth())
+                .address(user.getAddress())
+                .avatarUrl(user.getAvatarUrl())
+                .roleCodes(roleCodes)
+                .status(user.getStatus())
+                .isPermanent(user.getIsPermanent())
+                .expireDate(user.getExpireDate())
+                .lastLoginAt(user.getLastLoginAt())
+                .createdAt(user.getCreatedAt())
+                .build();
 
         return ApiResponse.success("Profile retrieved successfully", response);
     }
@@ -110,8 +128,7 @@ public class ProfileService {
             Long userId,
             UpdateProfileRequest request,
             String ipAddress,
-            String userAgent
-    ) {
+            String userAgent) {
         log.info("Updating profile for user ID: {}", userId);
 
         UserEntity user = userRepository.findById(userId)
@@ -144,13 +161,30 @@ public class ProfileService {
                 "Profile updated",
                 ipAddress,
                 userAgent,
-                oldValues,
-                newValues
-        );
+                buildOldValue(oldFullName, oldPhone, oldGender, oldAddress, oldAvatarUrl),
+                buildNewValue(user.getFullName(), user.getPhone(), user.getGender(),
+                        user.getAddress(), user.getAvatarUrl()));
 
-        log.info("Profile updated successfully for user: {}", user.getEmail());
+        // Extract role codes
+        Set<String> roleCodes = user.getRoles() != null
+                ? user.getRoles().stream()
+                        .map(role -> role.getRoleCode())
+                        .collect(Collectors.toSet())
+                : Set.of();
 
-        UserProfileResponse response = userMapper.toProfileResponse(user);
+        // Build response
+        UserProfileResponse response = UserProfileResponse.builder()
+                .userId(user.getUserId())
+                .email(user.getEmail())
+                .fullName(user.getFullName())
+                .phone(user.getPhone())
+                .gender(user.getGender())
+                .dateOfBirth(user.getDateOfBirth())
+                .address(user.getAddress())
+                .avatarUrl(user.getAvatarUrl())
+                .roleCodes(roleCodes)
+                .status(user.getStatus())
+                .build();
 
         return ApiResponse.success("Profile updated successfully.", response);
     }
@@ -212,19 +246,15 @@ public class ProfileService {
         return "";
     }
 
-    private String buildAuditValue(UserEntity user) {
+    private String buildOldValue(String fullName, String phone, String gender,
+            String address, String avatarUrl) {
         return String.format(
-                "{\"fullName\":\"%s\",\"phone\":\"%s\",\"gender\":\"%s\",\"dateOfBirth\":\"%s\",\"address\":\"%s\",\"avatarUrl\":\"%s\"}",
-                nvl(user.getFullName()),
-                nvl(user.getPhone()),
-                nvl(user.getGender()),
-                user.getDateOfBirth() != null ? user.getDateOfBirth().toString() : "",
-                nvl(user.getAddress()),
-                nvl(user.getAvatarUrl())
-        );
+                "{\"fullName\":\"%s\",\"phone\":\"%s\",\"gender\":\"%s\",\"address\":\"%s\",\"avatarUrl\":\"%s\"}",
+                fullName, phone, gender, address, avatarUrl);
     }
 
-    private String nvl(String value) {
-        return value != null ? value : "";
+    private String buildNewValue(String fullName, String phone, String gender,
+            String address, String avatarUrl) {
+        return buildOldValue(fullName, phone, gender, address, avatarUrl);
     }
 }

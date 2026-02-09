@@ -3,10 +3,14 @@ package org.example.sep26management;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableAsync;
 
+/**
+ * SEP26 Warehouse Management System
+ * Main application entry point
+ */
 @SpringBootApplication
 @EnableJpaRepositories(basePackages = "org.example.sep26management.infrastructure.persistence.repository")
 @EntityScan(basePackages = "org.example.sep26management.infrastructure.persistence.entity")

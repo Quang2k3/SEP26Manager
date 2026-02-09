@@ -2,11 +2,11 @@ package org.example.sep26management.application.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
-import org.example.sep26management.domain.enums.UserRole;
 import org.example.sep26management.domain.enums.UserStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Set;
 
 @Getter
 @Setter
@@ -23,7 +23,7 @@ public class UserProfileResponse {
     private LocalDate dateOfBirth;
     private String address;
     private String avatarUrl;
-    private UserRole role;
+    private Set<String> roleCodes; // Changed from UserRole to Set<String>
     private UserStatus status;
     private Boolean isPermanent;
     private LocalDate expireDate;

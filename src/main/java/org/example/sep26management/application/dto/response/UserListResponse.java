@@ -2,12 +2,12 @@ package org.example.sep26management.application.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
-import org.example.sep26management.domain.enums.UserRole;
 import org.example.sep26management.domain.enums.UserStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 @Getter
 @Setter
@@ -32,7 +32,7 @@ public class UserListResponse {
         private String email;
         private String fullName;
         private String phone;
-        private UserRole role;
+        private Set<String> roleCodes; // Changed from UserRole to Set<String>
         private UserStatus status;
         private Boolean isPermanent;
         private LocalDate expireDate;

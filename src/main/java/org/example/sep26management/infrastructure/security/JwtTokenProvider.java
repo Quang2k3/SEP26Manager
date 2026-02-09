@@ -4,11 +4,14 @@ import io.jsonwebtoken.*;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.domain.entity.User;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
-import java.util.Date;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Component
 @Slf4j
@@ -38,7 +41,16 @@ public class JwtTokenProvider {
     /**
      * Generate JWT token
      */
-    public String generateToken(Long userId, String email, String role, boolean rememberMe) {
+    public String generateToken(User user, boolean rememberMe) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", user.getUserId());
+        claims.put("email", user.getEmail());
+        // Store role codes as comma-separated string or list
+        claims.put("roles", user.getRoleCodes() != null ? String.join(",", user.getRoleCodes()) : "");
+        claims.put("fullName", user.getFullName());
+
+        long expiration = rememberMe ? jwtRememberMeExpirationMs : jwtExpirationMs;
+
         Date now = new Date();
         Date expiryDate = new Date(
                 now.getTime() + (rememberMe ? rememberMeExpiration : jwtExpiration)
@@ -83,10 +95,21 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Extract role from token
+     * Get role codes from JWT token
      */
-    public String getRoleFromToken(String token) {
-        return parseClaims(token).get("role", String.class);
+    public Set<String> getRoleCodesFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        String rolesStr = claims.get("roles", String.class);
+        if (rolesStr == null || rolesStr.isEmpty()) {
+            return new HashSet<>();
+        }
+        return Arrays.stream(rolesStr.split(","))
+                .collect(Collectors.toSet());
     }
 
     /**

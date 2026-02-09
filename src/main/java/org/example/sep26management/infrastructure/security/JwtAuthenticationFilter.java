@@ -15,9 +15,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -28,43 +27,39 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(
-            @NonNull HttpServletRequest request,
-            @NonNull HttpServletResponse response,
-            @NonNull FilterChain filterChain
-    ) throws ServletException, IOException {
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain) throws ServletException, IOException {
 
         try {
             String jwt = getJwtFromRequest(request);
 
-            if (StringUtils.hasText(jwt)) {
-                try {
-                    if (jwtTokenProvider.validateToken(jwt)) {
-                        String email = jwtTokenProvider.getEmailFromToken(jwt);
-                        Long userId = jwtTokenProvider.getUserIdFromToken(jwt);
-                        String role = jwtTokenProvider.getRoleFromToken(jwt);
+            if (StringUtils.hasText(jwt) && jwtTokenProvider.validateToken(jwt)) {
+                String email = jwtTokenProvider.getEmailFromToken(jwt);
+                Long userId = jwtTokenProvider.getUserIdFromToken(jwt);
+                Set<String> roleCodes = jwtTokenProvider.getRoleCodesFromToken(jwt);
 
-                        log.debug("JWT Valid - Email: {}, UserId: {}, Role: {}", email, userId, role);
+                // Create granted authorities from role codes
+                List<SimpleGrantedAuthority> authorities = roleCodes.stream()
+                        .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
+                        .collect(Collectors.toList());
 
-                        UsernamePasswordAuthenticationToken authentication =
-                                new UsernamePasswordAuthenticationToken(
-                                        email,
-                                        null,
-                                        Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + role))
-                                );
+                // Create authentication object
+                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                        email,
+                        null,
+                        authorities);
 
-                        Map<String, Object> details = new HashMap<>();
-                        details.put("userId", userId);
-                        details.put("email", email);
-                        details.put("role", role);
-                        authentication.setDetails(details);
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                // Set user ID as principal for easy access
+                Map<String, Object> details = new HashMap<>();
+                details.put("userId", userId);
+                details.put("email", email);
+                details.put("roles", roleCodes);
+                authentication.setDetails(details);
 
-                        log.debug("Authentication set for user: {} (ID: {})", email, userId);
-                    }
-                } catch (Exception e) {
-                    log.warn("Invalid JWT token: {}", e.getMessage());
-                }
+                SecurityContextHolder.getContext().setAuthentication(authentication);
             }
         } catch (Exception ex) {
             log.error("Error in JWT filter: {}", ex.getMessage());

@@ -6,10 +6,10 @@ spring:
     active: dev
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/sep26
+    url: jdbc:postgresql://localhost:5432/SEP26WMS
     username: postgres
-    password: tranhuyhoang
-
+    password: 123
+    
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10
@@ -18,7 +18,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate  # ✅ Validate against existing database schema
     show-sql: true
     properties:
       hibernate:
@@ -45,12 +45,7 @@ spring:
 
 # Application Configuration
 app:
-  default-password: postgres
-
-  jwt:
-    secret: 9xUc3TNqLOYTH91rKxxXsjkNGaLwwGDXmm6BJiC+9iuNFuAHrWB4XLRcxTADA4mBwdm1Gv+YlQs4dXCOeY1H2w==
-    expiration: 3600000
-    remember-me-expiration: 604800000
+  default-password: Warehouse@123
 
 
 otp:
@@ -77,6 +72,17 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
 
+# Springdoc OpenAPI (Swagger) Configuration
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    operations-sorter: method
+    tags-sorter: alpha
+  show-actuator: false
+
 ---
 # Development Profile
 spring:
@@ -87,7 +93,7 @@ spring:
   jpa:
     show-sql: true
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
 
 logging:
   level:
