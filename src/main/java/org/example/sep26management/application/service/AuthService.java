@@ -39,6 +39,7 @@ public class AuthService {
     private final EmailService emailService;
     private final AuditLogService auditLogService;
     private final UserEntityMapper userEntityMapper; // Add mapper injection
+    private final OtpService otpService; // Add OTP service for email verification
 
     @Value("${otp.expiration-minutes}")
     private int otpExpirationMinutes;
@@ -95,8 +96,39 @@ public class AuthService {
         user.setLastLoginAt(LocalDateTime.now());
         userRepository.save(user);
 
-        // Step 7: Generate JWT token using UserEntityMapper
+        // ===== OTP VERIFICATION CHECK (FIRST LOGIN ONLY) =====
+        // Convert to domain model for business logic
         User domainUser = userEntityMapper.toDomain(user);
+
+        // Check if OTP verification is required (only for first login)
+        if (domainUser.requiresOtpVerification()) {
+            log.info("First login detected, OTP verification required for user: {}", user.getEmail());
+
+            // Generate and send OTP
+            otpService.generateAndSendOtp(user.getEmail());
+
+            // Audit log
+            auditLogService.logAction(
+                    user.getUserId(),
+                    "LOGIN_PENDING_OTP",
+                    "USER",
+                    user.getUserId(),
+                    "First login - OTP verification required",
+                    ipAddress,
+                    userAgent);
+
+            // Return response indicating verification required
+            return LoginResponse.builder()
+                    .requiresVerification(true)
+                    .user(LoginResponse.UserInfoDTO.builder()
+                            .userId(user.getUserId())
+                            .email(user.getEmail())
+                            .fullName(user.getFullName())
+                            .build())
+                    .build();
+        }
+
+        // Step 7: Generate JWT token using UserEntityMapper
         String token = jwtTokenProvider.generateToken(
                 domainUser,
                 Boolean.TRUE.equals(request.getRememberMe()));
@@ -126,6 +158,61 @@ public class AuthService {
                         .email(user.getEmail())
                         .fullName(user.getFullName())
                         .roleCodes(domainUser.getRoleCodes()) // Use from domain model
+                        .avatarUrl(user.getAvatarUrl())
+                        .build())
+                .build();
+    }
+
+    /**
+     * Complete OTP verification after first login and generate JWT token
+     * Called after OTP is successfully verified
+     * 
+     * @param email     User email
+     * @param ipAddress IP address
+     * @param userAgent User agent
+     * @return LoginResponse with JWT token
+     */
+    public LoginResponse completeEmailVerification(String email, String ipAddress, String userAgent) {
+        log.info("Completing OTP verification for first login: {}", email);
+
+        // Find user
+        UserEntity user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UnauthorizedException("User not found"));
+
+        // Mark first login as completed
+        user.setIsFirstLogin(false);
+        userRepository.save(user);
+
+        // Convert to domain model
+        User domainUser = userEntityMapper.toDomain(user);
+
+        // Generate JWT token (default remember me = false for security)
+        String token = jwtTokenProvider.generateToken(domainUser, false);
+        long expiresIn = 5 * 60 * 1000L; // 5 minutes
+
+        // Audit log
+        auditLogService.logAction(
+                user.getUserId(),
+                "FIRST_LOGIN_COMPLETED",
+                "USER",
+                user.getUserId(),
+                "OTP verified successfully, first login completed",
+                ipAddress,
+                userAgent);
+
+        log.info("First login OTP verification completed for user: {}", email);
+
+        // Return full login response
+        return LoginResponse.builder()
+                .token(token)
+                .tokenType("Bearer")
+                .expiresIn(expiresIn)
+                .requiresVerification(false)
+                .user(LoginResponse.UserInfoDTO.builder()
+                        .userId(user.getUserId())
+                        .email(user.getEmail())
+                        .fullName(user.getFullName())
+                        .roleCodes(domainUser.getRoleCodes())
                         .avatarUrl(user.getAvatarUrl())
                         .build())
                 .build();

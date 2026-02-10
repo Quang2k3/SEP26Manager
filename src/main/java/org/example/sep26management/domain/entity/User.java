@@ -85,4 +85,19 @@ public class User {
         this.status = UserStatus.ACTIVE;
         this.isFirstLogin = false;
     }
+
+    /**
+     * Check if user requires OTP verification
+     * Only first-time login requires OTP verification
+     */
+    public boolean requiresOtpVerification() {
+        return Boolean.TRUE.equals(isFirstLogin);
+    }
+
+    /**
+     * Mark OTP verification as completed (first login done)
+     */
+    public void markOtpVerified() {
+        this.isFirstLogin = false;
+    }
 }

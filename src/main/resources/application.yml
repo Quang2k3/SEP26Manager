@@ -6,7 +6,7 @@ spring:
     active: dev
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/SEP26WMS
+    url: jdbc:postgresql://100.85.5.67:5432/SEP26WMS
     username: postgres
     password: 123
     
@@ -27,20 +27,37 @@ spring:
         use_sql_comments: true
     open-in-view: false
 
+  # Redis Configuration for OTP
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+
+  # Gmail SMTP Configuration
   mail:
     host: smtp.gmail.com
     port: 587
-    username: fake@gmail.com
-    password: fake
+    username: ${GMAIL_USERNAME:}
+    password: ${GMAIL_APP_PASSWORD:}
     properties:
       mail:
         smtp:
-          auth: false
+          auth: true
           starttls:
-            enable: false
-            required: false
-        transport:
-          protocol: smtp
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
     default-encoding: UTF-8
 
 # Application Configuration
@@ -56,9 +73,11 @@ jwt:
 # OTP Configuration
 otp:
   length: 6
-  expiration-minutes: 3
-  max-attempts: 5
-  resend-limit-per-hour: 5
+  expiration-minutes: 5
+  resend-cooldown-seconds: 120  # 2 minutes
+  resend-limit-per-hour: 5      # Max 5 OTP requests per hour
+  max-attempts: 3
+  lockout-duration-minutes: 15
 
 file:
   upload:
