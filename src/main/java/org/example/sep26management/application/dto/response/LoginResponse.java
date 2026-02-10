@@ -16,6 +16,7 @@ public class LoginResponse {
     private String tokenType;
     private Long expiresIn;
     private Boolean requiresVerification;
+    private String pendingToken;
     private UserInfoDTO user;
 
     @Getter

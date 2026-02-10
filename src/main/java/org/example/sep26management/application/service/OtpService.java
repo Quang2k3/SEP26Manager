@@ -2,6 +2,7 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -58,14 +59,14 @@ public class OtpService {
         if (isInCooldown(email)) {
             long remainingSeconds = getRemainingCooldownSeconds(email);
             throw new BusinessException(
-                    String.format("Please wait %d seconds before requesting a new OTP", remainingSeconds));
+                    String.format(MessageConstants.OTP_COOLDOWN, remainingSeconds));
         }
 
         // Check if locked out
         if (isLockedOut(email)) {
             long remainingMinutes = getRemainingLockoutMinutes(email);
             throw new BusinessException(
-                    String.format("Too many failed attempts. Please try again in %d minutes", remainingMinutes));
+                    String.format(MessageConstants.OTP_LOCKED, remainingMinutes));
         }
 
         // Generate 6-digit OTP
@@ -107,7 +108,7 @@ public class OtpService {
         if (isLockedOut(email)) {
             long remainingMinutes = getRemainingLockoutMinutes(email);
             throw new BusinessException(
-                    String.format("Too many failed attempts. Please try again in %d minutes", remainingMinutes));
+                    String.format(MessageConstants.OTP_LOCKED, remainingMinutes));
         }
 
         // Get OTP from Redis
@@ -116,7 +117,7 @@ public class OtpService {
 
         if (storedOtp == null) {
             log.warn("OTP not found or expired for email: {}", email);
-            throw new BusinessException("OTP expired or not found. Please request a new OTP");
+            throw new BusinessException(MessageConstants.OTP_EXPIRED);
         }
 
         // Check if OTP matches
