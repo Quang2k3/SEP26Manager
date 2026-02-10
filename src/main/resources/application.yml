@@ -6,7 +6,7 @@ spring:
     active: dev
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/SEP26WMS
+    url: jdbc:postgresql://100.85.5.67:5432/SEP26WMS
     username: postgres
     password: 123
     
