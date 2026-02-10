@@ -2,6 +2,8 @@ package org.example.sep26management.infrastructure.persistence.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 
@@ -28,9 +30,11 @@ public class AuditLogEntity {
     @Column(name = "action", nullable = false, length = 50)
     private String action;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "old_data", columnDefinition = "JSONB")
     private String oldData;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "new_data", columnDefinition = "JSONB")
     private String newData;
 
