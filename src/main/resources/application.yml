@@ -75,6 +75,7 @@ otp:
   length: 6
   expiration-minutes: 5
   resend-cooldown-seconds: 120  # 2 minutes
+  resend-limit-per-hour: 5      # Max 5 OTP requests per hour
   max-attempts: 3
   lockout-duration-minutes: 15
 
