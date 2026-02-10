@@ -1,28 +1,29 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    container_name: sep26manager-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-SEP26WMS}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123}
-      PGDATA: /var/lib/postgresql/data/pgdata
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-SEP26WMS}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - sep26manager-network
+  # PostgreSQL Database - COMMENTED OUT (using local PostgreSQL instead)
+  # Uncomment if you want to use Docker PostgreSQL
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: sep26manager-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: ${POSTGRES_DB:-SEP26WMS}
+  #     POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123}
+  #     PGDATA: /var/lib/postgresql/data/pgdata
+  #   ports:
+  #     - "${POSTGRES_PORT:-5432}:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #     - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-SEP26WMS}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - sep26manager-network
 
   # Redis Cache (for OTP and session management)
   redis:
@@ -50,13 +51,15 @@ services:
     container_name: sep26manager-backend
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILE:-dev}
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-SEP26WMS}
+      # Connect to host machine PostgreSQL
+      # Option 1: Use host IP (more reliable on Windows)
+      SPRING_DATASOURCE_URL: jdbc:postgresql://100.85.5.67:5432/${POSTGRES_DB:-SEP26WMS}
+      # Option 2: Use host.docker.internal (commented out if not working)
+      # SPRING_DATASOURCE_URL: jdbc:postgresql://host.docker.internal:5432/${POSTGRES_DB:-SEP26WMS}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-123}
       
