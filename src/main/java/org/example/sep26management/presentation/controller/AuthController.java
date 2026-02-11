@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.*;
 import org.example.sep26management.application.dto.response.ApiResponse;
@@ -39,7 +40,7 @@ public class AuthController {
                 String ipAddress = getClientIpAddress(httpRequest);
                 String userAgent = httpRequest.getHeader("User-Agent");
 
-                log.info("Login request from IP: {} for email: {}", ipAddress, request.getEmail());
+                log.info(LogMessages.AUTH_LOGIN_REQUEST_FROM_IP, ipAddress, request.getEmail());
 
                 LoginResponse response = authService.login(request, ipAddress, userAgent);
 
@@ -71,7 +72,7 @@ public class AuthController {
                         String ipAddress = getClientIpAddress(httpRequest);
                         String userAgent = httpRequest.getHeader("User-Agent");
 
-                        log.info("Logout request from user ID: {}", userId);
+                        log.info(LogMessages.AUTH_LOGOUT_REQUEST, userId);
 
                         ApiResponse<Void> response = authService.logout(userId, ipAddress, userAgent);
 

@@ -2,6 +2,7 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.infrastructure.persistence.entity.AuditLogEntity;
 import org.example.sep26management.infrastructure.persistence.repository.AuditLogJpaRepository;
 import org.springframework.scheduling.annotation.Async;
@@ -24,8 +25,7 @@ public class AuditLogService {
             Long entityId,
             String description,
             String ipAddress,
-            String userAgent
-    ) {
+            String userAgent) {
         try {
             AuditLogEntity auditLog = AuditLogEntity.builder()
                     .actionBy(userId)
@@ -37,9 +37,9 @@ public class AuditLogService {
                     .build();
 
             auditLogRepository.save(auditLog);
-            log.debug("Audit log saved: {} - {}", action, description);
+            log.debug(LogMessages.AUDIT_SAVED, action, description);
         } catch (Exception e) {
-            log.error("Failed to save audit log", e);
+            log.error(LogMessages.AUDIT_SAVE_FAILED, e);
         }
     }
 
@@ -54,8 +54,7 @@ public class AuditLogService {
             String ipAddress,
             String userAgent,
             String oldValue,
-            String newValue
-    ) {
+            String newValue) {
         try {
             AuditLogEntity auditLog = AuditLogEntity.builder()
                     .actionBy(userId)
@@ -67,9 +66,9 @@ public class AuditLogService {
                     .build();
 
             auditLogRepository.save(auditLog);
-            log.debug("Audit log with values saved: {} - {}", action, description);
+            log.debug(LogMessages.AUDIT_WITH_VALUES_SAVED, action, description);
         } catch (Exception e) {
-            log.error("Failed to save audit log with values", e);
+            log.error(LogMessages.AUDIT_SAVE_WITH_VALUES_FAILED, e);
         }
     }
 
@@ -82,13 +81,14 @@ public class AuditLogService {
                     .entityName("USER")
                     .entityId(0L) // No specific user ID for failed login
                     .actionBy(0L) // No user ID for failed login
-                    .newData("{\"email\":\"" + email + "\",\"reason\":\"" + reason + "\",\"ipAddress\":\"" + ipAddress + "\"}")
+                    .newData("{\"email\":\"" + email + "\",\"reason\":\"" + reason + "\",\"ipAddress\":\"" + ipAddress
+                            + "\"}")
                     .build();
 
             auditLogRepository.save(auditLog);
-            log.debug("Failed login logged: {}", email);
+            log.debug(LogMessages.AUDIT_FAILED_LOGIN_LOGGED, email);
         } catch (Exception e) {
-            log.error("Failed to log failed login", e);
+            log.error(LogMessages.AUDIT_FAILED_LOGIN_LOG_ERROR, e);
         }
     }
 }

@@ -1,6 +1,7 @@
 package org.example.sep26management.infrastructure.exception;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.springframework.http.HttpStatus;
@@ -33,7 +34,7 @@ public class GlobalExceptionHandler {
                         errors.put(fieldName, errorMessage);
                 });
 
-                log.warn("Validation error: {}", errors);
+                log.warn(LogMessages.EXCEPTION_VALIDATION_ERROR, errors);
 
                 String firstError = errors.values().iterator().next();
 
@@ -46,7 +47,7 @@ public class GlobalExceptionHandler {
         public ResponseEntity<ApiResponse<Void>> handleBusinessException(
                         BusinessException ex,
                         WebRequest request) {
-                log.warn("Business exception: {}", ex.getMessage());
+                log.warn(LogMessages.EXCEPTION_BUSINESS, ex.getMessage());
 
                 return ResponseEntity
                                 .badRequest()
@@ -57,7 +58,7 @@ public class GlobalExceptionHandler {
         public ResponseEntity<ApiResponse<Void>> handleUnauthorizedException(
                         UnauthorizedException ex,
                         WebRequest request) {
-                log.warn("Unauthorized access: {}", ex.getMessage());
+                log.warn(LogMessages.EXCEPTION_UNAUTHORIZED, ex.getMessage());
 
                 return ResponseEntity
                                 .status(HttpStatus.UNAUTHORIZED)
@@ -68,7 +69,7 @@ public class GlobalExceptionHandler {
         public ResponseEntity<ApiResponse<Void>> handleAuthenticationException(
                         AuthenticationException ex,
                         WebRequest request) {
-                log.warn("Authentication failed: {}", ex.getMessage());
+                log.warn(LogMessages.EXCEPTION_AUTHENTICATION_FAILED, ex.getMessage());
 
                 return ResponseEntity
                                 .status(HttpStatus.UNAUTHORIZED)
@@ -79,7 +80,7 @@ public class GlobalExceptionHandler {
         public ResponseEntity<ApiResponse<Void>> handleResourceNotFoundException(
                         ResourceNotFoundException ex,
                         WebRequest request) {
-                log.warn("Resource not found: {}", ex.getMessage());
+                log.warn(LogMessages.EXCEPTION_RESOURCE_NOT_FOUND, ex.getMessage());
 
                 return ResponseEntity
                                 .status(HttpStatus.NOT_FOUND)
@@ -90,7 +91,7 @@ public class GlobalExceptionHandler {
         public ResponseEntity<ApiResponse<Void>> handleAccessDeniedException(
                         AccessDeniedException ex,
                         WebRequest request) {
-                log.warn("Access denied: {}", ex.getMessage());
+                log.warn(LogMessages.EXCEPTION_ACCESS_DENIED, ex.getMessage());
 
                 return ResponseEntity
                                 .status(HttpStatus.FORBIDDEN)
@@ -101,7 +102,7 @@ public class GlobalExceptionHandler {
         public ResponseEntity<ApiResponse<Void>> handleForbiddenException(
                         ForbiddenException ex,
                         WebRequest request) {
-                log.warn("Forbidden: {}", ex.getMessage());
+                log.warn(LogMessages.EXCEPTION_FORBIDDEN, ex.getMessage());
 
                 return ResponseEntity
                                 .status(HttpStatus.FORBIDDEN)
@@ -111,7 +112,7 @@ public class GlobalExceptionHandler {
         @ExceptionHandler(MaxUploadSizeExceededException.class)
         public ResponseEntity<ApiResponse<Void>> handleMaxSizeException(
                         MaxUploadSizeExceededException ex) {
-                log.warn("File size exceeded: {}", ex.getMessage());
+                log.warn(LogMessages.EXCEPTION_FILE_SIZE_EXCEEDED, ex.getMessage());
 
                 return ResponseEntity
                                 .status(HttpStatus.PAYLOAD_TOO_LARGE)
@@ -122,7 +123,7 @@ public class GlobalExceptionHandler {
         public ResponseEntity<ApiResponse<Void>> handleGlobalException(
                         Exception ex,
                         WebRequest request) {
-                log.error("Unexpected error occurred", ex);
+                log.error(LogMessages.EXCEPTION_UNEXPECTED, ex);
 
                 return ResponseEntity
                                 .status(HttpStatus.INTERNAL_SERVER_ERROR)

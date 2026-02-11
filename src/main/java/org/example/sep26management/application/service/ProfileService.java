@@ -2,6 +2,7 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.dto.request.ChangePasswordRequest;
 import org.example.sep26management.application.dto.request.UpdateProfileRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
@@ -55,7 +56,7 @@ public class ProfileService {
             ChangePasswordRequest request,
             String ipAddress,
             String userAgent) {
-        log.info("Changing password for user ID: {}", userId);
+        log.info(LogMessages.PROFILE_CHANGING_PASSWORD, userId);
 
         // Find user
         UserEntity user = userRepository.findById(userId)
@@ -101,7 +102,7 @@ public class ProfileService {
      */
     @Transactional(readOnly = true)
     public ApiResponse<UserProfileResponse> getProfile(Long userId) {
-        log.info("Fetching profile for user ID: {}", userId);
+        log.info(LogMessages.PROFILE_FETCHING, userId);
 
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException(MessageConstants.USER_NOT_FOUND));
@@ -141,7 +142,7 @@ public class ProfileService {
             UpdateProfileRequest request,
             String ipAddress,
             String userAgent) {
-        log.info("Updating profile for user ID: {}", userId);
+        log.info(LogMessages.PROFILE_UPDATING, userId);
 
         // Step 2: Retrieve current profile
         UserEntity user = userRepository.findById(userId)
@@ -267,7 +268,7 @@ public class ProfileService {
             return "/uploads/avatars/" + newFilename;
 
         } catch (IOException e) {
-            log.error("Error saving avatar file", e);
+            log.error(LogMessages.PROFILE_ERROR_SAVING_AVATAR, e);
             throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
         }
     }
