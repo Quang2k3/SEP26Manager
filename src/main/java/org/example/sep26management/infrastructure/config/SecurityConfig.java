@@ -45,14 +45,16 @@ public class SecurityConfig {
                         // Public endpoints (Auth endpoints)
                         // Note: context-path is /api, so controller paths start from /v1/...
                         .requestMatchers(
+                                "/api/auth/**",
+                                "/api/v1/auth/**",
                                 "/v1/auth/**",
-                                "/v1/health",
                                 "/actuator/**",
+                                "/api/actuator/**",
                                 "/swagger-ui/**",
-                                "/swagger-ui.html",
-                                "/v3/api-docs/**")
+                                "/api/swagger-ui/**",
+                                "/v3/api-docs/**",
+                                "/api/v3/api-docs/**")
                         .permitAll()
-
                         // Manager only endpoints
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
                         .requestMatchers("/v1/zones/**").hasRole("MANAGER")
