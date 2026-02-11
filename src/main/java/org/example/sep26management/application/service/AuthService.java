@@ -32,7 +32,7 @@ import java.time.LocalDateTime;
 public class AuthService {
 
         private final UserJpaRepository userRepository;
-        // Temporarily disabled - otps table not available in database
+        // Temporarily disabled - otps table not available in databaseFFF
         // Uncomment when otps table is created
         // private final OtpJpaRepository otpRepository;
         private final PasswordEncoder passwordEncoder;
@@ -299,27 +299,4 @@ public class AuthService {
 
                 return true;
         }
-
-        // Temporarily disabled - otps table not available
-        /*
-         * private String generateOtp(String email, OtpType otpType) {
-         * // Generate 6-digit OTP
-         * Random random = new Random();
-         * String otpCode = String.format("%06d", random.nextInt(1000000));
-         * 
-         * // Save to database
-         * OtpEntity otp = OtpEntity.builder()
-         * .email(email)
-         * .otpCode(otpCode)
-         * .otpType(otpType)
-         * .attemptsRemaining(otpMaxAttempts)
-         * .isUsed(false)
-         * .expiresAt(LocalDateTime.now().plusMinutes(otpExpirationMinutes))
-         * .build();
-         * 
-         * otpRepository.save(otp);
-         * 
-         * return otpCode;
-         * }
-         */
 }
