@@ -62,7 +62,7 @@ function Deploy-Backend {
     $maxAttempts = 30
     for ($i = 1; $i -le $maxAttempts; $i++) {
         try {
-            $response = Invoke-WebRequest -Uri "http://localhost:8080/actuator/health" -TimeoutSec 2 -ErrorAction Stop
+            $response = Invoke-WebRequest -Uri "http://localhost:8080/api/actuator/health" -TimeoutSec 2 -ErrorAction Stop
             if ($response.StatusCode -eq 200) {
                 Print-Success "Backend is healthy!"
                 return

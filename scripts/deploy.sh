@@ -68,7 +68,7 @@ deploy_backend() {
     # Wait for backend to be healthy
     print_info "Waiting for backend to be healthy..."
     for i in {1..30}; do
-        if curl -sf http://localhost:8080/actuator/health > /dev/null 2>&1; then
+        if curl -sf http://localhost:8080/api/actuator/health > /dev/null 2>&1; then
             print_success "Backend is healthy!"
             return 0
         fi
