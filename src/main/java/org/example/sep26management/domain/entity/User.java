@@ -54,7 +54,7 @@ public class User {
     }
 
     public boolean isPendingVerification() {
-        return UserStatus.PENDING_VERIFICATION.equals(this.status);
+        return UserStatus.PENDING_VERIFY.equals(this.status);
     }
 
     public boolean isLocked() {
