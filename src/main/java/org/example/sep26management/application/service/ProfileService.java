@@ -6,6 +6,7 @@ import org.example.sep26management.application.dto.request.ChangePasswordRequest
 import org.example.sep26management.application.dto.request.UpdateProfileRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.UserProfileResponse;
+import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
@@ -58,22 +59,22 @@ public class ProfileService {
 
         // Find user
         UserEntity user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(MessageConstants.USER_NOT_FOUND));
 
         // Step 4: Validate current password
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
-            throw new BusinessException("Current password is incorrect.");
+            throw new BusinessException(MessageConstants.PASSWORD_INCORRECT);
         }
 
         // Step 5: Validate new password
         // 5a: Check if passwords match
         if (!request.getNewPassword().equals(request.getConfirmPassword())) {
-            throw new BusinessException("New password and confirmation do not match.");
+            throw new BusinessException(MessageConstants.PASSWORD_MISMATCH);
         }
 
         // 5c: Check if new password is same as current (BR-PERS-02)
         if (passwordEncoder.matches(request.getNewPassword(), user.getPasswordHash())) {
-            throw new BusinessException("New password must be different from current password.");
+            throw new BusinessException(MessageConstants.PASSWORD_SAME);
         }
 
         // Step 6: Update password
@@ -92,7 +93,7 @@ public class ProfileService {
                 userAgent);
 
         // Step 8: Return success (BR-PERS-04: maintain current session)
-        return ApiResponse.success("Password changed successfully");
+        return ApiResponse.success(MessageConstants.PASSWORD_CHANGED);
     }
 
     /**
@@ -103,7 +104,7 @@ public class ProfileService {
         log.info("Fetching profile for user ID: {}", userId);
 
         UserEntity user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(MessageConstants.USER_NOT_FOUND));
 
         // Extract role codes from user
         Set<String> roleCodes = user.getRoles() != null
@@ -129,7 +130,7 @@ public class ProfileService {
                 .createdAt(user.getCreatedAt())
                 .build();
 
-        return ApiResponse.success("Profile retrieved successfully", response);
+        return ApiResponse.success(MessageConstants.PROFILE_SUCCESS, response);
     }
 
     /**
@@ -144,7 +145,7 @@ public class ProfileService {
 
         // Step 2: Retrieve current profile
         UserEntity user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("Unable to load profile information."));
+                .orElseThrow(() -> new ResourceNotFoundException(MessageConstants.PROFILE_LOAD_FAILED));
 
         // Store old values for audit
         String oldFullName = user.getFullName();
@@ -207,7 +208,7 @@ public class ProfileService {
                 .status(user.getStatus())
                 .build();
 
-        return ApiResponse.success("Profile updated successfully.", response);
+        return ApiResponse.success(MessageConstants.PROFILE_UPDATED, response);
     }
 
     // ============================================
@@ -220,29 +221,29 @@ public class ProfileService {
 
             // Check if file is empty
             if (file.isEmpty()) {
-                throw new BusinessException("The uploaded file is empty.");
+                throw new BusinessException(MessageConstants.FILE_EMPTY);
             }
 
             // Check file size (BR-PERS-13)
             if (file.getSize() > maxFileSize) {
-                throw new BusinessException("File size must be less than 5MB");
+                throw new BusinessException(MessageConstants.FILE_TOO_LARGE);
             }
 
             // Check file extension
             String originalFilename = file.getOriginalFilename();
             if (originalFilename == null) {
-                throw new BusinessException("Invalid file name");
+                throw new BusinessException(MessageConstants.FILE_INVALID_NAME);
             }
 
             String extension = getFileExtension(originalFilename).toLowerCase();
             if (!ALLOWED_IMAGE_EXTENSIONS.contains(extension)) {
-                throw new BusinessException("Please select an image file");
+                throw new BusinessException(MessageConstants.FILE_NOT_IMAGE);
             }
 
             // Check content type
             String contentType = file.getContentType();
             if (contentType == null || !contentType.startsWith("image/")) {
-                throw new BusinessException("Please select an image file");
+                throw new BusinessException(MessageConstants.FILE_NOT_IMAGE);
             }
 
             // Create upload directory if not exists
@@ -267,7 +268,7 @@ public class ProfileService {
 
         } catch (IOException e) {
             log.error("Error saving avatar file", e);
-            throw new BusinessException("Failed to save avatar image");
+            throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
         }
     }
 

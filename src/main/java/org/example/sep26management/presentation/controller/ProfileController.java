@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.ChangePasswordRequest;
 import org.example.sep26management.application.dto.request.UpdateProfileRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
@@ -44,8 +45,7 @@ public class ProfileController {
     @PutMapping
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
             @Valid @RequestBody UpdateProfileRequest request,
-            HttpServletRequest httpRequest
-    ) {
+            HttpServletRequest httpRequest) {
         try {
             Long userId = getCurrentUserId();
             String ipAddress = getClientIpAddress(httpRequest);
@@ -57,8 +57,7 @@ public class ProfileController {
                     userId,
                     request,
                     ipAddress,
-                    userAgent
-            );
+                    userAgent);
 
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -71,8 +70,7 @@ public class ProfileController {
     @PostMapping("/change-password")
     public ResponseEntity<ApiResponse<Void>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
-            HttpServletRequest httpRequest
-    ) {
+            HttpServletRequest httpRequest) {
         try {
             Long userId = getCurrentUserId();
             String ipAddress = getClientIpAddress(httpRequest);
@@ -84,8 +82,7 @@ public class ProfileController {
                     userId,
                     request,
                     ipAddress,
-                    userAgent
-            );
+                    userAgent);
 
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -99,7 +96,7 @@ public class ProfileController {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
         if (authentication == null) {
-            throw new RuntimeException("Not authenticated");
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
         }
 
         Object details = authentication.getDetails();
@@ -117,7 +114,7 @@ public class ProfileController {
             }
         }
 
-        throw new RuntimeException("User ID not found in authentication");
+        throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
     }
 
     private String getClientIpAddress(HttpServletRequest request) {

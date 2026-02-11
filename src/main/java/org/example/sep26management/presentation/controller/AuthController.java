@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.*;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.LoginResponse;
@@ -44,12 +45,12 @@ public class AuthController {
 
                 if (Boolean.TRUE.equals(response.getRequiresVerification())) {
                         return ResponseEntity.ok(ApiResponse.success(
-                                        "Verification required. OTP has been sent to your email.",
+                                        MessageConstants.VERIFICATION_REQUIRED,
                                         response));
                 }
 
                 return ResponseEntity.ok(ApiResponse.success(
-                                "Login successful",
+                                MessageConstants.LOGIN_SUCCESS,
                                 response));
         }
 
@@ -80,7 +81,7 @@ public class AuthController {
                         return ResponseEntity.ok(response);
                 }
 
-                return ResponseEntity.ok(ApiResponse.success("Logged out successfully"));
+                return ResponseEntity.ok(ApiResponse.success(MessageConstants.LOGOUT_SUCCESS));
         }
 
         /**
@@ -93,7 +94,7 @@ public class AuthController {
 
                 if (authentication == null || !(authentication.getDetails() instanceof Map)) {
                         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                                        .body(ApiResponse.error("Not authenticated"));
+                                        .body(ApiResponse.error(MessageConstants.NOT_AUTHENTICATED));
                 }
 
                 @SuppressWarnings("unchecked")
@@ -103,7 +104,7 @@ public class AuthController {
                 UserResponse user = authService.getCurrentUser(userId);
 
                 return ResponseEntity.ok(ApiResponse.success(
-                                "Current user retrieved successfully",
+                                MessageConstants.CURRENT_USER_SUCCESS,
                                 user));
         }
 

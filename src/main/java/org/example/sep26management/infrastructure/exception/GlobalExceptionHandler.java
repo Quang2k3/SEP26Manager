@@ -1,6 +1,7 @@
 package org.example.sep26management.infrastructure.exception;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,119 +22,110 @@ import java.util.Map;
 @Slf4j
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiResponse<Map<String, String>>> handleValidationExceptions(
-            MethodArgumentNotValidException ex
-    ) {
-        Map<String, String> errors = new HashMap<>();
+        @ExceptionHandler(MethodArgumentNotValidException.class)
+        public ResponseEntity<ApiResponse<Map<String, String>>> handleValidationExceptions(
+                        MethodArgumentNotValidException ex) {
+                Map<String, String> errors = new HashMap<>();
 
-        ex.getBindingResult().getAllErrors().forEach((error) -> {
-            String fieldName = ((FieldError) error).getField();
-            String errorMessage = error.getDefaultMessage();
-            errors.put(fieldName, errorMessage);
-        });
+                ex.getBindingResult().getAllErrors().forEach((error) -> {
+                        String fieldName = ((FieldError) error).getField();
+                        String errorMessage = error.getDefaultMessage();
+                        errors.put(fieldName, errorMessage);
+                });
 
-        log.warn("Validation error: {}", errors);
+                log.warn("Validation error: {}", errors);
 
-        String firstError = errors.values().iterator().next();
+                String firstError = errors.values().iterator().next();
 
-        return ResponseEntity
-                .badRequest()
-                .body(ApiResponse.error(firstError));
-    }
+                return ResponseEntity
+                                .badRequest()
+                                .body(ApiResponse.error(firstError));
+        }
 
-    @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<ApiResponse<Void>> handleBusinessException(
-            BusinessException ex,
-            WebRequest request
-    ) {
-        log.warn("Business exception: {}", ex.getMessage());
+        @ExceptionHandler(BusinessException.class)
+        public ResponseEntity<ApiResponse<Void>> handleBusinessException(
+                        BusinessException ex,
+                        WebRequest request) {
+                log.warn("Business exception: {}", ex.getMessage());
 
-        return ResponseEntity
-                .badRequest()
-                .body(ApiResponse.error(ex.getMessage()));
-    }
+                return ResponseEntity
+                                .badRequest()
+                                .body(ApiResponse.error(ex.getMessage()));
+        }
 
-    @ExceptionHandler(UnauthorizedException.class)
-    public ResponseEntity<ApiResponse<Void>> handleUnauthorizedException(
-            UnauthorizedException ex,
-            WebRequest request
-    ) {
-        log.warn("Unauthorized access: {}", ex.getMessage());
+        @ExceptionHandler(UnauthorizedException.class)
+        public ResponseEntity<ApiResponse<Void>> handleUnauthorizedException(
+                        UnauthorizedException ex,
+                        WebRequest request) {
+                log.warn("Unauthorized access: {}", ex.getMessage());
 
-        return ResponseEntity
-                .status(HttpStatus.UNAUTHORIZED)
-                .body(ApiResponse.error(ex.getMessage()));
-    }
+                return ResponseEntity
+                                .status(HttpStatus.UNAUTHORIZED)
+                                .body(ApiResponse.error(ex.getMessage()));
+        }
 
-    @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<ApiResponse<Void>> handleAuthenticationException(
-            AuthenticationException ex,
-            WebRequest request
-    ) {
-        log.warn("Authentication failed: {}", ex.getMessage());
+        @ExceptionHandler(AuthenticationException.class)
+        public ResponseEntity<ApiResponse<Void>> handleAuthenticationException(
+                        AuthenticationException ex,
+                        WebRequest request) {
+                log.warn("Authentication failed: {}", ex.getMessage());
 
-        return ResponseEntity
-                .status(HttpStatus.UNAUTHORIZED)
-                .body(ApiResponse.error("Authentication failed"));
-    }
+                return ResponseEntity
+                                .status(HttpStatus.UNAUTHORIZED)
+                                .body(ApiResponse.error(MessageConstants.AUTH_FAILED));
+        }
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ApiResponse<Void>> handleResourceNotFoundException(
-            ResourceNotFoundException ex,
-            WebRequest request
-    ) {
-        log.warn("Resource not found: {}", ex.getMessage());
+        @ExceptionHandler(ResourceNotFoundException.class)
+        public ResponseEntity<ApiResponse<Void>> handleResourceNotFoundException(
+                        ResourceNotFoundException ex,
+                        WebRequest request) {
+                log.warn("Resource not found: {}", ex.getMessage());
 
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(ApiResponse.error(ex.getMessage()));
-    }
+                return ResponseEntity
+                                .status(HttpStatus.NOT_FOUND)
+                                .body(ApiResponse.error(ex.getMessage()));
+        }
 
-    @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<ApiResponse<Void>> handleAccessDeniedException(
-            AccessDeniedException ex,
-            WebRequest request
-    ) {
-        log.warn("Access denied: {}", ex.getMessage());
+        @ExceptionHandler(AccessDeniedException.class)
+        public ResponseEntity<ApiResponse<Void>> handleAccessDeniedException(
+                        AccessDeniedException ex,
+                        WebRequest request) {
+                log.warn("Access denied: {}", ex.getMessage());
 
-        return ResponseEntity
-                .status(HttpStatus.FORBIDDEN)
-                .body(ApiResponse.error("You do not have permission to perform this action!"));
-    }
+                return ResponseEntity
+                                .status(HttpStatus.FORBIDDEN)
+                                .body(ApiResponse.error(MessageConstants.ACCESS_DENIED));
+        }
 
-    @ExceptionHandler(ForbiddenException.class)
-    public ResponseEntity<ApiResponse<Void>> handleForbiddenException(
-            ForbiddenException ex,
-            WebRequest request
-    ) {
-        log.warn("Forbidden: {}", ex.getMessage());
+        @ExceptionHandler(ForbiddenException.class)
+        public ResponseEntity<ApiResponse<Void>> handleForbiddenException(
+                        ForbiddenException ex,
+                        WebRequest request) {
+                log.warn("Forbidden: {}", ex.getMessage());
 
-        return ResponseEntity
-                .status(HttpStatus.FORBIDDEN)
-                .body(ApiResponse.error(ex.getMessage()));
-    }
+                return ResponseEntity
+                                .status(HttpStatus.FORBIDDEN)
+                                .body(ApiResponse.error(ex.getMessage()));
+        }
 
-    @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ResponseEntity<ApiResponse<Void>> handleMaxSizeException(
-            MaxUploadSizeExceededException ex
-    ) {
-        log.warn("File size exceeded: {}", ex.getMessage());
+        @ExceptionHandler(MaxUploadSizeExceededException.class)
+        public ResponseEntity<ApiResponse<Void>> handleMaxSizeException(
+                        MaxUploadSizeExceededException ex) {
+                log.warn("File size exceeded: {}", ex.getMessage());
 
-        return ResponseEntity
-                .status(HttpStatus.PAYLOAD_TOO_LARGE)
-                .body(ApiResponse.error("File size must be less than 5MB"));
-    }
+                return ResponseEntity
+                                .status(HttpStatus.PAYLOAD_TOO_LARGE)
+                                .body(ApiResponse.error(MessageConstants.FILE_TOO_LARGE));
+        }
 
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleGlobalException(
-            Exception ex,
-            WebRequest request
-    ) {
-        log.error("Unexpected error occurred", ex);
+        @ExceptionHandler(Exception.class)
+        public ResponseEntity<ApiResponse<Void>> handleGlobalException(
+                        Exception ex,
+                        WebRequest request) {
+                log.error("Unexpected error occurred", ex);
 
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.error("An unexpected error occurred. Please try again later."));
-    }
+                return ResponseEntity
+                                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                .body(ApiResponse.error(MessageConstants.UNEXPECTED_ERROR));
+        }
 }

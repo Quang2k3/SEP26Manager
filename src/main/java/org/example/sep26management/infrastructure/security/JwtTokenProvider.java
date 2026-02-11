@@ -122,6 +122,52 @@ public class JwtTokenProvider {
     }
 
     /**
+     * Generate a short-lived pending token for OTP verification.
+     * This token carries the user's email and expires in 10 minutes.
+     *
+     * @param email User email
+     * @return Pending JWT token
+     */
+    public String generatePendingToken(String email) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("type", "PENDING_OTP");
+
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + 10 * 60 * 1000L); // 10 minutes
+
+        return Jwts.builder()
+                .setClaims(claims)
+                .setSubject(email)
+                .setIssuedAt(now)
+                .setExpiration(expiryDate)
+                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+                .compact();
+    }
+
+    /**
+     * Extract email from a pending OTP token.
+     * Validates that the token type is PENDING_OTP.
+     *
+     * @param token Pending token
+     * @return Email from the token
+     * @throws JwtException if token is invalid, expired, or not a pending token
+     */
+    public String getEmailFromPendingToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        String type = claims.get("type", String.class);
+        if (!"PENDING_OTP".equals(type)) {
+            throw new JwtException("Invalid token type");
+        }
+
+        return claims.getSubject();
+    }
+
+    /**
      * Get expiration date from token
      */
     public Date getExpirationDateFromToken(String token) {

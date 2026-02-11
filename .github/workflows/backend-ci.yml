@@ -42,7 +42,7 @@ jobs:
           --health-cmd "pg_isready -U test -d sep26manager_test"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
     steps:
       - name: Checkout code
@@ -55,6 +55,35 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        env:
+          PGPASSWORD: test
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U test -d sep26manager_test && break
+            sleep 2
+          done
+
+      # OPTIONAL but safe: schema.sql của bạn có pgcrypto/uuid-ossp thì sẽ cần.
+      - name: Create extensions (optional)
+        env:
+          PGPASSWORD: test
+        run: |
+          psql -h localhost -p 5432 -U test -d sep26manager_test -c "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";"
+          psql -h localhost -p 5432 -U test -d sep26manager_test -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
+
+      - name: Import schema.sql (DB-first)
+        env:
+          PGPASSWORD: test
+        run: |
+          test -f backend/migrations/schema.sql
+          psql -h localhost -p 5432 -U test -d sep26manager_test -f backend/migrations/schema.sql
+
       - name: Build (compile/package without tests)
         run: mvn -B clean package -DskipTests
 
@@ -64,6 +93,7 @@ jobs:
           SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/sep26manager_test
           SPRING_DATASOURCE_USERNAME: test
           SPRING_DATASOURCE_PASSWORD: test
+          SPRING_JPA_HIBERNATE_DDL_AUTO: validate
 
       - name: Run integration tests
         run: mvn -B verify -Pintegration-tests
@@ -72,6 +102,7 @@ jobs:
           SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/sep26manager_test
           SPRING_DATASOURCE_USERNAME: test
           SPRING_DATASOURCE_PASSWORD: test
+          SPRING_JPA_HIBERNATE_DDL_AUTO: validate
 
       - name: Generate test coverage
         run: mvn -B jacoco:report
