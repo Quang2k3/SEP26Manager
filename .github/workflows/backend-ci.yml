@@ -165,33 +165,30 @@ jobs:
 
   deploy:
     name: Deploy to Server
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-docker
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd /opt/sep26manager
-            docker-compose pull backend
-            docker-compose up -d backend
-            docker system prune -f
+      - name: Pull latest Docker image
+        run: docker pull quangnphe/sep26manager-backend:latest
+
+      - name: Restart backend container
+        working-directory: C:\Users\Public\Documents\ProjectSEP26\SEP26Manager
+        run: |
+          docker-compose pull backend
+          docker-compose up -d backend
+
+      - name: Cleanup old images
+        run: docker image prune -f
 
       - name: Verify deployment
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            sleep 10
-            curl -f http://localhost:8080/actuator/health || exit 1
-
-      - name: Notify deployment
-        if: success()
-        run: echo "✅ Backend deployed successfully!"
+        run: |
+          Start-Sleep -Seconds 15
+          $response = Invoke-WebRequest -Uri http://localhost:8080/actuator/health -UseBasicParsing -ErrorAction Stop
+          if ($response.StatusCode -eq 200) {
+            Write-Host "✅ Backend deployed successfully!"
+          } else {
+            Write-Error "❌ Health check failed"
+            exit 1
+          }
