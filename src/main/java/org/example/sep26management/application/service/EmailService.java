@@ -2,6 +2,9 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import java.util.concurrent.CompletableFuture;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -19,20 +22,35 @@ public class EmailService {
     private String fromEmail;
 
     @Async
-    public void sendOtpEmail(String toEmail, String otpCode, String purpose) {
+    public CompletableFuture<Boolean> sendOtpEmail(String toEmail, String otpCode, String purpose) {
+        String from = (fromEmail == null) ? "" : fromEmail.trim();
+        String to = (toEmail == null) ? "" : toEmail.trim();
+
+        if (from.isEmpty()) {
+            log.error("spring.mail.username is empty. Check mail config/env. fromEmail='{}'", fromEmail);
+            return CompletableFuture.completedFuture(false);
+        }
+        if (to.isEmpty()) {
+            log.error("toEmail is empty");
+            return CompletableFuture.completedFuture(false);
+        }
+
         try {
             SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(toEmail);
+            message.setFrom(from);
+            message.setTo(to);
             message.setSubject("Warehouse Management - " + purpose);
             message.setText(buildOtpEmailBody(otpCode, purpose));
 
             mailSender.send(message);
-            log.info("OTP email sent successfully to: {}", toEmail);
+            log.info("OTP email sent successfully to: {}", to);
+            return CompletableFuture.completedFuture(true);
         } catch (Exception e) {
-            // Chỉ log error, KHÔNG throw exception
-            log.error("Failed to send OTP email to: {} - Error: {}", toEmail, e.getMessage());
-            log.warn("OTP code for testing: {}", otpCode); // For testing without real email
+            // Log stacktrace để thấy nguyên nhân thật (đừng chỉ e.getMessage)
+            log.error("Failed to send OTP email to: {}", to, e);
+            // Bạn có thể giữ log OTP để test, nhưng hiểu là FAIL
+            log.warn("OTP code for testing: {}", otpCode);
+            return CompletableFuture.completedFuture(false);
         }
     }
 
@@ -43,22 +61,24 @@ public class EmailService {
      * @param toEmail Recipient email address
      * @param otpCode 6-digit OTP code
      */
-    @Async
-    public void sendOtpEmail(String toEmail, String otpCode) {
-        try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(toEmail);
-            message.setSubject("Email Verification - Your OTP Code");
-            message.setText(buildEmailVerificationOtpBody(otpCode));
+    // @Async
+    // public void sendOtpEmail(String toEmail, String otpCode) {
+    // try {
+    // SimpleMailMessage message = new SimpleMailMessage();
+    // message.setFrom(fromEmail);
+    // message.setTo(toEmail);
+    // message.setSubject("Email Verification - Your OTP Code");
+    // message.setText(buildEmailVerificationOtpBody(otpCode));
 
-            mailSender.send(message);
-            log.info("Email verification OTP sent successfully to: {}", toEmail);
-        } catch (Exception e) {
-            log.error("Failed to send email verification OTP to: {} - Error: {}", toEmail, e.getMessage());
-            log.warn("OTP code for testing: {}", otpCode); // For testing without real email
-        }
-    }
+    // mailSender.send(message);
+    // log.info("Email verification OTP sent successfully to: {}", toEmail);
+    // } catch (Exception e) {
+    // log.error("Failed to send email verification OTP to: {} - Error: {}",
+    // toEmail, e.getMessage());
+    // log.warn("OTP code for testing: {}", otpCode); // For testing without real
+    // email
+    // }
+    // }
 
     @Async
     public void sendWelcomeEmail(String toEmail, String tempPassword, String role) {
