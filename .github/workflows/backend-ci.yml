@@ -184,11 +184,11 @@ jobs:
 
       - name: Verify deployment
         run: |
-          Start-Sleep -Seconds 15
-          $response = Invoke-WebRequest -Uri http://localhost:8080/actuator/health -UseBasicParsing -ErrorAction Stop
-          if ($response.StatusCode -eq 200) {
+          Start-Sleep -Seconds 20
+          try {
+            Invoke-WebRequest -Uri http://localhost:8080/api/actuator/health -UseBasicParsing | Out-Null
             Write-Host "✅ Backend deployed successfully!"
-          } else {
-            Write-Error "❌ Health check failed"
+          } catch {
+            Write-Error "❌ Health check failed: $_"
             exit 1
           }
