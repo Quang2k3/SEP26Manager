@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.ResendOtpRequest;
 import org.example.sep26management.application.dto.request.VerifyOtpRequest;
@@ -53,18 +54,18 @@ public class OtpController {
                 try {
                         email = jwtTokenProvider.getEmailFromPendingToken(request.getPendingToken());
                 } catch (JwtException e) {
-                        log.warn("Invalid pending token for OTP verification: {}", e.getMessage());
+                        log.warn(LogMessages.OTP_CONTROLLER_INVALID_PENDING_TOKEN, e.getMessage());
                         return ResponseEntity.badRequest().body(
                                         ApiResponse.error(MessageConstants.INVALID_PENDING_TOKEN));
                 }
 
-                log.info("OTP verification request for email: {}", email);
+                log.info(LogMessages.OTP_CONTROLLER_VERIFICATION_REQUEST, email);
 
                 // Verify OTP
                 boolean isValid = otpService.verifyOtp(email, request.getOtp());
 
                 if (!isValid) {
-                        log.warn("Invalid OTP provided for email: {}", email);
+                        log.warn(LogMessages.OTP_CONTROLLER_INVALID_OTP, email);
                         return ResponseEntity.badRequest().body(
                                         ApiResponse.error(MessageConstants.OTP_INVALID));
                 }
@@ -79,7 +80,7 @@ public class OtpController {
                                 ipAddress,
                                 userAgent);
 
-                log.info("Email verification successful for: {}", email);
+                log.info(LogMessages.OTP_CONTROLLER_VERIFICATION_SUCCESS, email);
 
                 return ResponseEntity.ok(ApiResponse.success(
                                 MessageConstants.OTP_VERIFIED,
@@ -105,16 +106,16 @@ public class OtpController {
                 try {
                         email = jwtTokenProvider.getEmailFromPendingToken(request.getPendingToken());
                 } catch (JwtException e) {
-                        log.warn("Invalid pending token for OTP resend: {}", e.getMessage());
+                        log.warn(LogMessages.OTP_CONTROLLER_INVALID_PENDING_TOKEN_RESEND, e.getMessage());
                         return ResponseEntity.badRequest().body(
                                         ApiResponse.error(MessageConstants.INVALID_PENDING_TOKEN));
                 }
 
-                log.info("OTP resend request for email: {}", email);
+                log.info(LogMessages.OTP_CONTROLLER_RESEND_REQUEST, email);
 
                 otpService.generateAndSendOtp(email);
 
-                log.info("OTP resent successfully to: {}", email);
+                log.info(LogMessages.OTP_CONTROLLER_RESEND_SUCCESS, email);
 
                 return ResponseEntity.ok(ApiResponse.success(
                                 MessageConstants.OTP_RESENT));

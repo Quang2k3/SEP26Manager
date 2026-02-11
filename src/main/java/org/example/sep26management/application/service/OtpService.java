@@ -2,6 +2,7 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,7 +54,7 @@ public class OtpService {
      * @throws BusinessException if in cooldown period or locked out
      */
     public void generateAndSendOtp(String email) {
-        log.info("Generating OTP for email: {}", email);
+        log.info(LogMessages.OTP_GENERATING, email);
 
         // Check if in cooldown period
         if (isInCooldown(email)) {
@@ -71,7 +72,7 @@ public class OtpService {
 
         // Generate 6-digit OTP
         String otp = generateOtp();
-        log.debug("Generated OTP: {} for email: {}", otp, email);
+        log.debug(LogMessages.OTP_GENERATED, otp, email);
 
         // Store OTP in Redis with TTL
         String otpKey = OTP_PREFIX + email;
@@ -79,7 +80,7 @@ public class OtpService {
                 otpKey,
                 otp,
                 Duration.ofMinutes(otpExpirationMinutes));
-        log.info("OTP stored in Redis with TTL {} minutes", otpExpirationMinutes);
+        log.info(LogMessages.OTP_STORED_REDIS, otpExpirationMinutes);
 
         // Reset failed attempts counter
         resetAttempts(email);
@@ -88,9 +89,9 @@ public class OtpService {
         setCooldown(email);
 
         // Send OTP via email
-        emailService.sendOtpEmail(email, otp);
+        emailService.sendOtpEmail(email, otp, "Email Verification");
 
-        log.info("OTP sent successfully to email: {}", email);
+        log.info(LogMessages.OTP_SENT_SUCCESS, email);
     }
 
     /**
@@ -102,7 +103,7 @@ public class OtpService {
      * @throws BusinessException if OTP expired, not found, or locked out
      */
     public boolean verifyOtp(String email, String inputOtp) {
-        log.info("Verifying OTP for email: {}", email);
+        log.info(LogMessages.OTP_VERIFYING, email);
 
         // Check if locked out
         if (isLockedOut(email)) {
@@ -116,19 +117,19 @@ public class OtpService {
         String storedOtp = (String) redisTemplate.opsForValue().get(otpKey);
 
         if (storedOtp == null) {
-            log.warn("OTP not found or expired for email: {}", email);
+            log.warn(LogMessages.OTP_NOT_FOUND_OR_EXPIRED, email);
             throw new BusinessException(MessageConstants.OTP_EXPIRED);
         }
 
         // Check if OTP matches
         if (!storedOtp.equals(inputOtp)) {
-            log.warn("Invalid OTP attempt for email: {}", email);
+            log.warn(LogMessages.OTP_INVALID_ATTEMPT, email);
             incrementAttempts(email);
             return false;
         }
 
         // OTP correct - cleanup all Redis keys
-        log.info("OTP verified successfully for email: {}", email);
+        log.info(LogMessages.OTP_VERIFIED_SUCCESS, email);
         redisTemplate.delete(otpKey);
         redisTemplate.delete(OTP_ATTEMPTS_PREFIX + email);
         redisTemplate.delete(OTP_COOLDOWN_PREFIX + email);
@@ -173,7 +174,7 @@ public class OtpService {
                 key,
                 "1",
                 Duration.ofSeconds(resendCooldownSeconds));
-        log.debug("Cooldown set for {} seconds", resendCooldownSeconds);
+        log.debug(LogMessages.OTP_COOLDOWN_SET, resendCooldownSeconds);
     }
 
     /**
@@ -185,13 +186,12 @@ public class OtpService {
         Long attempts = redisTemplate.opsForValue().increment(key);
 
         if (attempts != null) {
-            log.debug("Failed OTP attempts for {}: {}/{}", email, attempts, maxAttempts);
+            log.debug(LogMessages.OTP_FAILED_ATTEMPTS, email, attempts, maxAttempts);
 
             if (attempts >= maxAttempts) {
                 // Lock out for configured duration
                 redisTemplate.expire(key, Duration.ofMinutes(lockoutDurationMinutes));
-                log.warn("Email {} locked out for {} minutes due to {} failed attempts",
-                        email, lockoutDurationMinutes, attempts);
+                log.warn(LogMessages.OTP_EMAIL_LOCKED_OUT, email, lockoutDurationMinutes, attempts);
             } else {
                 // Set expiration to match OTP TTL
                 redisTemplate.expire(key, Duration.ofMinutes(otpExpirationMinutes));
@@ -205,7 +205,7 @@ public class OtpService {
     private void resetAttempts(String email) {
         String key = OTP_ATTEMPTS_PREFIX + email;
         redisTemplate.delete(key);
-        log.debug("Reset failed attempts for email: {}", email);
+        log.debug(LogMessages.OTP_RESET_FAILED_ATTEMPTS, email);
     }
 
     /**

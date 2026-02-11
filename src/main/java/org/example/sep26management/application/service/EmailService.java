@@ -2,6 +2,10 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import java.util.concurrent.CompletableFuture;
+
+import org.example.sep26management.application.constants.LogMessages;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -19,20 +23,35 @@ public class EmailService {
     private String fromEmail;
 
     @Async
-    public void sendOtpEmail(String toEmail, String otpCode, String purpose) {
+    public CompletableFuture<Boolean> sendOtpEmail(String toEmail, String otpCode, String purpose) {
+        String from = (fromEmail == null) ? "" : fromEmail.trim();
+        String to = (toEmail == null) ? "" : toEmail.trim();
+
+        if (from.isEmpty()) {
+            log.error(LogMessages.EMAIL_FROM_EMPTY, fromEmail);
+            return CompletableFuture.completedFuture(false);
+        }
+        if (to.isEmpty()) {
+            log.error(LogMessages.EMAIL_TO_EMPTY);
+            return CompletableFuture.completedFuture(false);
+        }
+
         try {
             SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(toEmail);
+            message.setFrom(from);
+            message.setTo(to);
             message.setSubject("Warehouse Management - " + purpose);
             message.setText(buildOtpEmailBody(otpCode, purpose));
 
             mailSender.send(message);
-            log.info("OTP email sent successfully to: {}", toEmail);
+            log.info(LogMessages.EMAIL_OTP_SENT_SUCCESS, to);
+            return CompletableFuture.completedFuture(true);
         } catch (Exception e) {
-            // Chỉ log error, KHÔNG throw exception
-            log.error("Failed to send OTP email to: {} - Error: {}", toEmail, e.getMessage());
-            log.warn("OTP code for testing: {}", otpCode); // For testing without real email
+            // Log stacktrace để thấy nguyên nhân thật (đừng chỉ e.getMessage)
+            log.error(LogMessages.EMAIL_OTP_SEND_FAILED, to, e);
+            // Bạn có thể giữ log OTP để test, nhưng hiểu là FAIL
+            log.warn(LogMessages.EMAIL_OTP_CODE_FOR_TESTING, otpCode);
+            return CompletableFuture.completedFuture(false);
         }
     }
 
@@ -43,22 +62,24 @@ public class EmailService {
      * @param toEmail Recipient email address
      * @param otpCode 6-digit OTP code
      */
-    @Async
-    public void sendOtpEmail(String toEmail, String otpCode) {
-        try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(toEmail);
-            message.setSubject("Email Verification - Your OTP Code");
-            message.setText(buildEmailVerificationOtpBody(otpCode));
+    // @Async
+    // public void sendOtpEmail(String toEmail, String otpCode) {
+    // try {
+    // SimpleMailMessage message = new SimpleMailMessage();
+    // message.setFrom(fromEmail);
+    // message.setTo(toEmail);
+    // message.setSubject("Email Verification - Your OTP Code");
+    // message.setText(buildEmailVerificationOtpBody(otpCode));
 
-            mailSender.send(message);
-            log.info("Email verification OTP sent successfully to: {}", toEmail);
-        } catch (Exception e) {
-            log.error("Failed to send email verification OTP to: {} - Error: {}", toEmail, e.getMessage());
-            log.warn("OTP code for testing: {}", otpCode); // For testing without real email
-        }
-    }
+    // mailSender.send(message);
+    // log.info("Email verification OTP sent successfully to: {}", toEmail);
+    // } catch (Exception e) {
+    // log.error("Failed to send email verification OTP to: {} - Error: {}",
+    // toEmail, e.getMessage());
+    // log.warn("OTP code for testing: {}", otpCode); // For testing without real
+    // email
+    // }
+    // }
 
     @Async
     public void sendWelcomeEmail(String toEmail, String tempPassword, String role) {
@@ -70,10 +91,10 @@ public class EmailService {
             message.setText(buildWelcomeEmailBody(toEmail, tempPassword, role));
 
             mailSender.send(message);
-            log.info("Welcome email sent successfully to: {}", toEmail);
+            log.info(LogMessages.EMAIL_WELCOME_SENT_SUCCESS, toEmail);
         } catch (Exception e) {
-            log.error("Failed to send welcome email to: {} - Error: {}", toEmail, e.getMessage());
-            log.warn("Temp password for testing: {}", tempPassword); // For testing
+            log.error(LogMessages.EMAIL_WELCOME_SEND_FAILED, toEmail, e.getMessage());
+            log.warn(LogMessages.EMAIL_TEMP_PASSWORD_FOR_TESTING, tempPassword); // For testing
         }
     }
 
@@ -87,9 +108,9 @@ public class EmailService {
             message.setText(buildStatusChangeEmailBody(statusText));
 
             mailSender.send(message);
-            log.info("Status change email sent successfully to: {}", toEmail);
+            log.info(LogMessages.EMAIL_STATUS_CHANGE_SENT_SUCCESS, toEmail);
         } catch (Exception e) {
-            log.error("Failed to send status change email to: {} - Error: {}", toEmail, e.getMessage());
+            log.error(LogMessages.EMAIL_STATUS_CHANGE_SEND_FAILED, toEmail, e.getMessage());
         }
     }
 

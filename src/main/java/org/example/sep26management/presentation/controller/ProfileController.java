@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.ChangePasswordRequest;
 import org.example.sep26management.application.dto.request.UpdateProfileRequest;
@@ -31,12 +32,12 @@ public class ProfileController {
     public ResponseEntity<ApiResponse<UserProfileResponse>> getProfile() {
         try {
             Long userId = getCurrentUserId();
-            log.info("Fetching profile for user ID: {}", userId);
+            log.info(LogMessages.PROFILE_FETCHING, userId);
 
             ApiResponse<UserProfileResponse> response = profileService.getProfile(userId);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("Error getting profile: {}", e.getMessage(), e);
+            log.error(LogMessages.PROFILE_ERROR_GETTING, e.getMessage(), e);
             return ResponseEntity.internalServerError()
                     .body(ApiResponse.error("Failed to get profile: " + e.getMessage()));
         }
@@ -51,7 +52,7 @@ public class ProfileController {
             String ipAddress = getClientIpAddress(httpRequest);
             String userAgent = httpRequest.getHeader("User-Agent");
 
-            log.info("Updating profile for user ID: {}", userId);
+            log.info(LogMessages.PROFILE_UPDATING, userId);
 
             ApiResponse<UserProfileResponse> response = profileService.updateProfile(
                     userId,
@@ -61,7 +62,7 @@ public class ProfileController {
 
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("Error updating profile: {}", e.getMessage(), e);
+            log.error(LogMessages.PROFILE_ERROR_UPDATING, e.getMessage(), e);
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Failed to update profile: " + e.getMessage()));
         }
@@ -76,7 +77,7 @@ public class ProfileController {
             String ipAddress = getClientIpAddress(httpRequest);
             String userAgent = httpRequest.getHeader("User-Agent");
 
-            log.info("Changing password for user ID: {}", userId);
+            log.info(LogMessages.PROFILE_CHANGING_PASSWORD, userId);
 
             ApiResponse<Void> response = profileService.changePassword(
                     userId,
@@ -86,7 +87,7 @@ public class ProfileController {
 
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("Error changing password: {}", e.getMessage(), e);
+            log.error(LogMessages.PROFILE_ERROR_CHANGING_PASSWORD, e.getMessage(), e);
             return ResponseEntity.internalServerError()
                     .body(ApiResponse.error("Failed to change password: " + e.getMessage()));
         }
