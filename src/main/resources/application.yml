@@ -116,7 +116,10 @@ management:
         include: health,info
   endpoint:
     health:
-      show-details: when-authorized
+      show-details: always
+  health:
+    mail:
+      enabled: false  # Disable mail health check - not critical for deployment
 
 
 ---
