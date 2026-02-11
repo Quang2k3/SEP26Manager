@@ -108,6 +108,17 @@ springdoc:
     tags-sorter: alpha
   show-actuator: false
 
+# Spring Boot Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+
 ---
 # Development Profile
 spring:
