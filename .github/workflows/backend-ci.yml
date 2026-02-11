@@ -3,18 +3,8 @@ name: Backend CI/CD (Spring Boot)
 on:
   push:
     branches: [ main, develop ]
-    paths:
-      - 'src/**'
-      - 'pom.xml'
-      - 'backend/**'
-      - '.github/workflows/backend-ci.yml'
   pull_request:
     branches: [ main, develop ]
-    paths:
-      - 'src/**'
-      - 'pom.xml'
-      - 'backend/**'
-      - '.github/workflows/backend-ci.yml'
 
 env:
   JAVA_VERSION: '17'
