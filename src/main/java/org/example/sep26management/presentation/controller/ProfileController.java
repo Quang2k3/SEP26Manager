@@ -48,25 +48,14 @@ public class ProfileController {
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
             @Valid @ModelAttribute UpdateProfileRequest request,
             HttpServletRequest httpRequest) {
-        try {
-            Long userId = getCurrentUserId();
-            String ipAddress = getClientIpAddress(httpRequest);
-            String userAgent = httpRequest.getHeader("User-Agent");
 
-            log.info(LogMessages.PROFILE_UPDATING, userId);
+        Long userId = getCurrentUserId();
+        String ipAddress = getClientIpAddress(httpRequest);
+        String userAgent = httpRequest.getHeader("User-Agent");
 
-            ApiResponse<UserProfileResponse> response = profileService.updateProfile(
-                    userId,
-                    request,
-                    ipAddress,
-                    userAgent);
+        ApiResponse<UserProfileResponse> response = profileService.updateProfile(userId, request, ipAddress, userAgent);
 
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error(LogMessages.PROFILE_ERROR_UPDATING, e.getMessage(), e);
-            return ResponseEntity.badRequest()
-                    .body(ApiResponse.error("Failed to update profile: " + e.getMessage()));
-        }
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/change-password")
