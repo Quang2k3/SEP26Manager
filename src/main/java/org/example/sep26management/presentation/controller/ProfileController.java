@@ -11,6 +11,7 @@ import org.example.sep26management.application.dto.request.UpdateProfileRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.UserProfileResponse;
 import org.example.sep26management.application.service.ProfileService;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -43,9 +44,9 @@ public class ProfileController {
         }
     }
 
-    @PutMapping
+    @PutMapping(value = "/update-profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
-            @Valid @RequestBody UpdateProfileRequest request,
+            @Valid @ModelAttribute UpdateProfileRequest request,
             HttpServletRequest httpRequest) {
         try {
             Long userId = getCurrentUserId();
