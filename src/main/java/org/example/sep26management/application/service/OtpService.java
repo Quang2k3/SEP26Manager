@@ -88,7 +88,7 @@ public class OtpService {
         setCooldown(email);
 
         // Send OTP via email
-        emailService.sendOtpEmail(email, otp);
+        emailService.sendOtpEmail(email, otp, "Email Verification");
 
         log.info("OTP sent successfully to email: {}", email);
     }

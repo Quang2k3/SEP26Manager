@@ -43,11 +43,12 @@ spring:
           max-wait: -1ms
 
   # Gmail SMTP Configuration
+  spring:
   mail:
     host: smtp.gmail.com
     port: 587
-    username: ${GMAIL_USERNAME:}
-    password: ${GMAIL_APP_PASSWORD:}
+    username: ${GMAIL_USERNAME:nguyen.quang6633@gmail.com}
+    password: ${GMAIL_APP_PASSWORD:wukhwzqdycwwgjun}
     properties:
       mail:
         smtp:
@@ -59,6 +60,7 @@ spring:
           timeout: 5000
           writetimeout: 5000
     default-encoding: UTF-8
+
 
 # Application Configuration
 app:
