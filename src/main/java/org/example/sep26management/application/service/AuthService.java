@@ -2,6 +2,7 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.*;
 import org.example.sep26management.application.dto.response.ApiResponse;
@@ -10,10 +11,7 @@ import org.example.sep26management.domain.entity.User;
 import org.example.sep26management.domain.enums.UserStatus;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.UnauthorizedException;
-// Temporarily disabled - otps table not available
-// import org.example.sep26management.infrastructure.persistence.entity.OtpEntity;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
-// import org.example.sep26management.infrastructure.persistence.repository.OtpJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
 import org.example.sep26management.infrastructure.security.JwtTokenProvider;
 import org.example.sep26management.application.dto.response.UserResponse;
@@ -32,9 +30,6 @@ import java.time.LocalDateTime;
 public class AuthService {
 
         private final UserJpaRepository userRepository;
-        // Temporarily disabled - otps table not available in databaseFFF
-        // Uncomment when otps table is created
-        // private final OtpJpaRepository otpRepository;
         private final PasswordEncoder passwordEncoder;
         private final JwtTokenProvider jwtTokenProvider;
         private final EmailService emailService;
@@ -55,12 +50,12 @@ public class AuthService {
          * UC-AUTH-01: Login with JWT
          */
         public LoginResponse login(LoginRequest request, String ipAddress, String userAgent) {
-                log.info("Login attempt for email: {}", request.getEmail());
+                log.info(LogMessages.AUTH_LOGIN_ATTEMPT, request.getEmail());
 
                 // Step 4: Verify credentials
                 UserEntity user = userRepository.findByEmail(request.getEmail())
                                 .orElseThrow(() -> {
-                                        log.warn("Login failed: User not found for email: {}", request.getEmail());
+                                        log.warn(LogMessages.AUTH_LOGIN_FAILED_USER_NOT_FOUND, request.getEmail());
                                         auditLogService.logFailedLogin(request.getEmail(), "User not found", ipAddress);
                                         return new UnauthorizedException(MessageConstants.INVALID_CREDENTIALS);
                                 });
@@ -73,8 +68,8 @@ public class AuthService {
 
                 // Verify password
                 if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-                        log.warn("Login failed: Invalid password for email: {}, failed attempts: {}",
-                                        user.getEmail(), user.getFailedLoginAttempts() + 1);
+                        log.warn(LogMessages.AUTH_LOGIN_FAILED_INVALID_PASSWORD, user.getEmail(),
+                                        user.getFailedLoginAttempts() + 1);
                         user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
 
                         // Lock after 5 failed attempts
@@ -104,7 +99,7 @@ public class AuthService {
 
                 // Check if OTP verification is required (only for first login)
                 if (domainUser.requiresOtpVerification()) {
-                        log.info("First login detected, OTP verification required for user: {}", user.getEmail());
+                        log.info(LogMessages.AUTH_FIRST_LOGIN_OTP_REQUIRED, user.getEmail());
 
                         // Generate and send OTP
                         otpService.generateAndSendOtp(user.getEmail());
@@ -179,7 +174,7 @@ public class AuthService {
          * @return LoginResponse with JWT token
          */
         public LoginResponse completeEmailVerification(String email, String ipAddress, String userAgent) {
-                log.info("Completing OTP verification for first login: {}", email);
+                log.info(LogMessages.AUTH_COMPLETING_OTP_VERIFICATION, email);
 
                 // Find user
                 UserEntity user = userRepository.findByEmail(email)
@@ -206,7 +201,7 @@ public class AuthService {
                                 ipAddress,
                                 userAgent);
 
-                log.info("First login OTP verification completed for user: {}", email);
+                log.info(LogMessages.AUTH_FIRST_LOGIN_COMPLETED, email);
 
                 // Return full login response
                 return LoginResponse.builder()
@@ -228,7 +223,7 @@ public class AuthService {
          * UC-AUTH-02: Logout
          */
         public ApiResponse<Void> logout(Long userId, String ipAddress, String userAgent) {
-                log.info("Logout for user ID: {}", userId);
+                log.info(LogMessages.AUTH_LOGOUT, userId);
 
                 // Invalidate session (can be implemented with Redis for token blacklist)
                 // For now, just log the action
@@ -250,7 +245,7 @@ public class AuthService {
          */
         @Transactional(readOnly = true)
         public UserResponse getCurrentUser(Long userId) {
-                log.info("Fetching current user for ID: {}", userId);
+                log.info(LogMessages.AUTH_FETCHING_CURRENT_USER, userId);
 
                 UserEntity userEntity = userRepository.findById(userId)
                                 .orElseThrow(() -> new BusinessException(MessageConstants.USER_NOT_FOUND));

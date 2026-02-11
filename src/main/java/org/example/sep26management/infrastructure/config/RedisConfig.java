@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -29,7 +30,7 @@ public class RedisConfig {
      */
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
-        log.info("Configuring RedisTemplate for OTP storage");
+        log.info(LogMessages.REDIS_CONFIGURING);
 
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
@@ -54,7 +55,7 @@ public class RedisConfig {
 
         template.afterPropertiesSet();
 
-        log.info("RedisTemplate configured successfully");
+        log.info(LogMessages.REDIS_CONFIGURED_SUCCESS);
         return template;
     }
 }

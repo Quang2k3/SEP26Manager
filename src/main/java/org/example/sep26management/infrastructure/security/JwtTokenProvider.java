@@ -3,6 +3,7 @@ package org.example.sep26management.infrastructure.security;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.domain.entity.User;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -110,13 +111,13 @@ public class JwtTokenProvider {
                     .parseClaimsJws(token);
             return true;
         } catch (MalformedJwtException ex) {
-            log.error("Invalid JWT token");
+            log.error(LogMessages.JWT_INVALID_TOKEN);
         } catch (ExpiredJwtException ex) {
-            log.error("Expired JWT token");
+            log.error(LogMessages.JWT_EXPIRED_TOKEN);
         } catch (UnsupportedJwtException ex) {
-            log.error("Unsupported JWT token");
+            log.error(LogMessages.JWT_UNSUPPORTED_TOKEN);
         } catch (IllegalArgumentException ex) {
-            log.error("JWT claims string is empty");
+            log.error(LogMessages.JWT_CLAIMS_EMPTY);
         }
         return false;
     }
