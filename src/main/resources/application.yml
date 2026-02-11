@@ -43,7 +43,6 @@ spring:
           max-wait: -1ms
 
   # Gmail SMTP Configuration
-spring:
   mail:
     host: smtp.gmail.com
     port: 587
