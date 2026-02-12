@@ -6,6 +6,10 @@ import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.time.LocalDate;
 
 @Getter
@@ -25,6 +29,8 @@ public class UpdateProfileRequest {
 
     private String gender; // MALE, FEMALE, OTHER
 
+    @Schema(example = "2003-03-04", description = "Định dạng yyyy-MM-dd")
+    @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate dateOfBirth;
 
     private String address;

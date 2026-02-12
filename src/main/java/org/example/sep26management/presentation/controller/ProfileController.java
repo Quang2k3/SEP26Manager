@@ -29,7 +29,7 @@ public class ProfileController {
 
     private final ProfileService profileService;
 
-    @GetMapping
+    @GetMapping("")
     public ResponseEntity<ApiResponse<UserProfileResponse>> getProfile() {
         try {
             Long userId = getCurrentUserId();
@@ -55,7 +55,8 @@ public class ProfileController {
 
             log.info(LogMessages.PROFILE_UPDATING, userId);
 
-            ApiResponse<UserProfileResponse> response = profileService.updateProfile(userId, request, ipAddress, userAgent);
+            ApiResponse<UserProfileResponse> response = profileService.updateProfile(userId, request, ipAddress,
+                    userAgent);
 
             return ResponseEntity.ok(response);
         } catch (Exception e) {
