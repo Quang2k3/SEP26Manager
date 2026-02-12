@@ -1,21 +1,150 @@
 package org.example.sep26management.presentation.controller;
 
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.constants.LogMessages;
+import org.example.sep26management.application.constants.MessageConstants;
+import org.example.sep26management.application.dto.request.CreateUserRequest;
+import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.UserListResponse;
+import org.example.sep26management.application.dto.response.UserResponse;
+import org.example.sep26management.application.service.UserManagementService;
+import org.example.sep26management.domain.enums.UserStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /**
- * UserManagementController - TEMPORARILY DISABLED
- * 
- * This controller is disabled because UserManagementService is being refactored
- * to use dynamic RBAC instead of UserRole enum.
- * 
- * TODO: Re-enable after UserManagementService refactoring is complete.
+ * UserManagementController - Handles user management operations
+ * Requires ADMIN or MANAGER role to access
  */
 @RestController
-@RequestMapping("/api/users")
+@RequestMapping("/v1/users")
+@RequiredArgsConstructor
+@Slf4j
+@PreAuthorize("hasAnyRole('MANAGER')")
 public class UserManagementController {
 
-    // ALL ENDPOINTS TEMPORARILY DISABLED
-    // WILL BE RE-ENABLED AFTER RBAC REFACTORING
+    private final UserManagementService userManagementService;
 
+    /**
+     * Create a new user
+     * POST /api/v1/users/create
+     * 
+     * @param request     CreateUserRequest with user details
+     * @param httpRequest HTTP request for IP and user agent extraction
+     * @return ApiResponse with created user details
+     */
+    @PostMapping("/create-user")
+    public ResponseEntity<ApiResponse<UserResponse>> createUser(
+            @Valid @RequestBody CreateUserRequest request,
+            HttpServletRequest httpRequest) {
+        try {
+            Long createdBy = getCurrentUserId();
+            String ipAddress = getClientIpAddress(httpRequest);
+            String userAgent = httpRequest.getHeader("User-Agent");
+
+            log.info(LogMessages.USER_CREATING, request.getEmail());
+
+            ApiResponse<UserResponse> response = userManagementService.createUser(
+                    request,
+                    createdBy,
+                    ipAddress,
+                    userAgent);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error(LogMessages.USER_CREATION_FAILED, e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to create user: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Get list of users with pagination and filtering
+     * GET /api/v1/users
+     * 
+     * @param keyword Optional keyword to search by email or name
+     * @param status  Optional status filter (ACTIVE, INACTIVE, PENDING_VERIFY,
+     *                LOCKED)
+     * @param page    Page number (default: 0)
+     * @param size    Page size (default: 10)
+     * @return ApiResponse with paginated user list
+     */
+    @GetMapping("/list-users")
+    public ResponseEntity<ApiResponse<UserListResponse>> getUserList(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) UserStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        try {
+            log.info("Get user list request - keyword: {}, status: {}, page: {}, size: {}",
+                    keyword, status, page, size);
+
+            ApiResponse<UserListResponse> response = userManagementService.getUserList(
+                    keyword, status, page, size);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Failed to get user list: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to get user list: " + e.getMessage()));
+        }
+    }
+
+    // ============================================
+    // HELPER METHODS
+    // ============================================
+
+    /**
+     * Get current user ID from security context
+     */
+    private Long getCurrentUserId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        if (authentication == null) {
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        }
+
+        Object details = authentication.getDetails();
+        if (details instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> detailsMap = (Map<String, Object>) details;
+            Object userIdObj = detailsMap.get("userId");
+
+            if (userIdObj instanceof Long) {
+                return (Long) userIdObj;
+            } else if (userIdObj instanceof Integer) {
+                return ((Integer) userIdObj).longValue();
+            } else if (userIdObj != null) {
+                return Long.parseLong(userIdObj.toString());
+            }
+        }
+
+        throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
+    }
+
+    /**
+     * Extract client IP address from HTTP request
+     * Checks X-Forwarded-For and X-Real-IP headers first
+     */
+    private String getClientIpAddress(HttpServletRequest request) {
+        String xForwardedFor = request.getHeader("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+            return xForwardedFor.split(",")[0].trim();
+        }
+
+        String xRealIp = request.getHeader("X-Real-IP");
+        if (xRealIp != null && !xRealIp.isEmpty()) {
+            return xRealIp;
+        }
+
+        return request.getRemoteAddr();
+    }
 }

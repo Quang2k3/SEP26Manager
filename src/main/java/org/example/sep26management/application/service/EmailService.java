@@ -55,32 +55,6 @@ public class EmailService {
         }
     }
 
-    /**
-     * Send OTP email for email verification (simpler overload)
-     * Uses HTML template for better presentation
-     * 
-     * @param toEmail Recipient email address
-     * @param otpCode 6-digit OTP code
-     */
-    // @Async
-    // public void sendOtpEmail(String toEmail, String otpCode) {
-    // try {
-    // SimpleMailMessage message = new SimpleMailMessage();
-    // message.setFrom(fromEmail);
-    // message.setTo(toEmail);
-    // message.setSubject("Email Verification - Your OTP Code");
-    // message.setText(buildEmailVerificationOtpBody(otpCode));
-
-    // mailSender.send(message);
-    // log.info("Email verification OTP sent successfully to: {}", toEmail);
-    // } catch (Exception e) {
-    // log.error("Failed to send email verification OTP to: {} - Error: {}",
-    // toEmail, e.getMessage());
-    // log.warn("OTP code for testing: {}", otpCode); // For testing without real
-    // email
-    // }
-    // }
-
     @Async
     public void sendWelcomeEmail(String toEmail, String tempPassword, String role) {
         try {
@@ -164,39 +138,5 @@ public class EmailService {
                 Best regards,
                 Warehouse Management Team
                 """, statusText);
-    }
-
-    /**
-     * Build email body for email verification OTP
-     * Enhanced formatting for better readability
-     */
-    private String buildEmailVerificationOtpBody(String otpCode) {
-        return String.format("""
-                ╔══════════════════════════════════════════╗
-                ║   SEP26 WAREHOUSE MANAGEMENT SYSTEM      ║
-                ║         Email Verification               ║
-                ╚══════════════════════════════════════════╝
-
-                Dear User,
-
-                Thank you for registering with SEP26 Warehouse Management System.
-
-                Your email verification code is:
-
-                ┌─────────────────┐
-                │   %s   │
-                └─────────────────┘
-
-                ⏱️  This code will expire in 5 minutes.
-                🔒  For security, do not share this code with anyone.
-
-                ℹ️  If you didn't request this code, please ignore this email.
-
-                Best regards,
-                SEP26 Warehouse Management Team
-
-                ─────────────────────────────────────────
-                This is an automated message, please do not reply.
-                """, otpCode);
     }
 }

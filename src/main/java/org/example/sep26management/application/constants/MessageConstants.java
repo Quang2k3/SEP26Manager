@@ -50,6 +50,13 @@ public final class MessageConstants {
     // ==================== Pending Token Messages ====================
     public static final String INVALID_PENDING_TOKEN = "Invalid or expired verification token. Please login again.";
 
+    // ==================== User Management Messages ====================
+    public static final String USER_CREATED_SUCCESS = "User created successfully";
+    public static final String USER_EMAIL_EXISTS = "Email already exists";
+    public static final String ROLE_NOT_FOUND = "Role not found: %s";
+    public static final String EXPIRE_DATE_REQUIRED = "Expire date is required for temporary accounts";
+    public static final String INVALID_EXPIRE_DATE = "Expire date must be in the future";
+
     // ==================== Error Messages ====================
     public static final String AUTH_FAILED = "Authentication failed";
     public static final String ACCESS_DENIED = "You do not have permission to perform this action!";

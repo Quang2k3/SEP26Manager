@@ -32,7 +32,6 @@ public class AuthService {
         private final UserJpaRepository userRepository;
         private final PasswordEncoder passwordEncoder;
         private final JwtTokenProvider jwtTokenProvider;
-        private final EmailService emailService;
         private final AuditLogService auditLogService;
         private final UserEntityMapper userEntityMapper; // Add mapper injection
         private final OtpService otpService; // Add OTP service for email verification

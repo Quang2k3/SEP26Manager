@@ -135,6 +135,14 @@ public final class LogMessages {
     public static final String JWT_AUTH_SET_FAILED = "Could not set user authentication in security context";
 
     // ============================================================
+    // USER MANAGEMENT SERVICE
+    // ============================================================
+    public static final String USER_CREATING = "Creating user with email: {}";
+    public static final String USER_CREATED = "User created successfully with ID: {}";
+    public static final String USER_CREATION_FAILED = "Failed to create user: {}";
+    public static final String USER_EMAIL_DUPLICATE = "Attempted to create user with duplicate email: {}";
+
+    // ============================================================
     // EXCEPTION HANDLER
     // ============================================================
     public static final String EXCEPTION_VALIDATION_ERROR = "Validation error: {}";
