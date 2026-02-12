@@ -11,7 +11,6 @@ import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.LoginResponse;
 import org.example.sep26management.application.dto.response.UserResponse;
 import org.example.sep26management.application.service.AuthService;
-import org.example.sep26management.infrastructure.security.JwtTokenProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -27,7 +26,6 @@ import java.util.Map;
 public class AuthController {
 
         private final AuthService authService;
-        private final JwtTokenProvider jwtTokenProvider;
 
         /**
          * UC-AUTH-01: Login

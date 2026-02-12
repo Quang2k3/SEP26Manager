@@ -2,11 +2,12 @@ package org.example.sep26management.application.dto.request;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
-import org.example.sep26management.domain.enums.UserRole;
 
 import java.time.LocalDate;
+import java.util.Set;
 
 @Getter
 @Setter
@@ -15,12 +16,12 @@ import java.time.LocalDate;
 @Builder
 public class CreateUserRequest {
 
-    @NotBlank(message = "Email and Role is required")
+    @NotBlank(message = "Email is required")
     @Email(message = "Invalid email address")
     private String email;
 
-    @NotNull(message = "Email and Role is required")
-    private UserRole role;
+    @NotEmpty(message = "At least one role is required")
+    private Set<String> roleCodes;
 
     @NotNull(message = "Please specify account type")
     private Boolean isPermanent;

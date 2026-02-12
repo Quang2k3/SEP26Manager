@@ -52,13 +52,6 @@ public class UserEntity {
     @Builder.Default
     private Set<RoleEntity> roles = new HashSet<>();
 
-    // ⚠️ WAREHOUSE RELATIONSHIP COMMENTED OUT FOR AUTH TESTING
-    // @ManyToMany(fetch = FetchType.LAZY)
-    // @JoinTable(name = "user_warehouses", joinColumns = @JoinColumn(name =
-    // "user_id"), inverseJoinColumns = @JoinColumn(name = "warehouse_id"))
-    // @Builder.Default
-    // private Set<WarehouseEntity> warehouses = new HashSet<>();
-
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     private UserStatus status;

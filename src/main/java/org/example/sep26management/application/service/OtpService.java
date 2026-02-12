@@ -12,16 +12,6 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.util.Random;
 
-/**
- * Service for OTP (One-Time Password) management using Redis
- * 
- * Features:
- * - Generate 6-digit OTP
- * - Store in Redis with TTL (Time To Live)
- * - Verify OTP
- * - Handle resend cooldown (2 minutes)
- * - Brute force protection (max 3 attempts, 15 min lockout)
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j

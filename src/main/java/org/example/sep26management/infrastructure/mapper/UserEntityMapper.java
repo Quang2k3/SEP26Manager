@@ -55,11 +55,6 @@ public class UserEntityMapper {
                 .build();
     }
 
-    /**
-     * Update UserEntity from domain User
-     * Note: This doesn't handle roles - roles should be managed separately through
-     * RoleRepository
-     */
     public void updateEntity(UserEntity entity, User domain) {
         if (entity == null || domain == null) {
             return;
@@ -73,7 +68,6 @@ public class UserEntityMapper {
         entity.setDateOfBirth(domain.getDateOfBirth());
         entity.setAddress(domain.getAddress());
         entity.setAvatarUrl(domain.getAvatarUrl());
-        // Note: roleCodes need to be handled separately by fetching RoleEntity objects
         entity.setStatus(domain.getStatus());
         entity.setIsPermanent(domain.getIsPermanent());
         entity.setExpireDate(domain.getExpireDate());
