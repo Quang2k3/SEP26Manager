@@ -142,6 +142,23 @@ public final class LogMessages {
     public static final String USER_CREATION_FAILED = "Failed to create user: {}";
     public static final String USER_EMAIL_DUPLICATE = "Attempted to create user with duplicate email: {}";
 
+    // User role assignment
+    public static final String USER_ROLE_ASSIGNING = "Assigning role {} to user ID: {} by manager ID: {}";
+    public static final String USER_ROLE_ASSIGNED = "Role assigned successfully to user ID: {} - Old: {}, New: {}";
+    public static final String USER_ROLE_ASSIGNMENT_FAILED = "Failed to assign role to user ID: {} - Error: {}";
+    public static final String EMAIL_ROLE_CHANGE_SENT_SUCCESS = "Role change email sent successfully to: {}";
+    public static final String EMAIL_ROLE_CHANGE_SEND_FAILED = "Failed to send role change email to: {} - Error: {}";
+
+    // ============================================================
+    // USER MANAGEMENT CONTROLLER
+    // ============================================================
+    public static final String USER_LIST_REQUEST = "Get user list request - keyword: {}, status: {}, page: {}, size: {}";
+    public static final String USER_LIST_FETCH_FAILED = "Failed to get user list: {}";
+    public static final String USER_ROLE_ASSIGNMENT_REQUEST = "Manager ID: {} is assigning role {} to user ID: {}";
+    public static final String USER_ROLE_ASSIGNMENT_CONTROLLER_FAILED = "Failed to assign role to user {}: {}";
+    public static final String USER_LIST_FETCHING = "Fetching user list - keyword: {}, status: {}, page: {}, size: {}";
+    public static final String USER_ROLE_ALREADY_ASSIGNED = "User {} already has role {}";
+
     // ============================================================
     // EXCEPTION HANDLER
     // ============================================================

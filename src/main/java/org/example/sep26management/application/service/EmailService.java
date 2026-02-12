@@ -88,6 +88,22 @@ public class EmailService {
         }
     }
 
+    @Async
+    public void sendRoleChangeEmail(String toEmail, String oldRole, String newRole, String changedBy) {
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromEmail);
+            message.setTo(toEmail);
+            message.setSubject("Role Change Notification");
+            message.setText(buildRoleChangeEmailBody(oldRole, newRole, changedBy));
+
+            mailSender.send(message);
+            log.info(LogMessages.EMAIL_ROLE_CHANGE_SENT_SUCCESS, toEmail);
+        } catch (Exception e) {
+            log.error(LogMessages.EMAIL_ROLE_CHANGE_SEND_FAILED, toEmail, e.getMessage());
+        }
+    }
+
     private String buildOtpEmailBody(String otpCode, String purpose) {
         return String.format("""
                 Dear User,
@@ -138,5 +154,53 @@ public class EmailService {
                 Best regards,
                 Warehouse Management Team
                 """, statusText);
+    }
+
+    private String buildRoleChangeEmailBody(String oldRole, String newRole, String changedBy) {
+        return String.format(
+                """
+                        ════════════════════════════════════════════════════════════════
+                                    WAREHOUSE MANAGEMENT SYSTEM
+                                      Role Assignment Notification
+                        ════════════════════════════════════════════════════════════════
+
+                        Dear User,
+
+                        We are writing to inform you that your role has been updated in the
+                        Warehouse Management System.
+
+                        ┌────────────────────────────────────────────────────────────────┐
+                        │ ROLE CHANGE DETAILS                                            │
+                        ├────────────────────────────────────────────────────────────────┤
+                        │                                                                │
+                        │  Previous Role:  %s
+                        │  New Role:       %s
+                        │  Changed By:     %s
+                        │                                                                │
+                        └────────────────────────────────────────────────────────────────┘
+
+                        ⚠️  IMPORTANT NOTICE:
+                        This change is effective immediately. Your access permissions and
+                        security clearances have been updated according to your new role.
+
+                        📋 NEXT STEPS:
+                        • Please log out and log back in to ensure all permissions are
+                          properly applied
+                        • Review your new role responsibilities in the system documentation
+                        • Contact your manager if you have any questions about this change
+
+                        ────────────────────────────────────────────────────────────────
+
+                        If you believe this role change was made in error, please contact
+                        your manager or system administrator immediately.
+
+                        Best regards,
+                        Warehouse Management Team
+
+                        ════════════════════════════════════════════════════════════════
+                        This is an automated notification. Please do not reply to this email.
+                        ════════════════════════════════════════════════════════════════
+                        """,
+                oldRole, newRole, changedBy);
     }
 }

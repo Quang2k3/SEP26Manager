@@ -57,6 +57,12 @@ public final class MessageConstants {
     public static final String EXPIRE_DATE_REQUIRED = "Expire date is required for temporary accounts";
     public static final String INVALID_EXPIRE_DATE = "Expire date must be in the future";
 
+    // Role assignment messages
+    public static final String ROLE_ASSIGNED_SUCCESS = "Role assigned successfully";
+    public static final String USER_NOT_FOUND_FOR_ROLE_ASSIGNMENT = "Target user not found";
+    public static final String ROLE_ASSIGNMENT_FAILED = "Failed to assign role";
+    public static final String SAME_ROLE_ASSIGNMENT = "User already has this role";
+
     // ==================== Error Messages ====================
     public static final String AUTH_FAILED = "Authentication failed";
     public static final String ACCESS_DENIED = "You do not have permission to perform this action!";
