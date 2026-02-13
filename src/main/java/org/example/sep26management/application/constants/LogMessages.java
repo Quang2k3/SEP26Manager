@@ -160,6 +160,14 @@ public final class LogMessages {
     public static final String USER_ROLE_ALREADY_ASSIGNED = "User {} already has role {}";
 
     // ============================================================
+    // USER STATUS MANAGEMENT
+    // ============================================================
+    public static final String USER_STATUS_CHANGING = "Changing status for user ID: {} from {} to {} by manager ID: {}";
+    public static final String USER_STATUS_CHANGED = "User ID: {} status changed from {} to {} successfully";
+    public static final String USER_STATUS_CHANGE_FAILED = "Failed to change status for user ID: {} - Error: {}";
+    public static final String USER_ALREADY_HAS_STATUS = "User {} already has status {}";
+
+    // ============================================================
     // EXCEPTION HANDLER
     // ============================================================
     public static final String EXCEPTION_VALIDATION_ERROR = "Validation error: {}";

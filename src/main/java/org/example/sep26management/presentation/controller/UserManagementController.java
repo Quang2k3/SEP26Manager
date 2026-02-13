@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.AssignRoleRequest;
+import org.example.sep26management.application.dto.request.ChangeStatusRequest;
 import org.example.sep26management.application.dto.request.CreateUserRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.UserListResponse;
@@ -134,6 +135,46 @@ public class UserManagementController {
             log.error(LogMessages.USER_ROLE_ASSIGNMENT_CONTROLLER_FAILED, userId, e.getMessage(), e);
             return ResponseEntity.internalServerError()
                     .body(ApiResponse.error("Failed to assign role: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Change user status (ACTIVE/INACTIVE)
+     * PUT /api/v1/users/{userId}/change-status
+     *
+     * @param userId      Target user ID
+     * @param request     ChangeStatusRequest with new status, optional suspend date
+     *                    and reason
+     * @param httpRequest HttpServletRequest for IP and user agent
+     * @return ResponseEntity with updated user details
+     */
+    @PutMapping("/{userId}/change-status")
+    public ResponseEntity<ApiResponse<UserResponse>> changeStatus(
+            @PathVariable Long userId,
+            @Valid @RequestBody ChangeStatusRequest request,
+            HttpServletRequest httpRequest) {
+        try {
+            Long managerId = getCurrentUserId();
+            String managerEmail = getCurrentUserEmail();
+            String ipAddress = getClientIpAddress(httpRequest);
+            String userAgent = httpRequest.getHeader("User-Agent");
+
+            log.info("Manager ID: {} is changing status for user ID: {} to {}",
+                    managerId, userId, request.getStatus());
+
+            ApiResponse<UserResponse> response = userManagementService.changeUserStatus(
+                    userId,
+                    request,
+                    managerId,
+                    managerEmail,
+                    ipAddress,
+                    userAgent);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Failed to change status for user {}: {}", userId, e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to change status: " + e.getMessage()));
         }
     }
 

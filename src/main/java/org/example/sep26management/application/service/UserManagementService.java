@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
+import org.example.sep26management.application.dto.request.ChangeStatusRequest;
 import org.example.sep26management.application.dto.request.CreateUserRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.UserListResponse;
@@ -337,5 +338,108 @@ public class UserManagementService {
                         characters[j] = temp;
                 }
                 return new String(characters);
+        }
+
+        /**
+         * Change user status (ACTIVE/INACTIVE)
+         * Only MANAGER can perform this action
+         * 
+         * @param userId       Target user ID whose status will be changed
+         * @param request      ChangeStatusRequest containing new status, optional
+         *                     suspend date and reason
+         * @param managerId    Manager ID performing the action
+         * @param managerEmail Manager email for audit trail
+         * @param ipAddress    IP address of the request
+         * @param userAgent    User agent of the request
+         * @return ApiResponse containing updated user details
+         */
+        @Transactional
+        public ApiResponse<UserResponse> changeUserStatus(Long userId, ChangeStatusRequest request,
+                        Long managerId, String managerEmail, String ipAddress, String userAgent) {
+                log.info(LogMessages.USER_STATUS_CHANGING, userId, "current", request.getStatus(), managerId);
+
+                try {
+                        // Fetch target user
+                        UserEntity user = userRepository.findById(userId)
+                                        .orElseThrow(() -> new BusinessException(
+                                                        MessageConstants.USER_NOT_FOUND_FOR_STATUS_CHANGE));
+
+                        UserStatus oldStatus = user.getStatus();
+                        UserStatus newStatus = request.getStatus();
+
+                        // Check if user already has this status
+                        if (oldStatus == newStatus) {
+                                log.warn(LogMessages.USER_ALREADY_HAS_STATUS, userId, newStatus);
+                                throw new BusinessException(MessageConstants.SAME_STATUS_ASSIGNMENT);
+                        }
+
+                        // Update user status
+                        user.setStatus(newStatus);
+
+                        // Handle time-based suspension
+                        if (newStatus == UserStatus.INACTIVE && request.getSuspendUntil() != null) {
+                                user.setExpireDate(request.getSuspendUntil());
+                        } else if (newStatus == UserStatus.ACTIVE) {
+                                // Clear expireDate when reactivating
+                                user.setExpireDate(null);
+                        }
+
+                        user.setUpdatedBy(managerId);
+
+                        // Save changes
+                        UserEntity updatedUser = userRepository.save(user);
+
+                        log.info(LogMessages.USER_STATUS_CHANGED, userId, oldStatus, newStatus);
+
+                        // Send email notification
+                        emailService.sendStatusChangeEmail(
+                                        updatedUser.getEmail(),
+                                        oldStatus.name(),
+                                        newStatus.name(),
+                                        request.getSuspendUntil(),
+                                        request.getReason(),
+                                        managerEmail);
+
+                        // Log audit event
+                        String details = String.format("Status changed from '%s' to '%s'", oldStatus, newStatus);
+                        if (request.getSuspendUntil() != null) {
+                                details += String.format(" (until %s)", request.getSuspendUntil());
+                        }
+                        if (request.getReason() != null && !request.getReason().isEmpty()) {
+                                details += String.format(" - Reason: %s", request.getReason());
+                        }
+
+                        auditLogService.logAction(
+                                        managerId,
+                                        "STATUS_CHANGED",
+                                        "USER",
+                                        userId,
+                                        details,
+                                        ipAddress,
+                                        userAgent);
+
+                        // Build response
+                        UserResponse response = UserResponse.builder()
+                                        .userId(updatedUser.getUserId())
+                                        .email(updatedUser.getEmail())
+                                        .fullName(updatedUser.getFullName())
+                                        .roleCodes(updatedUser.getRoles().stream()
+                                                        .map(RoleEntity::getRoleCode)
+                                                        .collect(Collectors.toSet()))
+                                        .status(updatedUser.getStatus())
+                                        .isPermanent(updatedUser.getIsPermanent())
+                                        .expireDate(updatedUser.getExpireDate())
+                                        .createdAt(updatedUser.getCreatedAt())
+                                        .build();
+
+                        return ApiResponse.success(MessageConstants.STATUS_CHANGED_SUCCESS, response);
+
+                } catch (BusinessException e) {
+                        log.error(LogMessages.USER_STATUS_CHANGE_FAILED, userId, e.getMessage());
+                        throw e;
+                } catch (Exception e) {
+                        log.error(LogMessages.USER_STATUS_CHANGE_FAILED, userId, e.getMessage(), e);
+                        throw new BusinessException(MessageConstants.STATUS_CHANGE_FAILED);
+                }
         }
 }

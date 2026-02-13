@@ -63,6 +63,14 @@ public final class MessageConstants {
     public static final String ROLE_ASSIGNMENT_FAILED = "Failed to assign role";
     public static final String SAME_ROLE_ASSIGNMENT = "User already has this role";
 
+    // Status management messages
+    public static final String STATUS_CHANGED_SUCCESS = "User status changed successfully";
+    public static final String USER_NOT_FOUND_FOR_STATUS_CHANGE = "Target user not found";
+    public static final String STATUS_CHANGE_FAILED = "Failed to change user status";
+    public static final String SAME_STATUS_ASSIGNMENT = "User already has this status";
+    public static final String INVALID_STATUS_TRANSITION = "Invalid status transition";
+    public static final String ACCOUNT_DEACTIVATED = "Your account has been deactivated. Please contact your administrator.";
+
     // ==================== Error Messages ====================
     public static final String AUTH_FAILED = "Authentication failed";
     public static final String ACCESS_DENIED = "You do not have permission to perform this action!";

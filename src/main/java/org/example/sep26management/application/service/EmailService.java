@@ -3,6 +3,9 @@ package org.example.sep26management.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
 
 import org.example.sep26management.application.constants.LogMessages;
@@ -104,6 +107,30 @@ public class EmailService {
         }
     }
 
+    @Async
+    public void sendStatusChangeEmail(String toEmail, String oldStatus, String newStatus,
+            LocalDate suspendUntil, String reason, String changedBy) {
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromEmail);
+            message.setTo(toEmail);
+
+            // Dynamic subject based on new status
+            if ("INACTIVE".equals(newStatus)) {
+                message.setSubject("Account Deactivation Notice");
+            } else {
+                message.setSubject("Account Reactivation Notice");
+            }
+
+            message.setText(buildStatusChangeEmailBody(oldStatus, newStatus, suspendUntil, reason, changedBy));
+
+            mailSender.send(message);
+            log.info(LogMessages.EMAIL_STATUS_CHANGE_SENT_SUCCESS, toEmail);
+        } catch (Exception e) {
+            log.error(LogMessages.EMAIL_STATUS_CHANGE_SEND_FAILED, toEmail, e.getMessage());
+        }
+    }
+
     private String buildOtpEmailBody(String otpCode, String purpose) {
         return String.format("""
                 Dear User,
@@ -202,5 +229,103 @@ public class EmailService {
                         ════════════════════════════════════════════════════════════════
                         """,
                 oldRole, newRole, changedBy);
+    }
+
+    private String buildStatusChangeEmailBody(String oldStatus, String newStatus, LocalDate suspendUntil,
+            String reason, String changedBy) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        if ("INACTIVE".equals(newStatus)) {
+            String suspensionType = suspendUntil != null ? "Temporary"
+                    : "Permanent (until reactivated by administrator)";
+            String suspendUntilText = suspendUntil != null ? suspendUntil.format(formatter) : "N/A";
+            String reasonText = reason != null && !reason.isEmpty() ? reason : "Not specified";
+            return String.format("""
+                    ════════════════════════════════════════════════════════════════
+                                WAREHOUSE MANAGEMENT SYSTEM
+                                Account Deactivation Notice
+                    ════════════════════════════════════════════════════════════════
+
+                    Dear User,
+
+                    We are writing to inform you that your account has been deactivated
+                    in the Warehouse Management System.
+
+                    ┌────────────────────────────────────────────────────────────────┐
+                    │ STATUS CHANGE DETAILS                                          │
+                    ├────────────────────────────────────────────────────────────────┤
+                    │                                                                │
+                    │  Previous Status:    %s
+                    │  New Status:         %s
+                    │  Suspension Type:    %s
+                    │  Suspended Until:    %s
+                    │  Changed By:         %s
+                    │  Reason:             %s
+                    │                                                                │
+                    └────────────────────────────────────────────────────────────────┘
+
+                    ⚠️  IMPORTANT NOTICE:
+                    Your account has been deactivated and you will NOT be able to access
+                    the Warehouse Management System until your account is reactivated.
+
+                    All active sessions will be terminated and login attempts will be
+                    blocked during the suspension period.
+
+                    ────────────────────────────────────────────────────────────────
+
+                    If you believe this deactivation was made in error or have questions
+                    about this change, please contact your manager or system administrator
+                    immediately.
+
+                    Best regards,
+                    Warehouse Management Team
+
+                    ════════════════════════════════════════════════════════════════
+                    This is an automated notification. Please do not reply to this email.
+                    ════════════════════════════════════════════════════════════════
+                    """, oldStatus, newStatus, suspensionType, suspendUntilText, changedBy, reasonText);
+        } else {
+            return String.format("""
+                    ════════════════════════════════════════════════════════════════
+                                WAREHOUSE MANAGEMENT SYSTEM
+                                Account Reactivation Notice
+                    ════════════════════════════════════════════════════════════════
+
+                    Dear User,
+
+                    Good news! Your account has been reactivated in the Warehouse
+                    Management System.
+
+                    ┌────────────────────────────────────────────────────────────────┐
+                    │ STATUS CHANGE DETAILS                                          │
+                    ├────────────────────────────────────────────────────────────────┤
+                    │                                                                │
+                    │  Previous Status:    %s
+                    │  New Status:         %s
+                    │  Changed By:         %s
+                    │                                                                │
+                    └────────────────────────────────────────────────────────────────┘
+
+                    ✅ ACCOUNT ACCESS RESTORED:
+                    You can now access the Warehouse Management System using your
+                    existing credentials. All system features are available according
+                    to your assigned role and permissions.
+
+                    📋 NEXT STEPS:
+                    • Log in to the system with your email and password
+                    • Review any updates or changes made during the suspension period
+                    • Contact your manager if you have any questions
+
+                    ────────────────────────────────────────────────────────────────
+
+                    Welcome back to the Warehouse Management System!
+
+                    Best regards,
+                    Warehouse Management Team
+
+                    ════════════════════════════════════════════════════════════════
+                    This is an automated notification. Please do not reply to this email.
+                    ════════════════════════════════════════════════════════════════
+                    """, oldStatus, newStatus, changedBy);
+        }
     }
 }
