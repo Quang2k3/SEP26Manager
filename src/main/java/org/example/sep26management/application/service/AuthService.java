@@ -175,22 +175,24 @@ public class AuthService {
         public LoginResponse completeEmailVerification(String email, String ipAddress, String userAgent) {
                 log.info(LogMessages.AUTH_COMPLETING_OTP_VERIFICATION, email);
 
-                // Find user
                 UserEntity user = userRepository.findByEmail(email)
                                 .orElseThrow(() -> new UnauthorizedException(MessageConstants.USER_NOT_FOUND));
 
+                // ✅ Update trạng thái sau khi verify OTP
+                if (user.getStatus() == UserStatus.PENDING_VERIFY) {
+                        user.setStatus(UserStatus.ACTIVE);
+                }
+
                 // Mark first login as completed
                 user.setIsFirstLogin(false);
+
                 userRepository.save(user);
 
-                // Convert to domain model
                 User domainUser = userEntityMapper.toDomain(user);
 
-                // Generate JWT token (default remember me = false for security)
                 String token = jwtTokenProvider.generateToken(domainUser, false);
-                long expiresIn = 5 * 60 * 1000L; // 5 minutes
+                long expiresIn = 5 * 60 * 1000L;
 
-                // Audit log
                 auditLogService.logAction(
                                 user.getUserId(),
                                 "FIRST_LOGIN_COMPLETED",
@@ -200,9 +202,6 @@ public class AuthService {
                                 ipAddress,
                                 userAgent);
 
-                log.info(LogMessages.AUTH_FIRST_LOGIN_COMPLETED, email);
-
-                // Return full login response
                 return LoginResponse.builder()
                                 .token(token)
                                 .tokenType("Bearer")

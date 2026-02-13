@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
+import org.example.sep26management.application.dto.request.AssignRoleRequest;
+import org.example.sep26management.application.dto.request.ChangeStatusRequest;
 import org.example.sep26management.application.dto.request.CreateUserRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.UserListResponse;
@@ -84,17 +86,95 @@ public class UserManagementController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         try {
-            log.info("Get user list request - keyword: {}, status: {}, page: {}, size: {}",
-                    keyword, status, page, size);
+            log.info(LogMessages.USER_LIST_REQUEST, keyword, status, page, size);
 
             ApiResponse<UserListResponse> response = userManagementService.getUserList(
                     keyword, status, page, size);
 
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("Failed to get user list: {}", e.getMessage(), e);
+            log.error(LogMessages.USER_LIST_FETCH_FAILED, e.getMessage(), e);
             return ResponseEntity.internalServerError()
                     .body(ApiResponse.error("Failed to get user list: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Assign a new role to a user
+     * PUT /api/v1/users/{userId}/assign-role
+     * Only MANAGER can perform this action (enforced by class-level @PreAuthorize)
+     * 
+     * @param userId      Target user ID whose role will be changed
+     * @param request     AssignRoleRequest containing the new role
+     * @param httpRequest HTTP request for IP and user agent extraction
+     * @return ApiResponse with updated user details
+     */
+    @PutMapping("/{userId}/assign-role")
+    public ResponseEntity<ApiResponse<UserResponse>> assignRole(
+            @PathVariable Long userId,
+            @Valid @RequestBody AssignRoleRequest request,
+            HttpServletRequest httpRequest) {
+        try {
+            Long managerId = getCurrentUserId();
+            String managerEmail = getCurrentUserEmail();
+            String ipAddress = getClientIpAddress(httpRequest);
+            String userAgent = httpRequest.getHeader("User-Agent");
+
+            log.info(LogMessages.USER_ROLE_ASSIGNMENT_REQUEST, managerId, request.getRole(), userId);
+
+            ApiResponse<UserResponse> response = userManagementService.assignRole(
+                    userId,
+                    request.getRole().name(),
+                    managerId,
+                    managerEmail,
+                    ipAddress,
+                    userAgent);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error(LogMessages.USER_ROLE_ASSIGNMENT_CONTROLLER_FAILED, userId, e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to assign role: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Change user status (ACTIVE/INACTIVE)
+     * PUT /api/v1/users/{userId}/change-status
+     *
+     * @param userId      Target user ID
+     * @param request     ChangeStatusRequest with new status, optional suspend date
+     *                    and reason
+     * @param httpRequest HttpServletRequest for IP and user agent
+     * @return ResponseEntity with updated user details
+     */
+    @PutMapping("/{userId}/change-status")
+    public ResponseEntity<ApiResponse<UserResponse>> changeStatus(
+            @PathVariable Long userId,
+            @Valid @RequestBody ChangeStatusRequest request,
+            HttpServletRequest httpRequest) {
+        try {
+            Long managerId = getCurrentUserId();
+            String managerEmail = getCurrentUserEmail();
+            String ipAddress = getClientIpAddress(httpRequest);
+            String userAgent = httpRequest.getHeader("User-Agent");
+
+            log.info("Manager ID: {} is changing status for user ID: {} to {}",
+                    managerId, userId, request.getStatus());
+
+            ApiResponse<UserResponse> response = userManagementService.changeUserStatus(
+                    userId,
+                    request,
+                    managerId,
+                    managerEmail,
+                    ipAddress,
+                    userAgent);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Failed to change status for user {}: {}", userId, e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to change status: " + e.getMessage()));
         }
     }
 
@@ -128,6 +208,31 @@ public class UserManagementController {
         }
 
         throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
+    }
+
+    /**
+     * Get current user email from security context
+     */
+    private String getCurrentUserEmail() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        if (authentication == null) {
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        }
+
+        Object details = authentication.getDetails();
+        if (details instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> detailsMap = (Map<String, Object>) details;
+            Object emailObj = detailsMap.get("email");
+
+            if (emailObj != null) {
+                return emailObj.toString();
+            }
+        }
+
+        // Fallback to principal name if email not in details
+        return authentication.getName();
     }
 
     /**
