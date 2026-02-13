@@ -90,7 +90,7 @@ file:
     max-size: 5242880
 
 server:
-  port: 8081
+  port: 8080
   servlet:
     context-path: /api
 
