@@ -79,7 +79,8 @@ public class SecurityConfig {
                         // Manager only endpoints
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
                         .requestMatchers("/v1/zones/**").hasRole("MANAGER")
-                        .requestMatchers("/v1/category-zone-mappings/**").hasRole("MANAGER")
+                        .requestMatchers("/v1/category-zone-mappings/**").hasRole("MANAGER") // Zone Management
+                        .requestMatchers("/v1/categories/**").hasAnyRole("ADMIN","MANAGER")
                         // Authenticated endpoints
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
