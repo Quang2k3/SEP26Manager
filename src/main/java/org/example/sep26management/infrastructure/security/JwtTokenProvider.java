@@ -169,15 +169,58 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Get expiration date from token
+     * Generate a scan token for iPhone scanner (no DB user required).
+     * Claims: type=SCANNER, sessionId, exp=10 minutes.
      */
-    public Date getExpirationDateFromToken(String token) {
+    public String generateScanToken(String sessionId, Long warehouseId) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("type", "SCANNER");
+        claims.put("sessionId", sessionId);
+        claims.put("warehouseId", warehouseId);
+        claims.put("roles", "SCANNER");
+
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + 10 * 60 * 1000L); // 10 minutes
+
+        return Jwts.builder()
+                .setClaims(claims)
+                .setSubject("scanner:" + sessionId)
+                .setIssuedAt(now)
+                .setExpiration(expiryDate)
+                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+                .compact();
+    }
+
+    /**
+     * Check if a JWT token is a SCANNER type token.
+     */
+    public boolean isScanToken(String token) {
+        try {
+            Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(getSigningKey())
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody();
+            return "SCANNER".equals(claims.get("type", String.class));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Extract sessionId from a SCANNER token.
+     */
+    public String getSessionIdFromScanToken(String token) {
         Claims claims = Jwts.parserBuilder()
                 .setSigningKey(getSigningKey())
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
 
-        return claims.getExpiration();
+        String type = claims.get("type", String.class);
+        if (!"SCANNER".equals(type)) {
+            throw new JwtException("Not a scanner token");
+        }
+        return claims.get("sessionId", String.class);
     }
 }
