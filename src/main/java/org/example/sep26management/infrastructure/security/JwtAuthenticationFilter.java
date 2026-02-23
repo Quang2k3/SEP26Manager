@@ -36,30 +36,45 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String jwt = getJwtFromRequest(request);
 
             if (StringUtils.hasText(jwt) && jwtTokenProvider.validateToken(jwt)) {
-                String email = jwtTokenProvider.getEmailFromToken(jwt);
-                Long userId = jwtTokenProvider.getUserIdFromToken(jwt);
-                Set<String> roleCodes = jwtTokenProvider.getRoleCodesFromToken(jwt);
 
-                // Create granted authorities from role codes
-                List<SimpleGrantedAuthority> authorities = roleCodes.stream()
-                        .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
-                        .collect(Collectors.toList());
+                // ── SCANNER token path (iPhone scan events) ──────────────────
+                if (jwtTokenProvider.isScanToken(jwt)) {
+                    String sessionId = jwtTokenProvider.getSessionIdFromScanToken(jwt);
 
-                // Create authentication object
-                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                        email,
-                        null,
-                        authorities);
+                    List<SimpleGrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_SCANNER"));
 
+                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                            "scanner:" + sessionId, null, authorities);
 
-                // Set user ID as principal for easy access
-                Map<String, Object> details = new HashMap<>();
-                details.put("userId", userId);
-                details.put("email", email);
-                details.put("roles", roleCodes);
-                authentication.setDetails(details);
+                    Map<String, Object> details = new HashMap<>();
+                    details.put("sessionId", sessionId);
+                    authentication.setDetails(details);
 
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                } else {
+                    // ── Normal user token path ────────────────────────────────
+                    String email = jwtTokenProvider.getEmailFromToken(jwt);
+                    Long userId = jwtTokenProvider.getUserIdFromToken(jwt);
+                    Set<String> roleCodes = jwtTokenProvider.getRoleCodesFromToken(jwt);
+
+                    List<SimpleGrantedAuthority> authorities = roleCodes.stream()
+                            .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
+                            .collect(Collectors.toList());
+
+                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(email,
+                            null, authorities);
+
+                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                    Map<String, Object> details = new HashMap<>();
+                    details.put("userId", userId);
+                    details.put("email", email);
+                    details.put("roles", roleCodes);
+                    authentication.setDetails(details);
+
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                }
             }
         } catch (Exception ex) {
             log.error(LogMessages.JWT_AUTH_SET_FAILED, ex);

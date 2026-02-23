@@ -2,30 +2,31 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.SkuResponse;
+import org.example.sep26management.infrastructure.mapper.SkuMapper;
+import org.example.sep26management.infrastructure.persistence.repository.CategoryJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.AssignCategoryToSkuRequest;
-import org.example.sep26management.application.dto.response.ApiResponse;
-import org.example.sep26management.application.dto.response.SkuResponse;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.CategoryEntity;
 import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
-import org.example.sep26management.infrastructure.persistence.repository.CategoryJpaRepository;
-import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@Transactional
 public class SkuService {
 
+    private final SkuJpaRepository skuJpaRepository;
     private final SkuJpaRepository skuRepository;
+    private final SkuMapper skuMapper;
     private final CategoryJpaRepository categoryRepository;
     private final AuditLogService auditLogService;
-
     /**
      * UC: Assign Category to SKU
      * BR: Category must be active
@@ -55,14 +56,15 @@ public class SkuService {
         }
 
         // Check same category
-        if (request.getCategoryId().equals(sku.getCategoryId())) {
+        if (sku.getCategory() != null &&
+                request.getCategoryId().equals(sku.getCategory().getCategoryId())) {
             throw new BusinessException(MessageConstants.SKU_SAME_CATEGORY);
         }
 
-        Long oldCategoryId = sku.getCategoryId();
+        Long oldCategoryId = sku.getCategory().getCategoryId();
 
         // Assign
-        sku.setCategoryId(request.getCategoryId());
+        sku.setCategory(category);
         SkuEntity updatedSku = skuRepository.save(sku);
 
         log.info(LogMessages.SKU_CATEGORY_ASSIGNED, skuId, request.getCategoryId());
@@ -84,12 +86,55 @@ public class SkuService {
                 .description(sku.getDescription())
                 .brand(sku.getBrand())
                 .unit(sku.getUnit())
-                .categoryId(sku.getCategoryId())
+                .categoryId(sku.getCategory().getCategoryId())
                 .categoryCode(category != null ? category.getCategoryCode() : null)
                 .categoryName(category != null ? category.getCategoryName() : null)
                 .active(sku.getActive())
                 .createdAt(sku.getCreatedAt())
                 .updatedAt(sku.getUpdatedAt())
                 .build();
+    }
+
+    /**
+     * Lookup SKU by barcode.
+     * Used by the barcode scan flow (iPhone sends barcode → server resolves SKU).
+     *
+     * @param barcode barcode string scanned from device
+     * @return ApiResponse containing SkuResponse if found
+     */
+    @Transactional(readOnly = true)
+    public ApiResponse<SkuResponse> findByBarcode(String barcode) {
+        log.info("Looking up SKU by barcode: {}", barcode);
+
+        return skuJpaRepository.findActiveByBarcodeWithCategory(barcode)
+                .map(sku -> {
+                    log.info("SKU found for barcode {}: skuCode={}", barcode, sku.getSkuCode());
+                    return ApiResponse.success("SKU found", skuMapper.toResponse(sku));
+                })
+                .orElseGet(() -> {
+                    log.warn("No active SKU found for barcode: {}", barcode);
+                    return ApiResponse.error("SKU not found for barcode: " + barcode);
+                });
+    }
+
+    /**
+     * Lookup SKU by SKU code.
+     *
+     * @param skuCode the SKU code
+     * @return ApiResponse containing SkuResponse if found
+     */
+    @Transactional(readOnly = true)
+    public ApiResponse<SkuResponse> findBySkuCode(String skuCode) {
+        log.info("Looking up SKU by skuCode: {}", skuCode);
+
+        return skuJpaRepository.findActiveBySkuCodeWithCategory(skuCode)
+                .map(sku -> {
+                    log.info("SKU found: skuCode={}", sku.getSkuCode());
+                    return ApiResponse.success("SKU found", skuMapper.toResponse(sku));
+                })
+                .orElseGet(() -> {
+                    log.warn("No active SKU found for skuCode: {}", skuCode);
+                    return ApiResponse.error("SKU not found: " + skuCode);
+                });
     }
 }

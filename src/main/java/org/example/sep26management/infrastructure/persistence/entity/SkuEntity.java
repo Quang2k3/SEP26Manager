@@ -20,8 +20,9 @@ public class SkuEntity {
     @Column(name = "sku_id")
     private Long skuId;
 
-    @Column(name = "category_id")
-    private Long categoryId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id")
+    private CategoryEntity category;
 
     @Column(name = "sku_code", nullable = false, unique = true, length = 100)
     private String skuCode;
@@ -69,8 +70,7 @@ public class SkuEntity {
     private Integer shelfLifeDays;
 
     @Column(name = "active", nullable = false)
-    @Builder.Default
-    private Boolean active = true;
+    private Boolean active;
 
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
@@ -88,6 +88,8 @@ public class SkuEntity {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (active == null)
+            active = true;
     }
 
     @PreUpdate
