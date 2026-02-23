@@ -9,6 +9,7 @@ import org.example.sep26management.application.dto.request.CreateUserRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.UserListResponse;
 import org.example.sep26management.application.dto.response.UserResponse;
+import org.example.sep26management.infrastructure.mapper.UserMapper;
 import org.example.sep26management.domain.enums.UserStatus;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.persistence.entity.RoleEntity;
@@ -42,6 +43,7 @@ public class UserManagementService {
         private final PasswordEncoder passwordEncoder;
         private final EmailService emailService;
         private final AuditLogService auditLogService;
+        private final UserMapper userMapper;
 
         private static final String TEMP_PASSWORD_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
         private static final int TEMP_PASSWORD_LENGTH = 12;
@@ -127,20 +129,7 @@ public class UserManagementService {
                                 userAgent);
 
                 // Build response
-                UserResponse response = UserResponse.builder()
-                                .userId(savedUser.getUserId())
-                                .email(savedUser.getEmail())
-                                .fullName(savedUser.getFullName())
-                                .roleCodes(roles.stream()
-                                                .map(RoleEntity::getRoleCode)
-                                                .collect(Collectors.toSet()))
-                                .status(savedUser.getStatus())
-                                .isPermanent(savedUser.getIsPermanent())
-                                .expireDate(savedUser.getExpireDate())
-                                .createdAt(savedUser.getCreatedAt())
-                                .build();
-
-                return ApiResponse.success(MessageConstants.USER_CREATED_SUCCESS, response);
+                return ApiResponse.success(MessageConstants.USER_CREATED_SUCCESS, userMapper.toResponse(savedUser));
         }
 
         /**
@@ -165,26 +154,7 @@ public class UserManagementService {
 
                 // Convert to DTOs
                 List<UserListResponse.UserItemDTO> userItems = userPage.getContent().stream()
-                                .map(user -> {
-                                        Set<String> roleCodes = user.getRoles() != null
-                                                        ? user.getRoles().stream()
-                                                                        .map(RoleEntity::getRoleCode)
-                                                                        .collect(Collectors.toSet())
-                                                        : Set.of();
-
-                                        return UserListResponse.UserItemDTO.builder()
-                                                        .userId(user.getUserId())
-                                                        .email(user.getEmail())
-                                                        .fullName(user.getFullName())
-                                                        .phone(user.getPhone())
-                                                        .roleCodes(roleCodes)
-                                                        .status(user.getStatus())
-                                                        .isPermanent(user.getIsPermanent())
-                                                        .expireDate(user.getExpireDate())
-                                                        .createdAt(user.getCreatedAt())
-                                                        .lastLoginAt(user.getLastLoginAt())
-                                                        .build();
-                                })
+                                .map(userMapper::toListItem)
                                 .collect(Collectors.toList());
 
                 // Build response
@@ -271,20 +241,8 @@ public class UserManagementService {
                                         userAgent);
 
                         // Build response
-                        UserResponse response = UserResponse.builder()
-                                        .userId(updatedUser.getUserId())
-                                        .email(updatedUser.getEmail())
-                                        .fullName(updatedUser.getFullName())
-                                        .roleCodes(updatedUser.getRoles().stream()
-                                                        .map(RoleEntity::getRoleCode)
-                                                        .collect(Collectors.toSet()))
-                                        .status(updatedUser.getStatus())
-                                        .isPermanent(updatedUser.getIsPermanent())
-                                        .expireDate(updatedUser.getExpireDate())
-                                        .createdAt(updatedUser.getCreatedAt())
-                                        .build();
-
-                        return ApiResponse.success(MessageConstants.ROLE_ASSIGNED_SUCCESS, response);
+                        return ApiResponse.success(MessageConstants.ROLE_ASSIGNED_SUCCESS,
+                                        userMapper.toResponse(updatedUser));
 
                 } catch (BusinessException e) {
                         log.error(LogMessages.USER_ROLE_ASSIGNMENT_FAILED, userId, e.getMessage());
@@ -419,20 +377,8 @@ public class UserManagementService {
                                         userAgent);
 
                         // Build response
-                        UserResponse response = UserResponse.builder()
-                                        .userId(updatedUser.getUserId())
-                                        .email(updatedUser.getEmail())
-                                        .fullName(updatedUser.getFullName())
-                                        .roleCodes(updatedUser.getRoles().stream()
-                                                        .map(RoleEntity::getRoleCode)
-                                                        .collect(Collectors.toSet()))
-                                        .status(updatedUser.getStatus())
-                                        .isPermanent(updatedUser.getIsPermanent())
-                                        .expireDate(updatedUser.getExpireDate())
-                                        .createdAt(updatedUser.getCreatedAt())
-                                        .build();
-
-                        return ApiResponse.success(MessageConstants.STATUS_CHANGED_SUCCESS, response);
+                        return ApiResponse.success(MessageConstants.STATUS_CHANGED_SUCCESS,
+                                        userMapper.toResponse(updatedUser));
 
                 } catch (BusinessException e) {
                         log.error(LogMessages.USER_STATUS_CHANGE_FAILED, userId, e.getMessage());

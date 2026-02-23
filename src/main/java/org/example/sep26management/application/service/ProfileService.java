@@ -10,6 +10,7 @@ import org.example.sep26management.application.dto.response.UserProfileResponse;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
+import org.example.sep26management.infrastructure.mapper.UserMapper;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,9 +27,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -39,6 +38,7 @@ public class ProfileService {
     private final UserJpaRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
+    private final UserMapper userMapper;
 
     @Value("${file.upload.dir}")
     private String uploadDir;
@@ -107,31 +107,7 @@ public class ProfileService {
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException(MessageConstants.USER_NOT_FOUND));
 
-        // Extract role codes from user
-        Set<String> roleCodes = user.getRoles() != null
-                ? user.getRoles().stream()
-                        .map(role -> role.getRoleCode())
-                        .collect(Collectors.toSet())
-                : Set.of();
-
-        UserProfileResponse response = UserProfileResponse.builder()
-                .userId(user.getUserId())
-                .email(user.getEmail())
-                .fullName(user.getFullName())
-                .phone(user.getPhone())
-                .gender(user.getGender())
-                .dateOfBirth(user.getDateOfBirth())
-                .address(user.getAddress())
-                .avatarUrl(user.getAvatarUrl())
-                .roleCodes(roleCodes)
-                .status(user.getStatus())
-                .isPermanent(user.getIsPermanent())
-                .expireDate(user.getExpireDate())
-                .lastLoginAt(user.getLastLoginAt())
-                .createdAt(user.getCreatedAt())
-                .build();
-
-        return ApiResponse.success(MessageConstants.PROFILE_SUCCESS, response);
+        return ApiResponse.success(MessageConstants.PROFILE_SUCCESS, userMapper.toProfileResponse(user));
     }
 
     /**
@@ -188,28 +164,7 @@ public class ProfileService {
                 buildNewValue(user.getFullName(), user.getPhone(), user.getGender(),
                         user.getAddress(), user.getAvatarUrl()));
 
-        // Extract role codes
-        Set<String> roleCodes = user.getRoles() != null
-                ? user.getRoles().stream()
-                        .map(role -> role.getRoleCode())
-                        .collect(Collectors.toSet())
-                : Set.of();
-
-        // Build response
-        UserProfileResponse response = UserProfileResponse.builder()
-                .userId(user.getUserId())
-                .email(user.getEmail())
-                .fullName(user.getFullName())
-                .phone(user.getPhone())
-                .gender(user.getGender())
-                .dateOfBirth(user.getDateOfBirth())
-                .address(user.getAddress())
-                .avatarUrl(user.getAvatarUrl())
-                .roleCodes(roleCodes)
-                .status(user.getStatus())
-                .build();
-
-        return ApiResponse.success(MessageConstants.PROFILE_UPDATED, response);
+        return ApiResponse.success(MessageConstants.PROFILE_UPDATED, userMapper.toProfileResponse(user));
     }
 
     // ============================================
