@@ -90,6 +90,8 @@ file:
     max-size: 5242880
 
 server:
+  # 8082 to locally test with Postman, 8080 for deployment
+
   port: 8080
   servlet:
     context-path: /api

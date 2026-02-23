@@ -75,4 +75,16 @@ public final class MessageConstants {
     public static final String AUTH_FAILED = "Authentication failed";
     public static final String ACCESS_DENIED = "You do not have permission to perform this action!";
     public static final String UNEXPECTED_ERROR = "An unexpected error occurred. Please try again later.";
+
+    // ==================== Category Messages ====================
+    public static final String CATEGORY_CREATED_SUCCESS = "Category created successfully";
+    public static final String CATEGORY_UPDATED_SUCCESS = "Category updated successfully";
+    public static final String CATEGORY_RETRIEVED_SUCCESS = "Category retrieved successfully";
+    public static final String CATEGORY_LIST_SUCCESS = "Categories retrieved successfully";
+    public static final String CATEGORY_NOT_FOUND = "Category not found with ID: %s";
+    public static final String CATEGORY_CODE_EXISTS = "Category code '%s' already exists";
+    public static final String CATEGORY_PARENT_NOT_FOUND = "Parent category not found with ID: %s";
+    public static final String CATEGORY_PARENT_INACTIVE = "Cannot assign to an inactive parent category";
+    public static final String CATEGORY_SELF_PARENT = "A category cannot be its own parent";
+    public static final String CATEGORY_CIRCULAR_REFERENCE = "Circular parent-child reference detected";
 }
