@@ -1097,34 +1097,154 @@ INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, di
 -- INSERT SAMPLE DATA
 -- ============================================================
 
--- Sample Warehouse
-INSERT INTO warehouses (warehouse_code, warehouse_name, address, timezone) VALUES 
-('WH001', 'Main Warehouse', '123 Industrial Park, Ho Chi Minh City', 'Asia/Ho_Chi_Minh'),
-('WH002', 'North Warehouse', '456 Hanoi Road, Hanoi', 'Asia/Ho_Chi_Minh');
+-- ============================================================
+-- SEED DATA: roles, users, user_roles, skus
+-- Safe to re-run (uses ON CONFLICT DO NOTHING)
+-- ============================================================
 
--- Sample Roles
-INSERT INTO roles (role_code, role_name, description) VALUES 
-('ADMIN', 'Administrator', 'Full system access'),
-('MANAGER', 'Warehouse Manager', 'Manage warehouse operations'),
-('KEEPER', 'Warehouse Keeper', 'Daily warehouse operations'),
-('ACCOUNTANT', 'Accountant', 'Financial and reporting'),
-('QA', 'Quality Assurance', 'Quality control');
+-- 1) ROLES
+INSERT INTO roles (role_code, role_name, description, active)
+VALUES
+  ('MANAGER',     'Warehouse Manager', 'Manage warehouse operations', true),
+  ('KEEPER',      'Warehouse Keeper',  'Daily warehouse operations',  true),
+  ('ACCOUNTANT',  'Accountant',        'Financial and reporting',     true)
+ON CONFLICT (role_code) DO NOTHING;
 
--- Sample Admin User (password: Admin@123)
-INSERT INTO users (email, password_hash, full_name, status, is_first_login, is_permanent) VALUES 
-('admin@warehouse.com', '$2a$10$N9qo8uLOickgx2ZMRZoMye1ozeQ9r.2kCT.L3ejE6VQqL0cVIyqQO', 'System Administrator', 'ACTIVE', false, true);
 
--- Assign Admin Role
-INSERT INTO user_roles (user_id, role_id) VALUES 
-((SELECT user_id FROM users WHERE email = 'admin@warehouse.com'), 
- (SELECT role_id FROM roles WHERE role_code = 'ADMIN'));
+-- 2) USERS
+-- NOTE: Replace password_hash values with your real BCrypt hashes
+INSERT INTO users (
+  email, password_hash, full_name, phone, gender, date_of_birth, address,
+  status, is_first_login, is_permanent, expire_date
+)
+VALUES
+  ('quangnphe170355@fpt.edu.vn',    '$2a$10$3HB4DcPQ/JF.PqC6YZgkb.XXoDqAtCSF2xgtU2d7iCDuZyRh7DrAi', 'Nguyễn Phước Quang', '0900000001', 'MALE',   '1998-01-01', 'HCM', 'ACTIVE',  false, true,  NULL),
+  ('nguyen.quang6633@gmail.com', '$2a$10$2m//9tx7/QAH5WgcNyTRS.zkLyXOZSNC/Sx2KtD1nFgT3Wqw6sjaG', 'Trương Tuấn Anh',  '0900000002', 'FEMALE', '1999-02-02', 'HCM', 'ACTIVE',  true,  true,  NULL),
+  ('quangnphe170355@gmail.com',  '$2a$10$2m//9tx7/QAH5WgcNyTRS.zkLyXOZSNC/Sx2KtD1nFgT3Wqw6sjaG', 'Lưu Tiến Nhật',   '0900000003', 'MALE',   '2000-03-03', 'HCM', 'ACTIVE',  true,  true,  NULL),
+  ('tranhoang1112003@gmail.com',     '$2a$10$2m//9tx7/QAH5WgcNyTRS.zkLyXOZSNC/Sx2KtD1nFgT3Wqw6sjaG', 'Trần Huy Hoàng',         '0900000004', 'FEMALE', '2001-04-04', 'HCM', 'ACTIVE',  false,  true,  NULL)
+ON CONFLICT (email) DO NOTHING;
 
--- Sample Category
-INSERT INTO categories (category_code, category_name, description) VALUES 
-('CLEAN', 'Cleaning Products', 'Household and industrial cleaning products'),
-('CHEM', 'Chemicals', 'Industrial chemicals');
 
--- Sample SKU
-INSERT INTO skus (category_id, sku_code, sku_name, description, brand, unit, package_type, active) VALUES 
-((SELECT category_id FROM categories WHERE category_code = 'CLEAN'), 
- 'SKU001', 'Multi-Purpose Cleaner 500ml', 'Lemon scented multi-purpose cleaner', 'CleanPro', 'bottle', 'Bottle', true);
+-- 3) USER_ROLES (gán role cho user)
+INSERT INTO user_roles (user_id, role_id)
+VALUES
+  ((SELECT user_id FROM users WHERE email = 'nguyen.quang6633@gmail.com'),
+   (SELECT role_id FROM roles WHERE role_code = 'MANAGER')),
+
+  ((SELECT user_id FROM users WHERE email = 'quangnphe170355@fpt.edu.vn'),
+   (SELECT role_id FROM roles WHERE role_code = 'MANAGER')),
+
+  ((SELECT user_id FROM users WHERE email = 'quangnphe170355@gmail.com'),
+   (SELECT role_id FROM roles WHERE role_code = 'KEEPER')),
+
+  ((SELECT user_id FROM users WHERE email = 'tranhoang1112003@gmail.com'),
+   (SELECT role_id FROM roles WHERE role_code = 'ACCOUNTANT'))
+ON CONFLICT (user_id, role_id) DO NOTHING;
+
+
+-- -- (Khuyến nghị) 4) USER_WAREHOUSES (gán user vào kho) - nếu bạn muốn phân quyền theo kho
+-- -- Nếu bạn chưa cần thì bỏ block này cũng được
+-- INSERT INTO user_warehouses (user_id, warehouse_id, assigned_by, active)
+-- VALUES
+--   ((SELECT user_id FROM users WHERE email = 'admin@wms.local'),
+--    (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH001'),
+--    (SELECT user_id FROM users WHERE email = 'admin@wms.local'), true),
+--
+--   ((SELECT user_id FROM users WHERE email = 'manager1@wms.local'),
+--    (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH001'),
+--    (SELECT user_id FROM users WHERE email = 'admin@wms.local'), true),
+--
+--   ((SELECT user_id FROM users WHERE email = 'keeper1@wms.local'),
+--    (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH001'),
+--    (SELECT user_id FROM users WHERE email = 'admin@wms.local'), true),
+--
+--   ((SELECT user_id FROM users WHERE email = 'acc1@wms.local'),
+--    (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH001'),
+--    (SELECT user_id FROM users WHERE email = 'admin@wms.local'), true)
+-- ON CONFLICT (user_id, warehouse_id) DO NOTHING;
+
+
+-- 5) SKUS (thêm nhiều SKU mẫu)
+-- Lưu ý: barcode UNIQUE, nếu chưa có thì để NULL
+INSERT INTO skus (
+  category_id, sku_code, sku_name, description, brand,
+  package_type, volume_ml, weight_g, barcode, unit, origin_country,
+  scent, image_url, shelf_life_days, active
+)
+VALUES
+  ((SELECT category_id FROM categories WHERE category_code = 'HC'),
+   'SKU001', 'Nước giặt Luxury 3.8kg (4 can)', 'Nước giặt xả quần áo hương Luxury', 'SWAT',
+   'Thùng', NULL, NULL, NULL, '4', 'VN',
+   'Luxury', NULL, 730, true),
+
+  ((SELECT category_id FROM categories WHERE category_code = 'HC'),
+   'SKU002', 'Nước rửa chén Lemon 3.5kg (4 can)', 'Nước rửa chén hương chanh', 'SWAT',
+   'Thùng', NULL, NULL, NULL, '4', 'VN',
+   'Lemon', NULL, 730, true),
+
+  ((SELECT category_id FROM categories WHERE category_code = 'PC'),
+   'SKU003', 'Sữa tắm Fresh 900ml', 'Sữa tắm hương Fresh', 'SWAT',
+   'Chai', 900, NULL, NULL, 'Chai', 'VN',
+   'Fresh', NULL, 1095, true)
+ON CONFLICT (sku_code) DO NOTHING;
+
+
+-- 0) WAREHOUSE (bắt buộc nếu chưa có)
+INSERT INTO warehouses (warehouse_code, warehouse_name, address, timezone)
+VALUES ('WH01', 'Kho Chính', 'Quận 9, TP.HCM', 'Asia/Ho_Chi_Minh')
+ON CONFLICT (warehouse_code) DO NOTHING;
+
+-- 0.1) CATEGORIES (bắt buộc - SKU cần FK)
+INSERT INTO categories (category_code, category_name, description)
+VALUES
+  ('HC', 'Household Care', 'Sản phẩm gia dụng'),
+  ('PC', 'Personal Care',  'Sản phẩm chăm sóc cá nhân')
+ON CONFLICT (category_code) DO NOTHING;
+
+
+-- 6) ZONES
+INSERT INTO zones (warehouse_id, zone_code, zone_name)
+VALUES
+  ((SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01'), 'Z-INB', 'Khu nhận hàng'),
+  ((SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01'), 'Z-HC',  'Khu Household Care'),
+  ((SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01'), 'Z-PC',  'Khu Personal Care')
+ON CONFLICT (warehouse_id, zone_code) DO NOTHING;
+
+
+-- 7) LOCATIONS
+INSERT INTO locations (warehouse_id, zone_id, location_code, location_type, is_staging)
+VALUES
+  -- Z-INB: nơi để hàng mới nhận về
+  ((SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01'),
+   (SELECT zone_id FROM zones WHERE zone_code = 'Z-INB' AND warehouse_id = (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01')),
+   'WH01-INB-STAGE', 'STAGING', true),
+
+  -- Z-HC bins
+  ((SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01'),
+   (SELECT zone_id FROM zones WHERE zone_code = 'Z-HC' AND warehouse_id = (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01')),
+   'WH01-ZHC-A01-R01-B01', 'BIN', false),
+
+  ((SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01'),
+   (SELECT zone_id FROM zones WHERE zone_code = 'Z-HC' AND warehouse_id = (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01')),
+   'WH01-ZHC-A01-R01-B02', 'BIN', false),
+
+  ((SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01'),
+   (SELECT zone_id FROM zones WHERE zone_code = 'Z-HC' AND warehouse_id = (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01')),
+   'WH01-ZHC-A01-R02-B01', 'BIN', false),
+
+  -- Z-PC bins
+  ((SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01'),
+   (SELECT zone_id FROM zones WHERE zone_code = 'Z-PC' AND warehouse_id = (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01')),
+   'WH01-ZPC-A01-R01-B01', 'BIN', false),
+
+  ((SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01'),
+   (SELECT zone_id FROM zones WHERE zone_code = 'Z-PC' AND warehouse_id = (SELECT warehouse_id FROM warehouses WHERE warehouse_code = 'WH01')),
+   'WH01-ZPC-A01-R01-B02', 'BIN', false)
+ON CONFLICT (warehouse_id, location_code) DO NOTHING;
+
+
+-- 8) SUPPLIERS
+INSERT INTO suppliers (supplier_code, supplier_name, phone, email, active)
+VALUES
+  ('SUP001', 'Công ty TNHH SWAT', '0281234567', 'supply@swat.vn', true)
+ON CONFLICT (supplier_code) DO NOTHING;
