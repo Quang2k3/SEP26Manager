@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Getter
 @Setter
@@ -12,7 +13,6 @@ import java.math.BigDecimal;
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class SkuResponse {
-
     private Long skuId;
     private String skuCode;
     private String skuName;
@@ -35,4 +35,6 @@ public class SkuResponse {
     private Long categoryId;
     private String categoryCode;
     private String categoryName;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 }

@@ -198,4 +198,23 @@ public final class LogMessages {
     public static final String CATEGORY_CONTROLLER_CREATE_FAILED = "Failed to create category: {}";
     public static final String CATEGORY_CONTROLLER_UPDATE_REQUEST = "Update category ID: {} by userId: {}";
     public static final String CATEGORY_CONTROLLER_UPDATE_FAILED = "Failed to update category ID {}: {}";
+
+    // ============================================================
+    // CATEGORY DEACTIVATE & TREE
+    // ============================================================
+    public static final String CATEGORY_DEACTIVATING = "Deactivating category ID: {}";
+    public static final String CATEGORY_DEACTIVATED = "Category deactivated successfully ID: {}";
+    public static final String CATEGORY_TREE_FETCHING = "Fetching category tree";
+
+    // ============================================================
+    // MAP CATEGORY TO ZONE (Convention-based)
+    // ============================================================
+    public static final String CZM_MAPPING = "Mapping category ID: {} to zone in warehouse ID: {}";
+    public static final String CZM_MAPPED = "Category {} mapped to zone {} by convention";
+
+    // ============================================================
+    // SKU
+    // ============================================================
+    public static final String SKU_ASSIGNING_CATEGORY = "Assigning category to SKU: skuId={}, categoryId={}";
+    public static final String SKU_CATEGORY_ASSIGNED = "Category assigned to SKU: skuId={}, categoryId={}";
 }
