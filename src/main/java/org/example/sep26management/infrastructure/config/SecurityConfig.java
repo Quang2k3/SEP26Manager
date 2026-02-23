@@ -67,6 +67,8 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/api/v1/auth/**",
                                 "/v1/auth/**",
+                                "/v1/scan", // scanner HTML page (token in URL param)
+                                "/api/v1/scan",
                                 "/actuator/**",
                                 "/api/actuator/**",
                                 "/swagger-ui/**",
@@ -80,7 +82,7 @@ public class SecurityConfig {
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
                         .requestMatchers("/v1/zones/**").hasRole("MANAGER")
                         .requestMatchers("/v1/category-zone-mappings/**").hasRole("MANAGER") // Zone Management
-                        .requestMatchers("/v1/categories/**").hasAnyRole("ADMIN","MANAGER")
+                        .requestMatchers("/v1/categories/**").hasAnyRole("ADMIN", "MANAGER")
                         // Authenticated endpoints
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
