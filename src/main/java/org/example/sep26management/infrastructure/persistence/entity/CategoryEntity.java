@@ -25,15 +25,15 @@ public class CategoryEntity {
     @Column(name = "category_name", nullable = false, length = 200)
     private String categoryName;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "parent_category_id")
-    private CategoryEntity parentCategory;
+    @Column(name = "parent_category_id")
+    private Long parentCategoryId;
 
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
     @Column(name = "active", nullable = false)
-    private Boolean active;
+    @Builder.Default
+    private Boolean active = true;
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -45,8 +45,6 @@ public class CategoryEntity {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
-        if (active == null)
-            active = true;
     }
 
     @PreUpdate
