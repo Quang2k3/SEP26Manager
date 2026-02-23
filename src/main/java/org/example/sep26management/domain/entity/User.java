@@ -30,6 +30,7 @@ public class User {
     // Account Management
     private Set<String> roleCodes; // Dynamic roles from database (e.g., ["ADMIN", "MANAGER"])
     private UserStatus status;
+    private Set<String> permissionCodes; // Fine-grained permissions resolved from roles
 
     // Account Type
     private Boolean isPermanent;

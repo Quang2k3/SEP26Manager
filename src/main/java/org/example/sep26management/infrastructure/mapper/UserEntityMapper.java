@@ -29,6 +29,14 @@ public class UserEntityMapper {
                         .collect(Collectors.toSet())
                 : null;
 
+        // Extract permission codes from all roles
+        Set<String> permissionCodes = entity.getRoles() != null
+                ? entity.getRoles().stream()
+                        .flatMap(role -> role.getPermissions().stream())
+                        .map(permission -> permission.getPermissionCode())
+                        .collect(Collectors.toSet())
+                : null;
+
         return User.builder()
                 .userId(entity.getUserId())
                 .email(entity.getEmail())
@@ -40,6 +48,7 @@ public class UserEntityMapper {
                 .address(entity.getAddress())
                 .avatarUrl(entity.getAvatarUrl())
                 .roleCodes(roleCodes)
+                .permissionCodes(permissionCodes)
                 .status(entity.getStatus())
                 .isPermanent(entity.getIsPermanent())
                 .expireDate(entity.getExpireDate())
