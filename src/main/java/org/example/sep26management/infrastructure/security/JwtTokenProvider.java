@@ -40,6 +40,9 @@ public class JwtTokenProvider {
         claims.put("email", user.getEmail());
         // Store role codes as comma-separated string or list
         claims.put("roles", user.getRoleCodes() != null ? String.join(",", user.getRoleCodes()) : "");
+        // Store permission codes as comma-separated string for fine-grained checks on frontend if needed
+        claims.put("permissions",
+                user.getPermissionCodes() != null ? String.join(",", user.getPermissionCodes()) : "");
         claims.put("fullName", user.getFullName());
 
         long expiration = rememberMe ? jwtRememberMeExpirationMs : jwtExpirationMs;
@@ -97,6 +100,24 @@ public class JwtTokenProvider {
             return new HashSet<>();
         }
         return Arrays.stream(rolesStr.split(","))
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * Get permission codes from JWT token
+     */
+    public Set<String> getPermissionCodesFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        String permissionsStr = claims.get("permissions", String.class);
+        if (permissionsStr == null || permissionsStr.isEmpty()) {
+            return new HashSet<>();
+        }
+        return Arrays.stream(permissionsStr.split(","))
                 .collect(Collectors.toSet());
     }
 
