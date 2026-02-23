@@ -51,7 +51,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         null,
                         authorities);
 
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                 // Set user ID as principal for easy access
                 Map<String, Object> details = new HashMap<>();

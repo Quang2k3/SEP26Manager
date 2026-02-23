@@ -179,4 +179,23 @@ public final class LogMessages {
     public static final String EXCEPTION_FORBIDDEN = "Forbidden: {}";
     public static final String EXCEPTION_FILE_SIZE_EXCEEDED = "File size exceeded: {}";
     public static final String EXCEPTION_UNEXPECTED = "Unexpected error occurred";
+
+    // ============================================================
+    // CATEGORY MANAGEMENT SERVICE
+    // ============================================================
+    public static final String CATEGORY_CREATING = "Creating category with code: {}";
+    public static final String CATEGORY_CREATED = "Category created successfully with ID: {}";
+    public static final String CATEGORY_CODE_DUPLICATE = "Attempted to create category with duplicate code: {}";
+    public static final String CATEGORY_UPDATING = "Updating category with ID: {}";
+    public static final String CATEGORY_UPDATED = "Category updated successfully with ID: {}";
+    public static final String CATEGORY_FETCHING = "Fetching category with ID: {}";
+    public static final String CATEGORY_LIST_FETCHING = "Fetching all categories";
+
+    // ============================================================
+    // CATEGORY CONTROLLER
+    // ============================================================
+    public static final String CATEGORY_CONTROLLER_CREATE_REQUEST = "Create category request: {} by userId: {}";
+    public static final String CATEGORY_CONTROLLER_CREATE_FAILED = "Failed to create category: {}";
+    public static final String CATEGORY_CONTROLLER_UPDATE_REQUEST = "Update category ID: {} by userId: {}";
+    public static final String CATEGORY_CONTROLLER_UPDATE_FAILED = "Failed to update category ID {}: {}";
 }
