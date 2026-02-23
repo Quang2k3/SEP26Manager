@@ -7,8 +7,11 @@ import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
+import io.swagger.v3.oas.models.servers.Server;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
 
 @Configuration
 public class OpenApiConfig {
@@ -18,10 +21,16 @@ public class OpenApiConfig {
                 final String securitySchemeName = "bearerAuth";
 
                 return new OpenAPI()
+                                .servers(List.of(
+                                                new Server().url("https://api.cleanhousewms.id.vn/api")
+                                                                .description("Production"),
+                                                new Server().url("http://localhost:8080/api")
+                                                                .description("Local Docker"),
+                                                new Server().url("http://localhost:8081/api").description("Local Dev")))
                                 .info(new Info()
                                                 .title("Warehouse Management System API")
                                                 .version("1.0.0")
-                                                .description("API documentation for Warehouse Management System - Module A: User & Access")
+                                                .description("API documentation for Warehouse Management System")
                                                 .contact(new Contact()
                                                                 .name("Development Team")
                                                                 .email("dev@warehouse.com"))
