@@ -5,6 +5,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Scanner page using Quagga2 — specialized for linear barcodes (Code 39, Code
+ * 128).
+ * Much better than ZXing for 1D barcodes on iOS Safari.
+ */
 @RestController
 public class ScannerPageController {
 
@@ -28,7 +33,9 @@ public class ScannerPageController {
                 "<meta charset='UTF-8'>" +
                 "<meta name='viewport' content='width=device-width,initial-scale=1.0,user-scalable=no'>" +
                 "<title>Scanner</title>" +
-                "<script src='https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'></script>" +
+                // Quagga2 — specialized for linear/1D barcodes, much better than ZXing for Code
+                // 39/128 on mobile
+                "<script src='https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.2.6/dist/quagga.min.js'></script>" +
                 "<style>" +
                 "*{box-sizing:border-box;margin:0;padding:0}" +
                 "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}"
@@ -39,13 +46,16 @@ public class ScannerPageController {
                 ".badge{background:#dbeafe;color:#1e3a8a;border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700}"
                 +
                 ".container{padding:12px;max-width:500px;margin:0 auto}" +
-                "#cam-wrap{position:relative;border-radius:14px;overflow:hidden;border:2px solid #3b82f6;background:#000;margin-bottom:12px}"
+                "#cam-wrap{position:relative;border-radius:14px;overflow:hidden;border:2px solid #3b82f6;background:#111;margin-bottom:12px;min-height:180px}"
                 +
-                "#video{width:100%;display:block;max-height:52vw;object-fit:cover}" +
-                "#scan-line{position:absolute;left:8%;right:8%;height:2px;background:linear-gradient(90deg,transparent,#34d399,transparent);top:50%;animation:scan 1.8s ease-in-out infinite}"
+                // Quagga renders into a viewport div
+                "#interactive{width:100%;min-height:180px;position:relative}" +
+                "#interactive video,#interactive canvas{width:100%;height:auto;display:block;border-radius:12px}" +
+                "#interactive canvas.drawingBuffer{position:absolute;top:0;left:0}" +
+                "#scan-line{position:absolute;left:8%;right:8%;height:2px;background:linear-gradient(90deg,transparent,#34d399,transparent);top:50%;animation:scan 1.8s ease-in-out infinite;pointer-events:none;z-index:10}"
                 +
                 "@keyframes scan{0%,100%{top:20%}50%{top:80%}}" +
-                "#cam-status{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.65);color:#94a3b8;font-size:11px;padding:5px 10px;text-align:center}"
+                "#cam-status{background:#1e293b;color:#94a3b8;font-size:11px;padding:6px 12px;text-align:center;border-radius:0 0 12px 12px}"
                 +
                 ".card{background:#1e293b;border-radius:12px;padding:14px;margin-bottom:10px}" +
                 ".card-title{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;font-weight:600}"
@@ -59,7 +69,7 @@ public class ScannerPageController {
                 +
                 "table{width:100%;border-collapse:collapse;font-size:13px}" +
                 "th{text-align:left;color:#475569;padding:5px 4px;font-size:11px;font-weight:600}" +
-                "td{padding:9px 4px;border-bottom:1px solid #1e293b}" +
+                "td{padding:9px 4px;border-bottom:1px solid #263347}" +
                 ".qc{text-align:right;font-weight:700;color:#34d399;font-size:15px}" +
                 ".sc{color:#94a3b8;font-size:11px}" +
                 ".toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;padding:11px 24px;border-radius:28px;font-weight:700;font-size:14px;display:none;white-space:nowrap;box-shadow:0 4px 24px rgba(0,0,0,.5)}"
@@ -73,10 +83,10 @@ public class ScannerPageController {
                 "</header>" +
                 "<div class='container'>" +
                 "<div id='cam-wrap'>" +
-                "<video id='video' autoplay muted playsinline></video>" +
+                "<div id='interactive'></div>" +
                 "<div id='scan-line'></div>" +
-                "<div id='cam-status'>Đang khởi động camera…</div>" +
                 "</div>" +
+                "<div id='cam-status'>Đang khởi động camera…</div>" +
                 "<div class='card'>" +
                 "<div class='card-title'>Nhập thủ công (hoặc máy scan Bluetooth)</div>" +
                 "<div class='row'>" +
@@ -98,6 +108,8 @@ public class ScannerPageController {
                 "var API=window.location.origin+'/api/v1/scan-events';\n" +
                 "var scanning=false;\n" +
                 "var lineData={};\n" +
+                "var lastCode=null;\n" +
+                "var debounceTimer=null;\n" +
 
                 "function toast(msg,err){\n" +
                 "  var t=document.getElementById('toast');\n" +
@@ -115,7 +127,6 @@ public class ScannerPageController {
                 "  document.getElementById('cnt').textContent=Object.keys(lineData).length+' SKU';\n" +
                 "}\n" +
 
-                // Safe fetch — handles non-JSON responses gracefully
                 "function sendBarcode(barcode,qty){\n" +
                 "  if(scanning)return;scanning=true;\n" +
                 "  setStatus('Đang gửi: '+barcode);\n" +
@@ -126,7 +137,7 @@ public class ScannerPageController {
                 "  }).then(function(r){\n" +
                 "    return r.text().then(function(txt){\n" +
                 "      try{return JSON.parse(txt);}\n" +
-                "      catch(e){return {success:false,message:'HTTP '+r.status+' — '+txt.substring(0,120)};}\n" +
+                "      catch(e){return {success:false,message:'HTTP '+r.status+': '+txt.substring(0,120)};}\n" +
                 "    });\n" +
                 "  }).then(function(d){\n" +
                 "    if(d.success){\n" +
@@ -139,10 +150,10 @@ public class ScannerPageController {
                 "    }\n" +
                 "    setStatus('Camera sẵn sàng — hướng vào barcode');\n" +
                 "  }).catch(function(e){\n" +
-                "    toast('Mất kết nối: '+e,true);\n" +
-                "    setStatus('Lỗi mạng');\n" +
+                "    toast('Mất kết nối',true);\n" +
+                "    setStatus('Lỗi mạng: '+e);\n" +
                 "  }).finally(function(){\n" +
-                "    setTimeout(function(){scanning=false;},1200);\n" +
+                "    setTimeout(function(){scanning=false;},1500);\n" +
                 "  });\n" +
                 "}\n" +
 
@@ -157,43 +168,48 @@ public class ScannerPageController {
                 +
                 "});\n" +
 
-                // Camera: ZXing-only, use decodeFromStream to avoid conflict with existing
-                // stream
+                // Quagga2 initialization — specialized for Code 39 / Code 128
                 "window.addEventListener('load',function(){\n" +
-                "  navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}})\n"
-                +
-                "  .then(function(stream){\n" +
-                "    var vid=document.getElementById('video');\n" +
-                "    vid.srcObject=stream;\n" +
-                "    return vid.play().then(function(){return stream;});\n" +
-                "  }).then(function(stream){\n" +
-                "    startZxing(stream);\n" +
-                "  }).catch(function(e){\n" +
-                "    setStatus('Camera không khả dụng ('+e.message+') — dùng nhập tay');\n" +
+                "  Quagga.init({\n" +
+                "    inputStream:{\n" +
+                "      name:'Live',\n" +
+                "      type:'LiveStream',\n" +
+                "      target:document.getElementById('interactive'),\n" +
+                "      constraints:{\n" +
+                "        facingMode:'environment',\n" +
+                "        width:{ideal:1280},\n" +
+                "        height:{ideal:720}\n" +
+                "      }\n" +
+                "    },\n" +
+                "    locator:{patchSize:'medium',halfSample:true},\n" +
+                "    numOfWorkers:0,\n" + // 0 = run in main thread (required for iOS Safari)
+                "    frequency:10,\n" + // scan 10 times per second
+                "    decoder:{\n" +
+                "      readers:['code_39_reader','code_128_reader']\n" +
+                "    },\n" +
+                "    locate:true\n" +
+                "  },function(err){\n" +
+                "    if(err){\n" +
+                "      setStatus('Camera lỗi: '+err.message+' — dùng nhập tay');\n" +
+                "      toast('Không mở được camera',true);\n" +
+                "      return;\n" +
+                "    }\n" +
+                "    Quagga.start();\n" +
+                "    setStatus('Camera sẵn sàng (Quagga2 · Code 39/128) — hướng vào barcode');\n" +
+                "  });\n" +
+
+                // Quagga detected event — fired when barcode is successfully decoded
+                "  Quagga.onDetected(function(data){\n" +
+                "    var code=data.codeResult.code.trim().toUpperCase();\n" +
+                "    if(code.length<2)return;\n" +
+                // Debounce: same code within 2s → ignore
+                "    if(code===lastCode)return;\n" +
+                "    lastCode=code;\n" +
+                "    clearTimeout(debounceTimer);\n" +
+                "    debounceTimer=setTimeout(function(){lastCode=null;},2000);\n" +
+                "    sendBarcode(code,1);\n" +
                 "  });\n" +
                 "});\n" +
-
-                // ZXing: use decodeFromStream (passes existing stream, no new getUserMedia)
-                "function startZxing(stream){\n" +
-                "  if(typeof ZXing==='undefined'){setStatus('ZXing không tải được — dùng nhập tay');return;}\n" +
-                "  var hints=new Map();\n" +
-                "  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.CODE_39,ZXing.BarcodeFormat.CODE_128]);\n"
-                +
-                "  hints.set(ZXing.DecodeHintType.TRY_HARDER,true);\n" +
-                "  var reader=new ZXing.BrowserMultiFormatReader(hints,600);\n" +
-                "  var vid=document.getElementById('video');\n" +
-                "  // decodeFromStream reuses existing stream — no camera conflict\n" +
-                "  reader.decodeFromStream(stream,vid,function(result,err){\n" +
-                "    if(result&&!scanning){\n" +
-                "      var raw=result.getText().trim().toUpperCase();\n" +
-                "      if(raw.length>=2)sendBarcode(raw,1);\n" +
-                "    }\n" +
-                "    if(err&&typeof ZXing!=='undefined'&&!(err instanceof ZXing.NotFoundException)){\n" +
-                "      setStatus('Lỗi ZXing: '+err.message);\n" +
-                "    }\n" +
-                "  });\n" +
-                "  setStatus('Camera sẵn sàng (Code 39/128) — hướng vào barcode');\n" +
-                "}\n" +
                 "</script></body></html>";
     }
 }
