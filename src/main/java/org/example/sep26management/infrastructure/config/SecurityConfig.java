@@ -44,8 +44,9 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        // Chỉ cho phép frontend chạy trên localhost:3000 gọi API
-        config.setAllowedOrigins(List.of("http://localhost:3000"));
+        // Dùng allowedOriginPatterns để hỗ trợ credentials với mọi origin (Swagger UI,
+        // frontend, mobile)
+        config.setAllowedOriginPatterns(List.of("*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization", "Content-Type"));

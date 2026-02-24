@@ -41,7 +41,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (jwtTokenProvider.isScanToken(jwt)) {
                     String sessionId = jwtTokenProvider.getSessionIdFromScanToken(jwt);
 
-                    List<SimpleGrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_SCANNER"));
+                    // Read roles from token claims (roles="KEEPER") instead of hardcoding
+                    // ROLE_SCANNER
+                    Set<String> roleCodes = jwtTokenProvider.getRoleCodesFromToken(jwt);
+                    List<SimpleGrantedAuthority> authorities = roleCodes.isEmpty()
+                            ? List.of(new SimpleGrantedAuthority("ROLE_KEEPER"))
+                            : roleCodes.stream()
+                                    .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
+                                    .collect(Collectors.toList());
 
                     UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                             "scanner:" + sessionId, null, authorities);
