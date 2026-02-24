@@ -252,3 +252,9 @@ function dcp { docker ps }
 ```
 
 Sau đó chỉ cần gõ: `dcu`, `dcd`, `dcl`, `dcp` 🚀
+
+
+# Trong thư mục SEP26Manager
+docker compose down
+docker compose build --no-cache
+docker compose up -d

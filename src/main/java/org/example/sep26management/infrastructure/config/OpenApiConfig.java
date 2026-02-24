@@ -8,25 +8,37 @@ import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.servers.Server;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Configuration
 public class OpenApiConfig {
 
+        @Value("${spring.profiles.active:prod}")
+        private String activeProfile;
+
         @Bean
         public OpenAPI customOpenAPI() {
                 final String securitySchemeName = "bearerAuth";
 
+                // Đưa server local lên đầu khi chạy dev/local để Swagger mặc định gọi đúng
+                List<Server> servers = new ArrayList<>();
+                if (activeProfile.contains("dev") || activeProfile.contains("local")) {
+                        servers.add(new Server().url("http://localhost:8081/api").description("Local Dev (active)"));
+                        servers.add(new Server().url("http://localhost:8080/api").description("Local Docker"));
+                        servers.add(new Server().url("https://api.cleanhousewms.id.vn/api").description("Production"));
+                } else {
+                        servers.add(new Server().url("https://api.cleanhousewms.id.vn/api").description("Production"));
+                        servers.add(new Server().url("http://localhost:8080/api").description("Local Docker"));
+                        servers.add(new Server().url("http://localhost:8081/api").description("Local Dev"));
+                }
+
                 return new OpenAPI()
-                                .servers(List.of(
-                                                new Server().url("https://api.cleanhousewms.id.vn/api")
-                                                                .description("Production"),
-                                                new Server().url("http://localhost:8080/api")
-                                                                .description("Local Docker"),
-                                                new Server().url("http://localhost:8081/api").description("Local Dev")))
+                                .servers(servers)
                                 .info(new Info()
                                                 .title("Warehouse Management System API")
                                                 .version("1.0.0")
