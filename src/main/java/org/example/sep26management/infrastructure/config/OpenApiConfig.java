@@ -18,44 +18,36 @@ import java.util.List;
 @Configuration
 public class OpenApiConfig {
 
-        @Value("${spring.profiles.active:prod}")
-        private String activeProfile;
+    @Value("${spring.profiles.active:prod}")
+    private String activeProfile;
 
-        @Bean
-        public OpenAPI customOpenAPI() {
-                final String securitySchemeName = "bearerAuth";
+    @Bean
+    public OpenAPI customOpenAPI() {
+        final String securitySchemeName = "bearerAuth";
 
-                // Đưa server local lên đầu khi chạy dev/local để Swagger mặc định gọi đúng
-                List<Server> servers = new ArrayList<>();
-                if (activeProfile.contains("dev") || activeProfile.contains("local")) {
-                        servers.add(new Server().url("http://localhost:8081/api").description("Local Dev (active)"));
-                        servers.add(new Server().url("http://localhost:8080/api").description("Local Docker"));
-                        servers.add(new Server().url("https://api.cleanhousewms.id.vn/api").description("Production"));
-                } else {
-                        servers.add(new Server().url("https://api.cleanhousewms.id.vn/api").description("Production"));
-                        servers.add(new Server().url("http://localhost:8080/api").description("Local Docker"));
-                        servers.add(new Server().url("http://localhost:8081/api").description("Local Dev"));
-                }
+        List<Server> servers = new ArrayList<>();
+        servers.add(new Server().url("https://api.cleanhousewms.id.vn/api").description("Production"));
 
-                return new OpenAPI()
-                                .servers(servers)
-                                .info(new Info()
-                                                .title("Warehouse Management System API")
-                                                .version("1.0.0")
-                                                .description("API documentation for Warehouse Management System")
-                                                .contact(new Contact()
-                                                                .name("Development Team")
-                                                                .email("dev@warehouse.com"))
-                                                .license(new License()
-                                                                .name("Apache 2.0")
-                                                                .url("http://www.apache.org/licenses/LICENSE-2.0.html")))
-                                .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
-                                .components(new Components()
-                                                .addSecuritySchemes(securitySchemeName,
-                                                                new SecurityScheme()
-                                                                                .name(securitySchemeName)
-                                                                                .type(SecurityScheme.Type.HTTP)
-                                                                                .scheme("bearer")
-                                                                                .bearerFormat("JWT")));
-        }
+        return new OpenAPI()
+                .servers(servers)
+                .info(new Info()
+                        .title("Warehouse Management System API")
+                        .version("1.0.0")
+                        .description("API documentation for Warehouse Management System")
+                        .contact(new Contact()
+                                .name("Development Team")
+                                .email("dev@warehouse.com"))
+                        .license(new License()
+                                .name("Apache 2.0")
+                                .url("http://www.apache.org/licenses/LICENSE-2.0.html")))
+                .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
+                .components(new Components()
+                        .addSecuritySchemes(securitySchemeName,
+                                new SecurityScheme()
+                                        .name(securitySchemeName)
+                                        .type(SecurityScheme.Type.HTTP)
+                                        .scheme("bearer")
+                                        .bearerFormat("JWT")));
+    }
+
 }
