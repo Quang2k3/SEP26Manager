@@ -72,10 +72,8 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/api/v1/auth/**",
                                 "/v1/auth/**",
-                                "/v1/scan", // scanner HTML page (token in URL param)
+                                "/v1/scan", // iPhone scanner HTML page (token in URL param)
                                 "/v1/scan/url", // returns scan URL for QR generation
-                                "/api/v1/scan",
-                                "/api/v1/scan/url",
                                 "/actuator/**",
                                 "/api/actuator/**",
                                 "/swagger-ui/**",
@@ -83,8 +81,8 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/api/v3/api-docs/**")
                         .permitAll()
-                        // Scan events — requires SCANNER jwt role (iPhone)
-                        .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasRole("SCANNER")
+                        // Scan events — requires KEEPER role (iPhone scanner)
+                        .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasRole("KEEPER")
                         // Manager only endpoints
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
                         .requestMatchers("/v1/zones/**").hasRole("MANAGER")
