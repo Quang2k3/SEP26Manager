@@ -188,7 +188,7 @@ public class ScannerPageController {
                 "      var raw=result.getText().trim().toUpperCase();\n" +
                 "      if(raw.length>=2)sendBarcode(raw,1);\n" +
                 "    }\n" +
-                "    if(err&&err.name!=='NotFoundException'){\n" +
+                "    if(err&&typeof ZXing!=='undefined'&&!(err instanceof ZXing.NotFoundException)){\n" +
                 "      setStatus('Lỗi ZXing: '+err.message);\n" +
                 "    }\n" +
                 "  });\n" +
