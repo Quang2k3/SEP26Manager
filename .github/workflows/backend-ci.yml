@@ -59,7 +59,6 @@ jobs:
             sleep 2
           done
 
-      # OPTIONAL but safe: schema.sql của bạn có pgcrypto/uuid-ossp thì sẽ cần.
       - name: Create extensions (optional)
         env:
           PGPASSWORD: test
@@ -167,18 +166,24 @@ jobs:
         working-directory: C:\Users\Public\Documents\ProjectSEP26\SEP26Manager
         run: |
           docker-compose pull backend
-          docker-compose up -d backend
+          docker-compose up -d --force-recreate --no-deps backend
 
       - name: Cleanup old images
         run: docker image prune -f
 
       - name: Verify deployment
         run: |
-          Start-Sleep -Seconds 20
+          Start-Sleep -Seconds 30
           try {
-            Invoke-WebRequest -Uri http://localhost:8080/api/actuator/health -UseBasicParsing | Out-Null
-            Write-Host "✅ Backend deployed successfully!"
+            $response = Invoke-WebRequest -Uri http://localhost:8080/api/actuator/health -UseBasicParsing
+            if ($response.StatusCode -eq 200) {
+              Write-Host "Backend deployed successfully!"
+            }else {
+              Write-Error "Health check returned status: $($response.StatusCode)"
+              exit 1
+            }
           } catch {
-            Write-Error "❌ Health check failed: $_"
+            Write-Error "Health check failed: $_"
+            docker-compose logs backend
             exit 1
           }
