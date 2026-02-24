@@ -10,9 +10,27 @@ import org.springframework.web.bind.annotation.RestController;
  * URL: GET /v1/scan?token={SCAN_TOKEN}
  * The page uses html5-qrcode to activate the camera and POST to
  * /v1/scan-events.
+ *
+ * GET /v1/scan/url?token={SCAN_TOKEN}— returns the full scan URL as plain text
+ * so the frontend can generate a QR code from it.
  */
 @RestController
 public class ScannerPageController {
+
+    /**
+     * Returns the full scanner URL as plain text.
+     * Frontend calls this, gets the URL, then renders a QR code image from it.
+     * Example: GET /v1/scan/url?token=eyJ...
+     * Response: https://api.cleanhousewms.id.vn/api/v1/scan?token=eyJ...
+     */
+    @GetMapping(value = "/v1/scan/url", produces = MediaType.TEXT_PLAIN_VALUE)
+    public String getScanUrl(@RequestParam("token") String token,
+            jakarta.servlet.http.HttpServletRequest request) {
+        String base = request.getScheme() + "://" + request.getServerName()
+                + (request.getServerPort() == 80 || request.getServerPort() == 443 ? ""
+                        : ":" + request.getServerPort());
+        return base + "/api/v1/scan?token=" + token;
+    }
 
     @GetMapping(value = "/v1/scan", produces = MediaType.TEXT_HTML_VALUE)
     public String scannerPage(@RequestParam("token") String token) {
@@ -85,13 +103,28 @@ public class ScannerPageController {
                 "  let scanning = false;\n" +
                 "  let html5QrCode;\n" +
                 "\n" +
+                "  const FORMATS = [\n" +
+                "    Html5QrcodeSupportedFormats.QR_CODE,\n" +
+                "    Html5QrcodeSupportedFormats.CODE_128,\n" +
+                "    Html5QrcodeSupportedFormats.CODE_39,\n" +
+                "    Html5QrcodeSupportedFormats.CODE_93,\n" +
+                "    Html5QrcodeSupportedFormats.EAN_13,\n" +
+                "    Html5QrcodeSupportedFormats.EAN_8,\n" +
+                "    Html5QrcodeSupportedFormats.UPC_A,\n" +
+                "    Html5QrcodeSupportedFormats.UPC_E,\n" +
+                "    Html5QrcodeSupportedFormats.ITF,\n" +
+                "    Html5QrcodeSupportedFormats.CODABAR\n" +
+                "  ];\n" +
+                "\n" +
                 "  window.addEventListener('load', () => {\n" +
-                "    html5QrCode = new Html5Qrcode('reader');\n" +
+                "    html5QrCode = new Html5Qrcode('reader', { formatsToSupport: FORMATS });\n" +
                 "    Html5Qrcode.getCameras().then(cameras => {\n" +
                 "      if (!cameras.length) { setStatus('Không tìm thấy camera — dùng nhập tay'); return; }\n" +
                 "      const cam = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length-1];\n"
                 +
-                "      html5QrCode.start(cam.id, { fps:10, qrbox:{width:280,height:200} },\n" +
+                "      html5QrCode.start(\n" +
+                "        cam.id,\n" +
+                "        { fps:15, qrbox:{width:300,height:150}, aspectRatio:1.7 },\n" +
                 "        decodedText => {\n" +
                 "          if (!scanning) { scanning=true; submitScanWithBarcode(decodedText,1); setTimeout(()=>{scanning=false;},1500); }\n"
                 +
@@ -119,7 +152,12 @@ public class ScannerPageController {
                 "      method:'POST',\n" +
                 "      headers:{'Content-Type':'application/json','Authorization':'Bearer '+SCAN_TOKEN},\n" +
                 "      body:JSON.stringify({barcode,qty})\n" +
-                "    }).then(r=>r.json()).then(data=>{\n" +
+                "    }).then(r=>{\n" +
+                "      return r.text().then(text=>{\n" +
+                "        try { return JSON.parse(text); }\n" +
+                "        catch(e) { return {success:false,message:'Server trả về lỗi ('+r.status+'): '+text.substring(0,120)}; }\n" +
+                "      });\n" +
+                "    }).then(data=>{\n" +
                 "      if(data.success){\n" +
                 "        showToast('✅ '+data.data.skuCode+' — qty: '+data.data.newQty);\n" +
                 "        updateTable(data.data);\n" +
@@ -127,9 +165,9 @@ public class ScannerPageController {
                 "        setStatus('✅ Camera sẵn sàng');\n" +
                 "      } else {\n" +
                 "        showToast('❌ '+(data.message||'Lỗi'),true);\n" +
-                "        setStatus('❌ '+data.message);\n" +
+                "        setStatus('❌ '+(data.message||'Lỗi không xác định'));\n" +
                 "      }\n" +
-                "    }).catch(err=>{ showToast('❌ Mất kết nối',true); setStatus('Lỗi: '+err); });\n" +
+                "    }).catch(err=>{ showToast('❌ Mất kết nối',true); setStatus('Lỗi mạng: '+err); });\n" +
                 "  }\n" +
                 "\n" +
                 "  const lineData={};\n" +

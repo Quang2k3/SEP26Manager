@@ -69,7 +69,9 @@ public class SecurityConfig {
                                 "/api/v1/auth/**",
                                 "/v1/auth/**",
                                 "/v1/scan", // scanner HTML page (token in URL param)
+                                "/v1/scan/url", // returns scan URL for QR generation
                                 "/api/v1/scan",
+                                "/api/v1/scan/url",
                                 "/actuator/**",
                                 "/api/actuator/**",
                                 "/swagger-ui/**",
