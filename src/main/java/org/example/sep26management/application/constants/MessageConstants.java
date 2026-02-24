@@ -87,4 +87,22 @@ public final class MessageConstants {
     public static final String CATEGORY_PARENT_INACTIVE = "Cannot assign to an inactive parent category";
     public static final String CATEGORY_SELF_PARENT = "A category cannot be its own parent";
     public static final String CATEGORY_CIRCULAR_REFERENCE = "Circular parent-child reference detected";
+
+    // ==================== Category Deactivate & Tree ====================
+    public static final String CATEGORY_DEACTIVATED_SUCCESS = "Category deactivated successfully";
+    public static final String CATEGORY_ALREADY_INACTIVE = "Category is already inactive";
+    public static final String CATEGORY_HAS_ACTIVE_CHILDREN = "Cannot deactivate: category has %d active sub-categories. Deactivate them first.";
+    public static final String CATEGORY_TREE_SUCCESS = "Category tree retrieved successfully";
+
+    // ==================== Map Category to Zone (Convention) ====================
+    public static final String CZM_MAPPED_SUCCESS = "Category successfully mapped to zone";
+    public static final String CZM_CATEGORY_INACTIVE = "Cannot map: category is inactive (BR-CAT-08)";
+    public static final String CZM_ZONE_NOT_FOUND_CONVENTION = "Zone '%s' not found in warehouse %s. Please create zone with code '%1$s' first.";
+    public static final String CZM_ZONE_INACTIVE = "Cannot map: zone '%s' is inactive (BR-CAT-08)";
+
+    // ==================== SKU Messages ====================
+    public static final String SKU_NOT_FOUND = "SKU not found with ID: %s";
+    public static final String SKU_CATEGORY_ASSIGNED_SUCCESS = "Category assigned to SKU successfully";
+    public static final String SKU_CATEGORY_INACTIVE = "Cannot assign an inactive category to SKU (BR-CAT-08)";
+    public static final String SKU_SAME_CATEGORY = "SKU already belongs to this category";
 }

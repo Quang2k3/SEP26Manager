@@ -91,7 +91,7 @@ file:
 
 server:
   # 8082 to locally test with Postman, 8080 for deployment
-
+  #port: 8082
   port: 8080
   servlet:
     context-path: /api

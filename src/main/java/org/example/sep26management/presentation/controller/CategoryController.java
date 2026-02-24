@@ -10,6 +10,7 @@ import org.example.sep26management.application.dto.request.CreateCategoryRequest
 import org.example.sep26management.application.dto.request.UpdateCategoryRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.CategoryResponse;
+import org.example.sep26management.application.dto.response.CategoryTreeResponse;
 import org.example.sep26management.application.service.CategoryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +18,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.example.sep26management.application.dto.response.CategoryTreeResponse;
+import org.example.sep26management.application.dto.response.MapCategoryToZoneResponse;
+import org.example.sep26management.application.dto.request.MapCategoryToZoneRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -102,6 +106,57 @@ public class CategoryController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<List<CategoryResponse>>> getAllCategories() {
         ApiResponse<List<CategoryResponse>> response = categoryService.getAllCategories();
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * UC: Deactivate category
+     * PATCH /api/v1/categories/{categoryId}/deactivate
+     */
+    @PatchMapping("/{categoryId}/deactivate")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    public ResponseEntity<ApiResponse<CategoryResponse>> deactivateCategory(
+            @PathVariable Long categoryId,
+            HttpServletRequest httpRequest) {
+        Long deactivatedBy = getCurrentUserId();
+        String ipAddress = getClientIpAddress(httpRequest);
+        String userAgent = httpRequest.getHeader("User-Agent");
+
+        ApiResponse<CategoryResponse> response = categoryService.deactivateCategory(
+                categoryId, deactivatedBy, ipAddress, userAgent);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * UC: View Category Tree
+     * GET /api/v1/categories/tree?warehouseId=1
+     * Shows tree with zone mapping info (convention: Z- + categoryCode)
+     */
+    @GetMapping("/tree")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<List<CategoryTreeResponse>>> getCategoryTree(
+            @RequestParam(required = false) Long warehouseId) {
+        ApiResponse<List<CategoryTreeResponse>> response = categoryService.getCategoryTree(warehouseId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * UC: Map Category to Zone (convention-based)
+     * POST /api/v1/categories/{categoryId}/map-to-zone
+     * Convention: zone_code = "Z-" + category_code
+     */
+    @PostMapping("/{categoryId}/map-to-zone")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    public ResponseEntity<ApiResponse<MapCategoryToZoneResponse>> mapCategoryToZone(
+            @PathVariable Long categoryId,
+            @Valid @RequestBody MapCategoryToZoneRequest request,
+            HttpServletRequest httpRequest) {
+        Long mappedBy = getCurrentUserId();
+        String ipAddress = getClientIpAddress(httpRequest);
+        String userAgent = httpRequest.getHeader("User-Agent");
+
+        ApiResponse<MapCategoryToZoneResponse> response = categoryService.mapCategoryToZone(
+                categoryId, request, mappedBy, ipAddress, userAgent);
         return ResponseEntity.ok(response);
     }
 

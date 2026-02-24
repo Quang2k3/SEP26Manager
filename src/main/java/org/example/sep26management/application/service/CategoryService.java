@@ -14,6 +14,11 @@ import org.example.sep26management.infrastructure.persistence.entity.CategoryEnt
 import org.example.sep26management.infrastructure.persistence.repository.CategoryJpaRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.example.sep26management.application.dto.response.CategoryTreeResponse;
+import org.example.sep26management.application.dto.response.MapCategoryToZoneResponse;
+import org.example.sep26management.application.dto.request.MapCategoryToZoneRequest;
+import org.example.sep26management.infrastructure.persistence.entity.ZoneEntity;
+import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -26,6 +31,7 @@ public class CategoryService {
 
     private final CategoryJpaRepository categoryRepository;
     private final AuditLogService auditLogService;
+    private final ZoneJpaRepository zoneRepository;
 
     /**
      * Create a new product category
@@ -215,6 +221,195 @@ public class CategoryService {
                 .collect(Collectors.toList());
 
         return ApiResponse.success(MessageConstants.CATEGORY_LIST_SUCCESS, responses);
+    }
+
+    // ==========================================================
+    // UC: Deactivate Category
+    // ==========================================================
+
+    /**
+     * Deactivate a category.
+     * BR-CAT-08: Inactive categories cannot be used in new mappings.
+     * Must deactivate children first.
+     */
+    public ApiResponse<CategoryResponse> deactivateCategory(
+            Long categoryId,
+            Long deactivatedBy,
+            String ipAddress,
+            String userAgent) {
+
+        log.info(LogMessages.CATEGORY_DEACTIVATING, categoryId);
+
+        CategoryEntity category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.CATEGORY_NOT_FOUND, categoryId)));
+
+        if (!category.getActive()) {
+            throw new BusinessException(MessageConstants.CATEGORY_ALREADY_INACTIVE);
+        }
+
+        // Check active children — must deactivate children first
+        List<CategoryEntity> activeChildren = categoryRepository.findAll().stream()
+                .filter(c -> categoryId.equals(c.getParentCategoryId()) && c.getActive())
+                .collect(Collectors.toList());
+
+        if (!activeChildren.isEmpty()) {
+            throw new BusinessException(
+                    String.format(MessageConstants.CATEGORY_HAS_ACTIVE_CHILDREN, activeChildren.size()));
+        }
+
+        category.setActive(false);
+        CategoryEntity saved = categoryRepository.save(category);
+
+        log.info(LogMessages.CATEGORY_DEACTIVATED, categoryId);
+
+        auditLogService.logAction(
+                deactivatedBy, "CATEGORY_DEACTIVATED", "CATEGORY", categoryId,
+                "Category deactivated: " + category.getCategoryCode(),
+                ipAddress, userAgent);
+
+        String parentName = null;
+        if (saved.getParentCategoryId() != null) {
+            parentName = categoryRepository.findById(saved.getParentCategoryId())
+                    .map(CategoryEntity::getCategoryName).orElse(null);
+        }
+
+        return ApiResponse.success(MessageConstants.CATEGORY_DEACTIVATED_SUCCESS,
+                buildCategoryResponse(saved, parentName));
+    }
+
+    // ==========================================================
+    // UC: View Category Tree
+    // ==========================================================
+
+    /**
+     * Get category tree with zone mapping info.
+     * Shows convention-based zone: "Z-" + categoryCode
+     */
+    @Transactional(readOnly = true)
+    public ApiResponse<List<CategoryTreeResponse>> getCategoryTree(Long warehouseId) {
+        log.info(LogMessages.CATEGORY_TREE_FETCHING);
+
+        List<CategoryEntity> allCategories = categoryRepository.findAll();
+
+        // Build tree from root nodes (parentCategoryId == null)
+        List<CategoryTreeResponse> tree = allCategories.stream()
+                .filter(c -> c.getParentCategoryId() == null)
+                .map(root -> buildTreeNode(root, allCategories, warehouseId))
+                .collect(Collectors.toList());
+
+        return ApiResponse.success(MessageConstants.CATEGORY_TREE_SUCCESS, tree);
+    }
+
+    private CategoryTreeResponse buildTreeNode(
+            CategoryEntity node,
+            List<CategoryEntity> allCategories,
+            Long warehouseId) {
+
+        List<CategoryTreeResponse> children = allCategories.stream()
+                .filter(c -> node.getCategoryId().equals(c.getParentCategoryId()))
+                .map(child -> buildTreeNode(child, allCategories, warehouseId))
+                .collect(Collectors.toList());
+
+        // Convention: zone_code = "Z-" + category_code
+        String expectedZoneCode = "Z-" + node.getCategoryCode();
+        boolean zoneMapped = false;
+
+        if (warehouseId != null) {
+            zoneMapped = zoneRepository
+                    .findByWarehouseIdAndZoneCode(warehouseId, expectedZoneCode)
+                    .filter(ZoneEntity::getActive)
+                    .isPresent();
+        }
+
+        return CategoryTreeResponse.builder()
+                .categoryId(node.getCategoryId())
+                .categoryCode(node.getCategoryCode())
+                .categoryName(node.getCategoryName())
+                .description(node.getDescription())
+                .active(node.getActive())
+                .mappedZoneCode(expectedZoneCode)
+                .zoneMapped(zoneMapped)
+                .children(children)
+                .build();
+    }
+
+    // ==========================================================
+    // UC: Map Category to Zone (Convention-based)
+    // ==========================================================
+
+    /**
+     * Map category to zone using convention: zone_code = "Z-" + category_code
+     *
+     * Flow:
+     * 1. Lấy category_code từ category
+     * 2. Tính zone_code = "Z-" + category_code  (e.g. "HC" → "Z-HC")
+     * 3. Tìm zone trong warehouse theo zone_code
+     * 4. Validate: zone phải tồn tại + active, category phải active
+     * 5. Trả về kết quả mapping
+     *
+     * BR-CAT-07: Each category must have at least one primary storage zone
+     * BR-CAT-08: Inactive categories or zones cannot be used in new mappings
+     */
+    @Transactional(readOnly = true)
+    public ApiResponse<MapCategoryToZoneResponse> mapCategoryToZone(
+            Long categoryId,
+            MapCategoryToZoneRequest request,
+            Long mappedBy,
+            String ipAddress,
+            String userAgent) {
+
+        log.info(LogMessages.CZM_MAPPING, categoryId, request.getWarehouseId());
+
+        // 1. Validate category
+        CategoryEntity category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.CATEGORY_NOT_FOUND, categoryId)));
+
+        // BR-CAT-08: category must be active
+        if (!category.getActive()) {
+            throw new BusinessException(MessageConstants.CZM_CATEGORY_INACTIVE);
+        }
+
+        // 2. Convention: zone_code = "Z-" + category_code
+        String expectedZoneCode = "Z-" + category.getCategoryCode();
+
+        // 3. Find zone in warehouse
+        ZoneEntity zone = zoneRepository
+                .findByWarehouseIdAndZoneCode(request.getWarehouseId(), expectedZoneCode)
+                .orElseThrow(() -> new BusinessException(
+                        String.format(MessageConstants.CZM_ZONE_NOT_FOUND_CONVENTION,
+                                expectedZoneCode, request.getWarehouseId())));
+
+        // BR-CAT-08: zone must be active
+        if (!zone.getActive()) {
+            throw new BusinessException(
+                    String.format(MessageConstants.CZM_ZONE_INACTIVE, expectedZoneCode));
+        }
+
+        log.info(LogMessages.CZM_MAPPED, category.getCategoryCode(), expectedZoneCode);
+
+        // Audit
+        auditLogService.logAction(
+                mappedBy, "CATEGORY_ZONE_MAPPED", "CATEGORY", categoryId,
+                "Category " + category.getCategoryCode() + " mapped to zone " + expectedZoneCode
+                        + " in warehouse " + request.getWarehouseId(),
+                ipAddress, userAgent);
+
+        // 4. Build response
+        MapCategoryToZoneResponse response = MapCategoryToZoneResponse.builder()
+                .categoryId(category.getCategoryId())
+                .categoryCode(category.getCategoryCode())
+                .categoryName(category.getCategoryName())
+                .zoneId(zone.getZoneId())
+                .zoneCode(zone.getZoneCode())
+                .zoneName(zone.getZoneName())
+                .warehouseId(zone.getWarehouseId())
+                .conventionRule("Z-" + category.getCategoryCode())
+                .zoneActive(zone.getActive())
+                .build();
+
+        return ApiResponse.success(MessageConstants.CZM_MAPPED_SUCCESS, response);
     }
 
     // ============================================
