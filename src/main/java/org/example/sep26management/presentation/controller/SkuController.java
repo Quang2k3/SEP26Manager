@@ -31,6 +31,27 @@ public class SkuController {
 
     private final SkuService skuService;
     /**
+     * TEST ENDPOINT - xóa sau khi debug xong
+     */
+    @GetMapping("/test-ping")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<String> testPing() {
+        return ResponseEntity.ok("SKU Controller is working!");
+    }
+    /**
+     * UC-268: View SKU Detail
+     * GET /api/v1/skus/{skuId}
+     */
+    @GetMapping("/{skuId}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<SkuResponse>> getSkuDetail(
+            @PathVariable Long skuId) {
+        log.info("GET /v1/skus/{} — view SKU detail", skuId);
+        ApiResponse<SkuResponse> response = skuService.getSkuDetail(skuId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * Assign category to SKU
      * PATCH /api/v1/skus/{skuId}/assign-category
      */
