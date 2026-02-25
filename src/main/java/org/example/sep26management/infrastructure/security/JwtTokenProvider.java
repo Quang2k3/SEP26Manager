@@ -40,10 +40,13 @@ public class JwtTokenProvider {
         claims.put("email", user.getEmail());
         // Store role codes as comma-separated string or list
         claims.put("roles", user.getRoleCodes() != null ? String.join(",", user.getRoleCodes()) : "");
-        // Store permission codes as comma-separated string for fine-grained checks on frontend if needed
+        // Store permission codes as comma-separated string for fine-grained checks on
+        // frontend if needed
         claims.put("permissions",
                 user.getPermissionCodes() != null ? String.join(",", user.getPermissionCodes()) : "");
         claims.put("fullName", user.getFullName());
+        // Embed warehouse IDs the user is assigned to
+        claims.put("warehouseIds", user.getWarehouseIds() != null ? user.getWarehouseIds() : List.of());
 
         long expiration = rememberMe ? jwtRememberMeExpirationMs : jwtExpirationMs;
 
@@ -101,6 +104,28 @@ public class JwtTokenProvider {
         }
         return Arrays.stream(rolesStr.split(","))
                 .collect(Collectors.toSet());
+    }
+
+    /**
+     * Get warehouse IDs from JWT token
+     */
+    @SuppressWarnings("unchecked")
+    public List<Long> getWarehouseIdsFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        Object raw = claims.get("warehouseIds");
+        if (raw == null)
+            return Collections.emptyList();
+        if (raw instanceof List) {
+            return ((List<?>) raw).stream()
+                    .map(v -> ((Number) v).longValue())
+                    .collect(Collectors.toList());
+        }
+        return Collections.emptyList();
     }
 
     /**

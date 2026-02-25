@@ -128,6 +128,10 @@ public class AuthService {
                                         .build();
                 }
 
+                // Lấy danh sách kho được phân công cho user
+                java.util.List<Long> warehouseIds = userRepository.findActiveWarehouseIdsByUserId(user.getUserId());
+                domainUser.setWarehouseIds(warehouseIds);
+
                 // Step 7: Generate JWT token using UserEntityMapper
                 String token = jwtTokenProvider.generateToken(
                                 domainUser,
@@ -157,8 +161,9 @@ public class AuthService {
                                                 .userId(user.getUserId())
                                                 .email(user.getEmail())
                                                 .fullName(user.getFullName())
-                                                .roleCodes(domainUser.getRoleCodes()) // Use from domain model
+                                                .roleCodes(domainUser.getRoleCodes())
                                                 .avatarUrl(user.getAvatarUrl())
+                                                .warehouseIds(warehouseIds)
                                                 .build())
                                 .build();
         }
@@ -190,6 +195,10 @@ public class AuthService {
 
                 User domainUser = userEntityMapper.toDomain(user);
 
+                // Lấy danh sách kho được phân công
+                java.util.List<Long> warehouseIds = userRepository.findActiveWarehouseIdsByUserId(user.getUserId());
+                domainUser.setWarehouseIds(warehouseIds);
+
                 String token = jwtTokenProvider.generateToken(domainUser, false);
                 long expiresIn = 5 * 60 * 1000L;
 
@@ -213,6 +222,7 @@ public class AuthService {
                                                 .fullName(user.getFullName())
                                                 .roleCodes(domainUser.getRoleCodes())
                                                 .avatarUrl(user.getAvatarUrl())
+                                                .warehouseIds(warehouseIds)
                                                 .build())
                                 .build();
         }
