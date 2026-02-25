@@ -23,14 +23,31 @@ import org.springframework.transaction.annotation.Transactional;
 public class SkuService {
 
     private final SkuJpaRepository skuJpaRepository;
-    private final SkuJpaRepository skuRepository;
     private final SkuMapper skuMapper;
     private final CategoryJpaRepository categoryRepository;
     private final AuditLogService auditLogService;
+
+    /**
+     * UC-268: View SKU Detail
+     */
+    @Transactional(readOnly = true)
+    public ApiResponse<SkuResponse> getSkuDetail(Long skuId) {
+        log.info("Fetching SKU detail for ID: {}", skuId);
+
+        SkuEntity sku = skuJpaRepository.findByIdWithCategory(skuId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.SKU_NOT_FOUND, skuId)));
+
+        SkuResponse response = skuMapper.toResponse(sku);
+
+        return ApiResponse.success("SKU detail retrieved successfully", response);
+    }
+
     /**
      * UC: Assign Category to SKU
      * BR: Category must be active
      */
+    @Transactional
     public ApiResponse<SkuResponse> assignCategoryToSku(
             Long skuId,
             AssignCategoryToSkuRequest request,
@@ -41,7 +58,7 @@ public class SkuService {
         log.info(LogMessages.SKU_ASSIGNING_CATEGORY, skuId, request.getCategoryId());
 
         // Find SKU
-        SkuEntity sku = skuRepository.findById(skuId)
+        SkuEntity sku = skuJpaRepository.findByIdWithCategory(skuId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.SKU_NOT_FOUND, skuId)));
 
@@ -55,52 +72,29 @@ public class SkuService {
             throw new BusinessException(MessageConstants.SKU_CATEGORY_INACTIVE);
         }
 
-        // Check same category
-        if (sku.getCategory() != null &&
-                request.getCategoryId().equals(sku.getCategory().getCategoryId())) {
+        // Check same category (null-safe)
+        Long currentCategoryId = (sku.getCategory() != null) ? sku.getCategory().getCategoryId() : null;
+        if (request.getCategoryId().equals(currentCategoryId)) {
             throw new BusinessException(MessageConstants.SKU_SAME_CATEGORY);
         }
 
-        Long oldCategoryId = sku.getCategory().getCategoryId();
-
         // Assign
         sku.setCategory(category);
-        SkuEntity updatedSku = skuRepository.save(sku);
+        SkuEntity updatedSku = skuJpaRepository.save(sku);
 
         log.info(LogMessages.SKU_CATEGORY_ASSIGNED, skuId, request.getCategoryId());
 
         auditLogService.logAction(
                 updatedBy, "SKU_CATEGORY_ASSIGNED", "SKU", skuId,
-                "SKU " + sku.getSkuCode() + " category: " + oldCategoryId + " -> " + request.getCategoryId(),
+                "SKU " + sku.getSkuCode() + " category: " + currentCategoryId + " -> " + request.getCategoryId(),
                 ipAddress, userAgent);
 
         return ApiResponse.success(MessageConstants.SKU_CATEGORY_ASSIGNED_SUCCESS,
-                buildSkuResponse(updatedSku, category));
-    }
-
-    private SkuResponse buildSkuResponse(SkuEntity sku, CategoryEntity category) {
-        return SkuResponse.builder()
-                .skuId(sku.getSkuId())
-                .skuCode(sku.getSkuCode())
-                .skuName(sku.getSkuName())
-                .description(sku.getDescription())
-                .brand(sku.getBrand())
-                .unit(sku.getUnit())
-                .categoryId(sku.getCategory().getCategoryId())
-                .categoryCode(category != null ? category.getCategoryCode() : null)
-                .categoryName(category != null ? category.getCategoryName() : null)
-                .active(sku.getActive())
-                .createdAt(sku.getCreatedAt())
-                .updatedAt(sku.getUpdatedAt())
-                .build();
+                skuMapper.toResponse(updatedSku));
     }
 
     /**
      * Lookup SKU by barcode.
-     * Used by the barcode scan flow (iPhone sends barcode → server resolves SKU).
-     *
-     * @param barcode barcode string scanned from device
-     * @return ApiResponse containing SkuResponse if found
      */
     @Transactional(readOnly = true)
     public ApiResponse<SkuResponse> findByBarcode(String barcode) {
@@ -119,9 +113,6 @@ public class SkuService {
 
     /**
      * Lookup SKU by SKU code.
-     *
-     * @param skuCode the SKU code
-     * @return ApiResponse containing SkuResponse if found
      */
     @Transactional(readOnly = true)
     public ApiResponse<SkuResponse> findBySkuCode(String skuCode) {

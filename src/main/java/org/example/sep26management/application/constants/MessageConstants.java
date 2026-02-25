@@ -105,4 +105,5 @@ public final class MessageConstants {
     public static final String SKU_CATEGORY_ASSIGNED_SUCCESS = "Category assigned to SKU successfully";
     public static final String SKU_CATEGORY_INACTIVE = "Cannot assign an inactive category to SKU (BR-CAT-08)";
     public static final String SKU_SAME_CATEGORY = "SKU already belongs to this category";
+    public static final String SKU_DETAIL_SUCCESS = "SKU detail retrieved successfully";
 }

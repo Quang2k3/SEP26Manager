@@ -27,4 +27,7 @@ public interface SkuJpaRepository extends JpaRepository<SkuEntity, Long> {
 
     @Query("SELECT s FROM SkuEntity s LEFT JOIN FETCH s.category WHERE s.skuCode = :skuCode AND s.active = true AND s.deletedAt IS NULL")
     Optional<SkuEntity> findActiveBySkuCodeWithCategory(@Param("skuCode") String skuCode);
+
+    @Query("SELECT s FROM SkuEntity s LEFT JOIN FETCH s.category WHERE s.skuId = :skuId")
+    Optional<SkuEntity> findByIdWithCategory(@Param("skuId") Long skuId);
 }
