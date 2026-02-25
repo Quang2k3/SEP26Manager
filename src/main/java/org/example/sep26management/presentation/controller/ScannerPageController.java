@@ -19,8 +19,7 @@ public class ScannerPageController {
 
     @GetMapping(value = "/v1/scan", produces = MediaType.TEXT_HTML_VALUE)
     public String scannerPage(@RequestParam("token") String token) {
-        String safeToken = token.replace("'", "\\'");
-        return buildHtml(safeToken);
+        return buildHtml(token.replace("'", "\\'"));
     }
 
     private String buildHtml(String token) {

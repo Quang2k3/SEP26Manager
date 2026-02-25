@@ -223,10 +223,10 @@ public class JwtTokenProvider {
         claims.put("type", "SCANNER");
         claims.put("sessionId", sessionId);
         claims.put("warehouseId", warehouseId);
-        claims.put("roles", "SCANNER");
+        claims.put("roles", "KEEPER");
 
         Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + 10 * 60 * 1000L); // 10 minutes
+        Date expiryDate = new Date(now.getTime() + 2 * 60 * 60 * 1000L); // 2 hours
 
         return Jwts.builder()
                 .setClaims(claims)
