@@ -5,6 +5,7 @@ import org.example.sep26management.domain.enums.UserStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 
 @Getter
@@ -31,6 +32,7 @@ public class User {
     private Set<String> roleCodes; // Dynamic roles from database (e.g., ["ADMIN", "MANAGER"])
     private UserStatus status;
     private Set<String> permissionCodes; // Fine-grained permissions resolved from roles
+    private List<Long> warehouseIds; // Kho được phân công (từ user_warehouses)
 
     // Account Type
     private Boolean isPermanent;

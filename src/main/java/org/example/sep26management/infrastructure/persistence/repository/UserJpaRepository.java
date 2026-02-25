@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -41,4 +42,8 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
                         Pageable pageable);
 
         long countByStatus(UserStatus status);
+
+        @Query(value = "SELECT uw.warehouse_id FROM user_warehouses uw " +
+                        "WHERE uw.user_id = :userId AND uw.active = TRUE", nativeQuery = true)
+        List<Long> findActiveWarehouseIdsByUserId(@Param("userId") Long userId);
 }

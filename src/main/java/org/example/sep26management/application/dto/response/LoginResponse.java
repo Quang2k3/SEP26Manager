@@ -3,6 +3,7 @@ package org.example.sep26management.application.dto.response;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
 
+import java.util.List;
 import java.util.Set;
 
 @Getter
@@ -28,7 +29,8 @@ public class LoginResponse {
         private Long userId;
         private String email;
         private String fullName;
-        private Set<String> roleCodes; // Changed from UserRole to Set<String>
+        private Set<String> roleCodes;
         private String avatarUrl;
+        private List<Long> warehouseIds; // Danh sách kho được phân công
     }
 }
