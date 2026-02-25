@@ -5,16 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.ReceivingItemResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
-import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskEntity;
-import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskItemEntity;
-import org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity;
-import org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity;
-import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
-import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskItemJpaRepository;
-import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskJpaRepository;
-import org.example.sep26management.infrastructure.persistence.repository.ReceivingItemJpaRepository;
-import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
-import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
+import org.example.sep26management.infrastructure.persistence.entity.*;
+import org.example.sep26management.infrastructure.persistence.repository.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,7 +28,10 @@ public class ReceivingOrderService {
         private final PutawayTaskJpaRepository putawayTaskRepo;
         private final PutawayTaskItemJpaRepository putawayTaskItemRepo;
         private final SkuJpaRepository skuRepo;
-        private final JdbcTemplate jdbcTemplate;
+        private final WarehouseJpaRepository warehouseRepo;
+        private final SupplierJpaRepository supplierRepo;
+        private final UserJpaRepository userRepo;
+        private final JdbcTemplate jdbcTemplate; // Chỉ dùng cho các native INSERT/UPDATE phức tạp (inventory)
 
         // ─── List ──────────────────────────────────────────────────────────────────
 
@@ -47,11 +42,13 @@ public class ReceivingOrderService {
                                 : receivingOrderRepo.findAllByOrderByCreatedAtDesc();
 
                 List<ReceivingOrderResponse> result = orders.stream()
-                                .map(o -> toResponse(o, false))
+                                .map(o -> toSummaryResponse(o))
                                 .collect(Collectors.toList());
 
                 return ApiResponse.success("OK", result);
         }
+
+        // ─── Get (với enriched fields đầy đủ) ─────────────────────────────────────
 
         @Transactional(readOnly = true)
         public ApiResponse<ReceivingOrderResponse> getOrder(Long id) {
@@ -63,9 +60,63 @@ public class ReceivingOrderService {
                 Map<Long, SkuEntity> skuMap = skuRepo.findAllById(skuIds).stream()
                                 .collect(Collectors.toMap(SkuEntity::getSkuId, s -> s));
 
-                ReceivingOrderResponse response = toResponse(order, false);
-                response.setItems(
-                                items.stream().map(item -> toItemResponse(item, skuMap)).collect(Collectors.toList()));
+                // Lookup từ repo — KHÔNG query thẳng trong service
+                String warehouseName = warehouseRepo.findById(order.getWarehouseId())
+                                .map(WarehouseEntity::getWarehouseName).orElse(null);
+
+                String supplierName = order.getSupplierId() != null
+                                ? supplierRepo.findById(order.getSupplierId()).map(SupplierEntity::getSupplierName)
+                                                .orElse(null)
+                                : null;
+
+                String createdByName = order.getCreatedBy() != null
+                                ? userRepo.findById(order.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+
+                String approvedByName = order.getApprovedBy() != null
+                                ? userRepo.findById(order.getApprovedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+
+                String confirmedByName = order.getConfirmedBy() != null
+                                ? userRepo.findById(order.getConfirmedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+
+                // Map items
+                List<ReceivingItemResponse> itemResponses = items.stream()
+                                .map(item -> toItemResponse(item, skuMap))
+                                .collect(Collectors.toList());
+
+                int totalLines = itemResponses.size();
+                BigDecimal totalQty = items.stream()
+                                .map(ReceivingItemEntity::getReceivedQty)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                ReceivingOrderResponse response = ReceivingOrderResponse.builder()
+                                .receivingId(order.getReceivingId())
+                                .receivingCode(order.getReceivingCode())
+                                .status(order.getStatus())
+                                .warehouseId(order.getWarehouseId())
+                                .warehouseName(warehouseName)
+                                .supplierId(order.getSupplierId())
+                                .supplierName(supplierName)
+                                .sourceType(order.getSourceType())
+                                .sourceReferenceCode(order.getSourceReferenceCode())
+                                .note(order.getNote())
+                                .createdBy(order.getCreatedBy())
+                                .createdByName(createdByName)
+                                .createdAt(order.getCreatedAt())
+                                .updatedAt(order.getUpdatedAt())
+                                .approvedBy(order.getApprovedBy())
+                                .approvedByName(approvedByName)
+                                .approvedAt(order.getApprovedAt())
+                                .confirmedBy(order.getConfirmedBy())
+                                .confirmedByName(confirmedByName)
+                                .confirmedAt(order.getConfirmedAt())
+                                .totalLines(totalLines)
+                                .totalQty(totalQty)
+                                .items(itemResponses)
+                                .build();
+
                 return ApiResponse.success("OK", response);
         }
 
@@ -81,7 +132,7 @@ public class ReceivingOrderService {
                 receivingOrderRepo.save(order);
 
                 log.info("GRN {} submitted by userId={}", order.getReceivingCode(), userId);
-                return ApiResponse.success("GRN submitted successfully", toResponse(order, false));
+                return ApiResponse.success("GRN submitted successfully", toSummaryResponse(order));
         }
 
         // ─── Approve ───────────────────────────────────────────────────────────────
@@ -98,7 +149,7 @@ public class ReceivingOrderService {
                 receivingOrderRepo.save(order);
 
                 log.info("GRN {} approved by managerId={}", order.getReceivingCode(), managerId);
-                return ApiResponse.success("GRN approved successfully", toResponse(order, false));
+                return ApiResponse.success("GRN approved successfully", toSummaryResponse(order));
         }
 
         // ─── Post ──────────────────────────────────────────────────────────────────
@@ -108,23 +159,18 @@ public class ReceivingOrderService {
                 ReceivingOrderEntity order = findOrder(id);
                 validateStatus(order, "APPROVED", "post");
 
-                // 1. Load line items
                 List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
                 if (items.isEmpty()) {
                         return ApiResponse.error("No items found in GRN " + id);
                 }
 
-                // 2. Create inventory_lots for each line + record inventory_transactions
                 List<Long> lotIds = new ArrayList<>();
                 for (ReceivingItemEntity item : items) {
-                        // 2a. Insert into inventory_lots
                         Long lotId = jdbcTemplate.queryForObject(
                                         "INSERT INTO inventory_lots (sku_id, lot_number, expiry_date, manufacture_date, qc_status, quarantine_status, receiving_item_id) "
-                                                        +
-                                                        "VALUES (?, ?, ?, ?, 'RELEASED', 'NONE', ?) " +
-                                                        "ON CONFLICT (sku_id, lot_number) DO UPDATE SET receiving_item_id = EXCLUDED.receiving_item_id "
-                                                        +
-                                                        "RETURNING lot_id",
+                                                        + "VALUES (?, ?, ?, ?, 'RELEASED', 'NONE', ?) "
+                                                        + "ON CONFLICT (sku_id, lot_number) DO UPDATE SET receiving_item_id = EXCLUDED.receiving_item_id "
+                                                        + "RETURNING lot_id",
                                         Long.class,
                                         item.getSkuId(),
                                         item.getLotNumber() != null ? item.getLotNumber() : "LOT-" + id,
@@ -133,29 +179,23 @@ public class ReceivingOrderService {
                                         item.getReceivingItemId());
                         lotIds.add(lotId);
 
-                        // 2b. Upsert inventory_snapshot (staging area — location_id from first staging
-                        // location)
                         Long stagingLocationId = getFirstStagingLocation(order.getWarehouseId());
+
                         jdbcTemplate.update(
                                         "INSERT INTO inventory_snapshot (warehouse_id, sku_id, lot_id, location_id, quantity, last_updated) "
-                                                        +
-                                                        "VALUES (?, ?, ?, ?, ?, NOW()) " +
-                                                        "ON CONFLICT (warehouse_id, sku_id, lot_id_safe, location_id) "
-                                                        +
-                                                        "DO UPDATE SET quantity = inventory_snapshot.quantity + EXCLUDED.quantity, last_updated = NOW()",
+                                                        + "VALUES (?, ?, ?, ?, ?, NOW()) "
+                                                        + "ON CONFLICT (warehouse_id, sku_id, lot_id_safe, location_id) "
+                                                        + "DO UPDATE SET quantity = inventory_snapshot.quantity + EXCLUDED.quantity, last_updated = NOW()",
                                         order.getWarehouseId(), item.getSkuId(), lotId, stagingLocationId,
                                         item.getReceivedQty());
 
-                        // 2c. Insert inventory_transaction
                         jdbcTemplate.update(
                                         "INSERT INTO inventory_transactions (warehouse_id, sku_id, lot_id, location_id, quantity, txn_type, reference_table, reference_id, created_by) "
-                                                        +
-                                                        "VALUES (?, ?, ?, ?, ?, 'RECEIVE', 'receiving_orders', ?, ?)",
+                                                        + "VALUES (?, ?, ?, ?, ?, 'RECEIVE', 'receiving_orders', ?, ?)",
                                         order.getWarehouseId(), item.getSkuId(), lotId, stagingLocationId,
                                         item.getReceivedQty(), id, accountantId);
                 }
 
-                // 3. Update order status → POSTED
                 order.setStatus("POSTED");
                 order.setConfirmedBy(accountantId);
                 order.setConfirmedAt(LocalDateTime.now());
@@ -163,7 +203,6 @@ public class ReceivingOrderService {
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
 
-                // 4. Create PutawayTask + PutawayTaskItems
                 Long stagingLocationId = getFirstStagingLocation(order.getWarehouseId());
                 PutawayTaskEntity task = PutawayTaskEntity.builder()
                                 .warehouseId(order.getWarehouseId())
@@ -191,14 +230,14 @@ public class ReceivingOrderService {
                 order.setPutawayCreatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
 
-                log.info("GRN {} posted by accountantId={}, putawayTaskId={}", order.getReceivingCode(), accountantId,
-                                savedTask.getPutawayTaskId());
+                log.info("GRN {} posted by accountantId={}, putawayTaskId={}",
+                                order.getReceivingCode(), accountantId, savedTask.getPutawayTaskId());
                 return ApiResponse.success(
                                 "GRN posted successfully. Putaway task created: " + savedTask.getPutawayTaskId(),
-                                toResponse(order, false));
+                                toSummaryResponse(order));
         }
 
-        // ─── Helpers ───────────────────────────────────────────────────────────────
+        // ─── Private helpers ───────────────────────────────────────────────────────
 
         private ReceivingOrderEntity findOrder(Long id) {
                 return receivingOrderRepo.findById(id)
@@ -219,21 +258,21 @@ public class ReceivingOrderService {
                                         "SELECT location_id FROM locations WHERE warehouse_id = ? AND is_staging = TRUE AND active = TRUE LIMIT 1",
                                         Long.class, warehouseId);
                 } catch (Exception e) {
-                        // Fallback: any location in warehouse
                         return jdbcTemplate.queryForObject(
                                         "SELECT location_id FROM locations WHERE warehouse_id = ? AND active = TRUE LIMIT 1",
                                         Long.class, warehouseId);
                 }
         }
 
-        private ReceivingOrderResponse toResponse(ReceivingOrderEntity o, boolean withItems) {
+        /** Response tối giản (list, submit, approve, post) — không cần JOIN. */
+        private ReceivingOrderResponse toSummaryResponse(ReceivingOrderEntity o) {
                 return ReceivingOrderResponse.builder()
                                 .receivingId(o.getReceivingId())
-                                .warehouseId(o.getWarehouseId())
                                 .receivingCode(o.getReceivingCode())
                                 .status(o.getStatus())
-                                .sourceType(o.getSourceType())
+                                .warehouseId(o.getWarehouseId())
                                 .supplierId(o.getSupplierId())
+                                .sourceType(o.getSourceType())
                                 .sourceReferenceCode(o.getSourceReferenceCode())
                                 .note(o.getNote())
                                 .createdBy(o.getCreatedBy())
@@ -253,6 +292,7 @@ public class ReceivingOrderService {
                                 .skuId(item.getSkuId())
                                 .skuCode(sku != null ? sku.getSkuCode() : null)
                                 .skuName(sku != null ? sku.getSkuName() : null)
+                                .unit(sku != null ? sku.getUnit() : null)
                                 .receivedQty(item.getReceivedQty())
                                 .lotNumber(item.getLotNumber())
                                 .expiryDate(item.getExpiryDate())

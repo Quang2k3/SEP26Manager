@@ -16,6 +16,7 @@ public class ReceivingItemResponse {
     private Long skuId;
     private String skuCode;
     private String skuName;
+    private String unit;
     private BigDecimal receivedQty;
     private String lotNumber;
     private LocalDate expiryDate;
