@@ -106,4 +106,28 @@ public final class MessageConstants {
     public static final String SKU_CATEGORY_INACTIVE = "Cannot assign an inactive category to SKU (BR-CAT-08)";
     public static final String SKU_SAME_CATEGORY = "SKU already belongs to this category";
     public static final String SKU_DETAIL_SUCCESS = "SKU detail retrieved successfully";
+
+    // ==================== SKU Search Messages (UC-B06) ====================
+    public static final String SKU_SEARCH_SUCCESS = "SKU search completed successfully";
+    public static final String SKU_SEARCH_NO_RESULT = "No SKUs found matching your criteria.";
+
+    // ==================== SKU Threshold Messages (UC-B07) ====================
+    public static final String THRESHOLD_UPDATED_SUCCESS = "Thresholds updated successfully";
+    public static final String THRESHOLD_NOT_FOUND = "Threshold configuration not found";
+    public static final String THRESHOLD_MUST_BE_POSITIVE = "Please enter valid positive integers.";
+    public static final String THRESHOLD_MIN_MUST_BE_LESS_THAN_MAX = "Min threshold must be lower than Max threshold.";
+    public static final String SKU_INACTIVE = "SKU is not active";
+
+    // ==================== Import SKU Messages (UC-B08) ====================
+    public static final String IMPORT_SKU_SUCCESS = "SKU import completed";
+    public static final String IMPORT_INVALID_FILE_FORMAT = "Invalid file format. Please use Excel or CSV.";
+    public static final String IMPORT_FILE_TOO_LARGE = "File size exceeds 5MB limit.";
+    public static final String IMPORT_TOO_MANY_ROWS = "File exceeds maximum 1,000 rows per import batch.";
+
+    // ==================== Zone Messages (UC-LOC-01) ====================
+    public static final String ZONE_CREATED_SUCCESS = "Zone created successfully";
+    public static final String ZONE_CODE_DUPLICATE = "Zone Code '%s' already exists in this warehouse.";
+
+    // ==================== Warehouse Messages ====================
+    public static final String WAREHOUSE_NOT_FOUND = "Warehouse not found with ID: %s";
 }

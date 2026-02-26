@@ -2,7 +2,9 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.sep26management.application.dto.request.SearchSkuRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.SkuResponse;
 import org.example.sep26management.infrastructure.mapper.SkuMapper;
 import org.example.sep26management.infrastructure.persistence.repository.CategoryJpaRepository;
@@ -14,8 +16,13 @@ import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.CategoryEntity;
 import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -41,6 +48,49 @@ public class SkuService {
         SkuResponse response = skuMapper.toResponse(sku);
 
         return ApiResponse.success("SKU detail retrieved successfully", response);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // UC-B06: Search SKU
+    // BR-SKU-06: partial, case-insensitive, skuCode + skuName
+    // BR-GEN-01: blank keyword → latest 20 records
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public ApiResponse<PageResponse<SkuResponse>> searchSku(SearchSkuRequest request) {
+        log.info("Searching SKU with keyword='{}', page={}, size={}",
+                request.getKeyword(), request.getPage(), request.getSize());
+
+        int size = request.getSize() > 0 ? request.getSize() : 20;
+        Pageable pageable = PageRequest.of(request.getPage(), size);
+
+        // blank keyword → return all (BR-GEN-01 default view)
+        String keyword = (request.getKeyword() != null && !request.getKeyword().isBlank())
+                ? request.getKeyword().trim()
+                : null;
+
+        Page<SkuEntity> page = skuJpaRepository.searchByKeyword(keyword, pageable);
+
+        List<SkuResponse> content = page.getContent()
+                .stream()
+                .map(skuMapper::toResponse)
+                .toList();
+
+        PageResponse<SkuResponse> pageResponse = PageResponse.<SkuResponse>builder()
+                .content(content)
+                .page(page.getNumber())
+                .size(page.getSize())
+                .totalElements(page.getTotalElements())
+                .totalPages(page.getTotalPages())
+                .last(page.isLast())
+                .build();
+
+        // MS-SKU-06: empty state message khi không có kết quả
+        String message = content.isEmpty()
+                ? MessageConstants.SKU_SEARCH_NO_RESULT
+                : MessageConstants.SKU_SEARCH_SUCCESS;
+
+        return ApiResponse.success(message, pageResponse);
     }
 
     /**
