@@ -20,4 +20,11 @@ public class ScanEventRequest {
     @NotNull(message = "qty is required")
     @Positive(message = "qty must be positive")
     private BigDecimal qty;
+
+    /**
+     * Required only when calling with a regular user JWT (e.g. Swagger testing).
+     * iPhone scanner uses a scan token that already embeds the sessionId — leave
+     * null in that case.
+     */
+    private String sessionId;
 }
