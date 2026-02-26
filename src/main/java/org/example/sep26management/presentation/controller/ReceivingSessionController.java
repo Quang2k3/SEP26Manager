@@ -3,7 +3,6 @@ package org.example.sep26management.presentation.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.CreateGrnRequest;
-import org.example.sep26management.application.dto.request.CreateSessionRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.ScanSessionResponse;
 import org.example.sep26management.application.service.ReceivingSessionService;
@@ -13,6 +12,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -25,11 +25,10 @@ public class ReceivingSessionController {
 
     /** POST /v1/receiving-sessions — Laptop creates a session */
     @PostMapping
-    public ApiResponse<ScanSessionResponse> createSession(
-            @Valid @RequestBody CreateSessionRequest request,
-            Authentication auth) {
+    public ApiResponse<ScanSessionResponse> createSession(Authentication auth) {
         Long userId = extractUserId(auth);
-        return receivingSessionService.createSession(request, userId);
+        Long warehouseId = extractWarehouseId(auth);
+        return receivingSessionService.createSession(warehouseId, userId);
     }
 
     /** POST /v1/receiving-sessions/{id}/scan-token — Generate iPhone scan JWT */
@@ -66,6 +65,8 @@ public class ReceivingSessionController {
     /**
      * POST /v1/receiving-sessions/{id}/create-grn
      * Turn scan session into a DRAFT GRN (receiving_orders + receiving_items).
+     * warehouseId is taken from the scan session (set when session was created from
+     * JWT).
      */
     @PostMapping("/{sessionId}/create-grn")
     public ApiResponse<Map<String, Object>> createGrn(
@@ -76,7 +77,6 @@ public class ReceivingSessionController {
         return receivingSessionService.createGrn(sessionId, request, userId);
     }
 
-    @SuppressWarnings("unchecked")
     private Long extractUserId(Authentication auth) {
         if (auth != null && auth.getDetails() instanceof Map) {
             Object uid = ((Map<?, ?>) auth.getDetails()).get("userId");
@@ -86,5 +86,26 @@ public class ReceivingSessionController {
                 return ((Integer) uid).longValue();
         }
         throw new RuntimeException("Cannot extract userId from authentication");
+    }
+
+    /**
+     * Extract the first warehouseId from the JWT token claims.
+     * Each user role is bound to exactly one warehouse, so we take the first entry.
+     */
+    private Long extractWarehouseId(Authentication auth) {
+        if (auth != null && auth.getDetails() instanceof Map) {
+            Object raw = ((Map<?, ?>) auth.getDetails()).get("warehouseIds");
+            if (raw instanceof List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long)
+                    return (Long) first;
+                if (first instanceof Integer)
+                    return ((Integer) first).longValue();
+                if (first instanceof Number)
+                    return ((Number) first).longValue();
+            }
+        }
+        throw new RuntimeException(
+                "Cannot extract warehouseId from authentication — ensure the role is assigned to a warehouse");
     }
 }

@@ -64,6 +64,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     String email = jwtTokenProvider.getEmailFromToken(jwt);
                     Long userId = jwtTokenProvider.getUserIdFromToken(jwt);
                     Set<String> roleCodes = jwtTokenProvider.getRoleCodesFromToken(jwt);
+                    List<Long> warehouseIds = jwtTokenProvider.getWarehouseIdsFromToken(jwt);
 
                     List<SimpleGrantedAuthority> authorities = roleCodes.stream()
                             .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
@@ -78,6 +79,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     details.put("userId", userId);
                     details.put("email", email);
                     details.put("roles", roleCodes);
+                    details.put("warehouseIds", warehouseIds);
                     authentication.setDetails(details);
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
