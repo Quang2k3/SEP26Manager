@@ -84,9 +84,9 @@ public class SecurityConfig {
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
                         .requestMatchers("/v1/zones/**").hasRole("MANAGER")
                         .requestMatchers("/v1/category-zone-mappings/**").hasRole("MANAGER") // Zone Management
-                        .requestMatchers("/v1/categories/**").hasAnyRole("ADMIN", "MANAGER")
+                        .requestMatchers("/v1/categories/**").hasAnyRole("MANAGER")
                         .requestMatchers("/v1/skus/**").authenticated()
-                        .requestMatchers("/v1/locations/**").hasAnyRole("ADMIN", "MANAGER")
+                        .requestMatchers("/v1/locations/**").hasAnyRole("MANAGER")
                         // Authenticated endpoints
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

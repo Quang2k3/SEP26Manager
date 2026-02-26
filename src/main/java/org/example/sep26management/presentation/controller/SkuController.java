@@ -5,10 +5,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.AssignCategoryToSkuRequest;
+import org.example.sep26management.application.dto.request.ConfigureSkuThresholdRequest;
 import org.example.sep26management.application.dto.request.SearchSkuRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.SkuResponse;
+import org.example.sep26management.application.dto.response.SkuThresholdResponse;
 import org.example.sep26management.application.service.SkuService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -65,6 +67,33 @@ public class SkuController {
                 .build();
 
         return ResponseEntity.ok(skuService.searchSku(request));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // UC-B07: Configure SKU Threshold
+    // PUT /api/v1/skus/{skuId}/threshold
+    // ─────────────────────────────────────────────────────────────
+
+    @PutMapping("/{skuId}/threshold")
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<SkuThresholdResponse>> configureThreshold(
+            @PathVariable Long skuId,
+            @Valid @RequestBody ConfigureSkuThresholdRequest request,
+            HttpServletRequest httpRequest) {
+
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(skuService.configureThreshold(
+                skuId, request, userId,
+                getClientIpAddress(httpRequest),
+                httpRequest.getHeader("User-Agent")));
+    }
+
+    @GetMapping("/{skuId}/threshold")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<SkuThresholdResponse>> getThreshold(
+            @PathVariable Long skuId,
+            @RequestParam Long warehouseId) {
+        return ResponseEntity.ok(skuService.getThreshold(skuId, warehouseId));
     }
 
     /**
