@@ -39,8 +39,8 @@ public class ScannerPageController {
                 "<meta name='viewport' content='width=device-width,initial-scale=1.0,user-scalable=no'>" +
                 "<title>Warehouse Scanner (QR)</title>" +
 
-                // html5-qrcode (QR cực ổn định trên iOS Safari)
-                "<script src='https://unpkg.com/html5-qrcode@2.3.10/html5-qrcode.min.js'></script>" +
+                // html5-qrcode - load with fallback
+                "<script src='https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js'></script>" +
 
                 "<style>" +
                 "*{box-sizing:border-box;margin:0;padding:0}" +
@@ -214,19 +214,45 @@ public class ScannerPageController {
                 +
                 "} \n" +
                 "function startQr(){\n" +
+                "  setStatus('Đang khởi động camera...');\n" +
+                "  \n" +
                 "  // Check HTTPS - camera requires secure context\n" +
                 "  if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {\n" +
                 "    toast('Cần HTTPS để quét QR!', true);\n" +
                 "    setStatus('Lỗi: Cần HTTPS để truy cập camera');\n" +
                 "    return;\n" +
                 "  }\n" +
+                "  \n" +
+                "  // Debug: log library availability\n" +
+                "  console.log('Html5Qrcode available:', typeof Html5Qrcode !== 'undefined');\n" +
+                "  \n" +
+                "  if (typeof Html5Qrcode === 'undefined') {\n" +
+                "    toast('Thư viện QR chưa tải! Thử refresh trang.', true);\n" +
+                "    setStatus('Lỗi: Thư viện chưa tải');\n" +
+                "    return;\n" +
+                "  }\n" +
+                "  \n" +
                 "  try{\n" +
-                "    // Use Html5QrcodeScanner for better permission handling, or fallback to Html5Qrcode\n" +
                 "    Html5Qrcode.getCameras().then(function(cameras){\n" +
+                "      console.log('Cameras found:', cameras);\n" +
+                "      \n" +
                 "      if(cameras && cameras.length){\n" +
-                "        var cameraId = cameras.find(function(c){return c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('environment');}) || cameras[0].id;\n" +
+                "        var cameraId = cameras[0].id; // Use first available camera\n" +
+                "        \n" +
+                "        // Try to find back camera\n" +
+                "        for(var i=0; i<cameras.length; i++){\n" +
+                "          var label = cameras[i].label.toLowerCase();\n" +
+                "          if(label.includes('back') || label.includes('rear') || label.includes('environment')){\n" +
+                "            cameraId = cameras[i].id;\n" +
+                "            break;\n" +
+                "          }\n" +
+                "        }\n" +
+                "        \n" +
                 "        qr = new Html5Qrcode('reader');\n" +
-                "        var config = { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } };\n" +
+                "        \n" +
+                "        // Simplified config for iOS Safari\n" +
+                "        var config = { fps: 10, qrbox: { width: 250, height: 250 } };\n" +
+                "        \n" +
                 "        qr.start(cameraId, config, function(decodedText){\n" +
                 "          var code=(decodedText||'').trim().toUpperCase();\n" +
                 "          if(code.length<2) return;\n" +
@@ -235,22 +261,30 @@ public class ScannerPageController {
                 "          lastCode=code; lastAt=now;\n" +
                 "          document.getElementById('last').textContent=code;\n" +
                 "          sendBarcode(code,1);\n" +
-                "        }, function(err){}).then(function(){\n" +
+                "        }, function(errorMessage){ \n" +
+                "          // Ignore scan errors (no QR found)\n" +
+                "        }).then(function(){\n" +
                 "          qrRunning=true;\n" +
-                "          setStatus('Camera sẵn sàng (QR) — đưa QR vào khung');\n" +
+                "          setStatus('Camera sẵn sàng — đưa QR vào khung');\n" +
                 "        }).catch(function(e){\n" +
+                "          console.log('Camera error:', e);\n" +
                 "          toast('Không mở được camera: ' + e, true);\n" +
                 "          setStatus('Camera lỗi: '+e);\n" +
                 "        });\n" +
                 "      }else{\n" +
                 "        toast('Không tìm thấy camera!', true);\n" +
-                "        setStatus('Lỗi: Không tìm thấy camera trên thiết bị');\n" +
+                "        setStatus('Lỗi: Không tìm thấy camera');\n" +
                 "      }\n" +
                 "    }).catch(function(e){\n" +
-                "      toast('Không truy cập được camera: Quyền bị từ chối hoặc không có camera', true);\n" +
-                "      setStatus('Lỗi quyền camera: ' + e + '. Vui lòng cho phép truy cập camera trong cài đặt trình duyệt.');\n" +
+                "      console.log('getCameras error:', e);\n" +
+                "      toast('Lỗi truy cập camera: ' + e, true);\n" +
+                "      setStatus('Lỗi: ' + e);\n" +
                 "    });\n" +
-                "  }catch(e){toast('Không khởi tạo được QR: '+e,true);setStatus('Lỗi: '+e);} \n" +
+                "  }catch(e){\n" +
+                "    console.log('Start QR error:', e);\n" +
+                "    toast('Không khởi tạo được QR: '+e, true);\n" +
+                "    setStatus('Lỗi: '+e); \n" +
+                "  } \n" +
                 "} \n" +
 
                 "document.addEventListener('DOMContentLoaded',function(){\n" +
