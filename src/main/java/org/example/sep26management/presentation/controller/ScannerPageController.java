@@ -101,7 +101,10 @@ public class ScannerPageController {
                 "<table><thead><tr><th>SKU</th><th>Tên sản phẩm</th><th style='text-align:right'>Qty</th></tr></thead>"
                 +
                 "<tbody id='lines'></tbody></table>" +
-                "</div></div>" +
+                "</div>" +
+                "<button class='btn' id='closeBtn' style='width:100%;background:#ef4444;margin-top:10px' onclick='closeScan()'>🛑 Kết thúc Scan</button>"
+                +
+                "</div>" +
                 "<div class='toast' id='toast'></div>" +
                 "<script>\n" +
                 "var TOKEN='" + token + "';\n" +
@@ -110,6 +113,9 @@ public class ScannerPageController {
                 "var lineData={};\n" +
                 "var lastCode=null;\n" +
                 "var debounceTimer=null;\n" +
+                "function getSessionId(){try{var p=TOKEN.split('.')[1];var d=JSON.parse(atob(p));return d.sessionId||null;}catch(e){return null;}}\n"
+                +
+                "var SESSION_ID=getSessionId();\n" +
 
                 "function toast(msg,err){\n" +
                 "  var t=document.getElementById('toast');\n" +
@@ -157,6 +163,26 @@ public class ScannerPageController {
                 "  });\n" +
                 "}\n" +
 
+                "function closeScan(){\n" +
+                "  if(!SESSION_ID){toast('Không tìm thấy session',true);return;}\n" +
+                "  if(!confirm('Kết thúc phiên scan?'))return;\n" +
+                "  fetch(window.location.origin+'/api/v1/receiving-sessions/'+SESSION_ID,{\n" +
+                "    method:'DELETE',\n" +
+                "    headers:{'Authorization':'Bearer '+TOKEN}\n" +
+                "  }).then(function(r){return r.json();}).then(function(d){\n" +
+                "    if(d.success){\n" +
+                "      toast('Phiên scan đã đóng');\n" +
+                "      try{Quagga.stop();}catch(e){}\n" +
+                "      document.getElementById('closeBtn').disabled=true;\n" +
+                "      document.getElementById('closeBtn').textContent='Đã đóng';\n" +
+                "      setStatus('Phiên scan đã kết thúc');\n" +
+                "    }else{\n" +
+                "      toast(d.message||'Lỗi đóng session',true);\n" +
+                "    }\n" +
+                "  }).catch(function(e){\n" +
+                "    toast('Lỗi kết nối: '+e,true);\n" +
+                "  });\n" +
+                "}\n" +
                 "function submitManual(){\n" +
                 "  var b=document.getElementById('bc').value.trim().toUpperCase();\n" +
                 "  var q=parseFloat(document.getElementById('qty').value)||1;\n" +
