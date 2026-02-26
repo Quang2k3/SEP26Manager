@@ -1,7 +1,6 @@
 package org.example.sep26management.application.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import lombok.*;
 
 import java.time.LocalDate;
@@ -13,8 +12,8 @@ import java.time.LocalDate;
 @Builder
 public class CreateGrnRequest {
 
-    @NotNull(message = "warehouseId is required")
-    private Long warehouseId;
+    // warehouseId is resolved from the scan session data (which was set from JWT
+    // when session was created)
 
     /** SUPPLIER | TRANSFER | RETURN */
     @NotBlank(message = "sourceType is required")
