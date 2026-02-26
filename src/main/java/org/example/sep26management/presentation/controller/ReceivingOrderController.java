@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
 import org.example.sep26management.application.service.ReceivingOrderService;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -37,8 +38,9 @@ public class ReceivingOrderController {
         return receivingOrderService.submit(id, extractUserId(auth));
     }
 
-    /** POST /v1/receiving-orders/{id}/approve — Manager */
+    /** POST /v1/receiving-orders/{id}/approve — Manager only */
     @PostMapping("/{id}/approve")
+    @PreAuthorize("hasRole('MANAGER')")
     public ApiResponse<ReceivingOrderResponse> approve(
             @PathVariable Long id,
             Authentication auth) {

@@ -93,9 +93,10 @@ public class ScanEventService {
                 sessionId, request.getBarcode(), sku.getSkuCode(), request.getQty(), newQty);
 
         return ApiResponse.success("Scanned", Map.of(
-                "ok", true,
+                "skuId", sku.getSkuId(),
                 "skuCode", sku.getSkuCode(),
                 "skuName", sku.getSkuName(),
+                "barcode", sku.getBarcode(),
                 "newQty", newQty));
     }
 }

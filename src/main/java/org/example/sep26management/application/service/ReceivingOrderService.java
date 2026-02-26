@@ -132,7 +132,7 @@ public class ReceivingOrderService {
                 receivingOrderRepo.save(order);
 
                 log.info("GRN {} submitted by userId={}", order.getReceivingCode(), userId);
-                return ApiResponse.success("GRN submitted successfully", toSummaryResponse(order));
+                return ApiResponse.success("GRN submitted successfully", getOrder(id).getData());
         }
 
         // ─── Approve ───────────────────────────────────────────────────────────────
@@ -149,7 +149,7 @@ public class ReceivingOrderService {
                 receivingOrderRepo.save(order);
 
                 log.info("GRN {} approved by managerId={}", order.getReceivingCode(), managerId);
-                return ApiResponse.success("GRN approved successfully", toSummaryResponse(order));
+                return ApiResponse.success("GRN approved successfully", getOrder(id).getData());
         }
 
         // ─── Post ──────────────────────────────────────────────────────────────────
@@ -234,7 +234,7 @@ public class ReceivingOrderService {
                                 order.getReceivingCode(), accountantId, savedTask.getPutawayTaskId());
                 return ApiResponse.success(
                                 "GRN posted successfully. Putaway task created: " + savedTask.getPutawayTaskId(),
-                                toSummaryResponse(order));
+                                getOrder(id).getData());
         }
 
         // ─── Private helpers ───────────────────────────────────────────────────────
@@ -266,6 +266,16 @@ public class ReceivingOrderService {
 
         /** Response tối giản (list, submit, approve, post) — không cần JOIN. */
         private ReceivingOrderResponse toSummaryResponse(ReceivingOrderEntity o) {
+                String createdByName = o.getCreatedBy() != null
+                                ? userRepo.findById(o.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+                String approvedByName = o.getApprovedBy() != null
+                                ? userRepo.findById(o.getApprovedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+                String confirmedByName = o.getConfirmedBy() != null
+                                ? userRepo.findById(o.getConfirmedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+
                 return ReceivingOrderResponse.builder()
                                 .receivingId(o.getReceivingId())
                                 .receivingCode(o.getReceivingCode())
@@ -276,11 +286,14 @@ public class ReceivingOrderService {
                                 .sourceReferenceCode(o.getSourceReferenceCode())
                                 .note(o.getNote())
                                 .createdBy(o.getCreatedBy())
+                                .createdByName(createdByName)
                                 .createdAt(o.getCreatedAt())
                                 .updatedAt(o.getUpdatedAt())
                                 .approvedBy(o.getApprovedBy())
+                                .approvedByName(approvedByName)
                                 .approvedAt(o.getApprovedAt())
                                 .confirmedBy(o.getConfirmedBy())
+                                .confirmedByName(confirmedByName)
                                 .confirmedAt(o.getConfirmedAt())
                                 .build();
         }
