@@ -200,25 +200,43 @@ public class ScannerPageController {
                 +
                 "} \n" +
                 "function startQr(){\n" +
+                "  // Check HTTPS - camera requires secure context\n" +
+                "  if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {\n" +
+                "    toast('Cần HTTPS để quét QR!', true);\n" +
+                "    setStatus('Lỗi: Cần HTTPS để truy cập camera');\n" +
+                "    return;\n" +
+                "  }\n" +
                 "  try{\n" +
-                "    qr=new Html5Qrcode('reader');\n" +
-                "    var config={ fps: 10, qrbox: { width: 250, height: 250 } };\n" +
-                "    qr.start({ facingMode: 'environment' }, config, function(decodedText){\n" +
-                "      var code=(decodedText||'').trim().toUpperCase();\n" +
-                "      if(code.length<2) return;\n" +
-                "      var now=Date.now();\n" +
-                "      if(code===lastCode && (now-lastAt)<1500) return;\n" +
-                "      lastCode=code; lastAt=now;\n" +
-                "      document.getElementById('last').textContent=code;\n" +
-                "      sendBarcode(code,1);\n" +
-                "    }, function(err){}).then(function(){\n" +
-                "      qrRunning=true;\n" +
-                "      setStatus('Camera sẵn sàng (QR) — đưa QR vào khung');\n" +
+                "    // Use Html5QrcodeScanner for better permission handling, or fallback to Html5Qrcode\n" +
+                "    Html5Qrcode.getCameras().then(function(cameras){\n" +
+                "      if(cameras && cameras.length){\n" +
+                "        var cameraId = cameras.find(function(c){return c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('environment');}) || cameras[0].id;\n" +
+                "        qr = new Html5Qrcode('reader');\n" +
+                "        var config = { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } };\n" +
+                "        qr.start(cameraId, config, function(decodedText){\n" +
+                "          var code=(decodedText||'').trim().toUpperCase();\n" +
+                "          if(code.length<2) return;\n" +
+                "          var now=Date.now();\n" +
+                "          if(code===lastCode && (now-lastAt)<1500) return;\n" +
+                "          lastCode=code; lastAt=now;\n" +
+                "          document.getElementById('last').textContent=code;\n" +
+                "          sendBarcode(code,1);\n" +
+                "        }, function(err){}).then(function(){\n" +
+                "          qrRunning=true;\n" +
+                "          setStatus('Camera sẵn sàng (QR) — đưa QR vào khung');\n" +
+                "        }).catch(function(e){\n" +
+                "          toast('Không mở được camera: ' + e, true);\n" +
+                "          setStatus('Camera lỗi: '+e);\n" +
+                "        });\n" +
+                "      }else{\n" +
+                "        toast('Không tìm thấy camera!', true);\n" +
+                "        setStatus('Lỗi: Không tìm thấy camera trên thiết bị');\n" +
+                "      }\n" +
                 "    }).catch(function(e){\n" +
-                "      toast('Không mở được camera QR', true);\n" +
-                "      setStatus('Camera lỗi: '+e);\n" +
+                "      toast('Không truy cập được camera: Quyền bị từ chối hoặc không có camera', true);\n" +
+                "      setStatus('Lỗi quyền camera: ' + e + '. Vui lòng cho phép truy cập camera trong cài đặt trình duyệt.');\n" +
                 "    });\n" +
-                "  }catch(e){toast('Không khởi tạo được QR',true);setStatus('Lỗi: '+e);} \n" +
+                "  }catch(e){toast('Không khởi tạo được QR: '+e,true);setStatus('Lỗi: '+e);} \n" +
                 "} \n" +
 
                 "document.addEventListener('DOMContentLoaded',function(){\n" +
