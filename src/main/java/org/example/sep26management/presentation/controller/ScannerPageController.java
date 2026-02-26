@@ -132,6 +132,20 @@ public class ScannerPageController {
                 "var inflight=false;\n" +
                 "var lastCode=null;\n" +
                 "var lastAt=0;\n" +
+                "var html5QrcodeLoaded = typeof Html5Qrcode !== 'undefined';\n" +
+
+                "function waitForHtml5Qrcode(callback, retries) {\n" +
+                "  if (typeof Html5Qrcode !== 'undefined') {\n" +
+                "    html5QrcodeLoaded = true;\n" +
+                "    callback();\n" +
+                "    return;\n" +
+                "  }\n" +
+                "  if (retries <= 0) {\n" +
+                "    document.getElementById('cam-status').textContent = 'Lỗi: Không tải được thư viện QR';\n" +
+                "    return;\n" +
+                "  }\n" +
+                "  setTimeout(function() { waitForHtml5Qrcode(callback, retries - 1); }, 200);\n" +
+                "}\n" +
 
                 "function base64UrlDecode(str){str=(str||'').replace(/-/g,'+').replace(/_/g,'/');while(str.length%4)str+='=';return atob(str);} \n"
                 +
@@ -245,7 +259,9 @@ public class ScannerPageController {
                 "  document.getElementById('bc').addEventListener('keydown', function(e){ if(e.key==='Enter') submitManual(); });\n"
                 +
                 "});\n" +
-                "window.addEventListener('load', startQr);\n" +
+                "window.addEventListener('load', function(){\n" +
+                "  waitForHtml5Qrcode(startQr, 25);\n" +
+                "});\n" +
 
                 "</script></body></html>";
     }
