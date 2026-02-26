@@ -2,12 +2,11 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.example.sep26management.application.dto.request.ConfigureSkuThresholdRequest;
 import org.example.sep26management.application.dto.request.SearchSkuRequest;
-import org.example.sep26management.application.dto.response.ApiResponse;
-import org.example.sep26management.application.dto.response.PageResponse;
-import org.example.sep26management.application.dto.response.SkuResponse;
-import org.example.sep26management.application.dto.response.SkuThresholdResponse;
+import org.example.sep26management.application.dto.response.*;
 import org.example.sep26management.infrastructure.mapper.SkuMapper;
 import org.example.sep26management.infrastructure.persistence.entity.SkuThresholdEntity;
 import org.example.sep26management.infrastructure.persistence.repository.CategoryJpaRepository;
@@ -26,8 +25,11 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -270,6 +272,163 @@ public class SkuService {
                 skuMapper.toResponse(updatedSku));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // UC-B08: Import SKU from Excel
+    // BR-IMP-01: max 5MB, max 1000 rows
+    // BR-SKU-01: duplicate SKU codes → skip + flag as "Duplicate"
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<ImportSkuResultResponse> importSkuFromExcel(
+            MultipartFile file,
+            Long importedBy,
+            String ipAddress,
+            String userAgent) throws IOException {
+
+        log.info("Starting SKU import, file={}, size={}", file.getOriginalFilename(), file.getSize());
+
+        // BR-IMP-01: Validate file format
+        String filename = file.getOriginalFilename() != null ? file.getOriginalFilename().toLowerCase() : "";
+        if (!filename.endsWith(".xlsx") && !filename.endsWith(".xls")) {
+            throw new BusinessException(MessageConstants.IMPORT_INVALID_FILE_FORMAT);
+        }
+
+        // BR-IMP-01: Validate file size (5MB)
+        if (file.getSize() > 5 * 1024 * 1024) {
+            throw new BusinessException(MessageConstants.IMPORT_FILE_TOO_LARGE);
+        }
+
+        List<SkuEntity> toSave = new ArrayList<>();
+        List<ImportSkuResultResponse.RowError> errors = new ArrayList<>();
+        int totalRows = 0;
+        int duplicateCount = 0;
+
+        try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
+            Sheet sheet = workbook.getSheetAt(0);
+
+            // Row 0 = header, data starts at row 1
+            int lastRow = sheet.getLastRowNum();
+
+            // BR-IMP-01: max 1000 rows
+            if (lastRow > 1000) {
+                throw new BusinessException(MessageConstants.IMPORT_TOO_MANY_ROWS);
+            }
+
+            for (int rowIdx = 1; rowIdx <= lastRow; rowIdx++) {
+                Row row = sheet.getRow(rowIdx);
+                if (row == null || isRowEmpty(row)) continue;
+
+                totalRows++;
+                int displayRow = rowIdx + 1; // 1-indexed for error messages
+
+                try {
+                    // Parse required fields from Excel template
+                    // Col 0: skuCode | Col 1: skuName | Col 2: unit
+                    // Col 3: brand   | Col 4: barcode | Col 5: description
+                    // Col 6: packageType | Col 7: volumeMl | Col 8: weightG
+                    // Col 9: originCountry | Col 10: scent | Col 11: shelfLifeDays
+                    // Col 12: storageTempMin | Col 13: storageTempMax
+
+                    String skuCode = getCellString(row, 0);
+                    String skuName = getCellString(row, 1);
+                    String unit = getCellString(row, 2);
+
+                    // Validate mandatory fields [BR-SKU-01]
+                    if (skuCode == null || skuCode.isBlank()) {
+                        errors.add(ImportSkuResultResponse.RowError.builder()
+                                .rowNumber(displayRow).reason("SKU Code is required").build());
+                        continue;
+                    }
+                    if (skuName == null || skuName.isBlank()) {
+                        errors.add(ImportSkuResultResponse.RowError.builder()
+                                .rowNumber(displayRow).skuCode(skuCode)
+                                .reason("SKU Name is required").build());
+                        continue;
+                    }
+                    if (unit == null || unit.isBlank()) {
+                        errors.add(ImportSkuResultResponse.RowError.builder()
+                                .rowNumber(displayRow).skuCode(skuCode)
+                                .reason("Unit is required").build());
+                        continue;
+                    }
+
+                    // BR-SKU-01: check duplicate in DB
+                    if (skuJpaRepository.existsBySkuCode(skuCode)) {
+                        duplicateCount++;
+                        errors.add(ImportSkuResultResponse.RowError.builder()
+                                .rowNumber(displayRow).skuCode(skuCode)
+                                .reason("Duplicate: SKU Code already exists in system").build());
+                        continue;
+                    }
+
+                    // BR-SKU-01: check duplicate within same batch
+                    boolean dupInBatch = toSave.stream()
+                            .anyMatch(s -> s.getSkuCode().equalsIgnoreCase(skuCode));
+                    if (dupInBatch) {
+                        duplicateCount++;
+                        errors.add(ImportSkuResultResponse.RowError.builder()
+                                .rowNumber(displayRow).skuCode(skuCode)
+                                .reason("Duplicate: SKU Code duplicated within import file").build());
+                        continue;
+                    }
+
+                    // Build entity
+                    SkuEntity sku = SkuEntity.builder()
+                            .skuCode(skuCode.trim())
+                            .skuName(skuName.trim())
+                            .unit(unit.trim())
+                            .brand(getCellString(row, 3))
+                            .barcode(getCellString(row, 4))
+                            .description(getCellString(row, 5))
+                            .packageType(getCellString(row, 6))
+                            .volumeMl(getCellDecimal(row, 7))
+                            .weightG(getCellDecimal(row, 8))
+                            .originCountry(getCellString(row, 9))
+                            .scent(getCellString(row, 10))
+                            .shelfLifeDays(getCellInteger(row, 11))
+                            .storageTempMin(getCellDecimal(row, 12))
+                            .storageTempMax(getCellDecimal(row, 13))
+                            .active(true)
+                            .build();
+
+                    toSave.add(sku);
+
+                } catch (Exception e) {
+                    log.warn("Error parsing row {}: {}", rowIdx, e.getMessage());
+                    errors.add(ImportSkuResultResponse.RowError.builder()
+                            .rowNumber(displayRow)
+                            .reason("Parse error: " + e.getMessage())
+                            .build());
+                }
+            }
+        }
+
+        // Bulk save valid records
+        if (!toSave.isEmpty()) {
+            skuJpaRepository.saveAll(toSave);
+            log.info("SKU import: saved {} records", toSave.size());
+        }
+
+        int successCount = toSave.size();
+
+        auditLogService.logAction(
+                importedBy, "SKU_IMPORT", "SKU", null,
+                String.format("Imported %d SKUs, %d failed, %d duplicates",
+                        successCount, errors.size() - duplicateCount, duplicateCount),
+                ipAddress, userAgent);
+
+        ImportSkuResultResponse result = ImportSkuResultResponse.builder()
+                .totalRows(totalRows)
+                .successCount(successCount)
+                .errorCount(errors.size())
+                .duplicateCount(duplicateCount)
+                .errors(errors.isEmpty() ? null : errors)
+                .build();
+
+        return ApiResponse.success(MessageConstants.IMPORT_SKU_SUCCESS, result);
+    }
+
+
     /**
      * Lookup SKU by barcode.
      */
@@ -304,5 +463,63 @@ public class SkuService {
                     log.warn("No active SKU found for skuCode: {}", skuCode);
                     return ApiResponse.error("SKU not found: " + skuCode);
                 });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Excel parsing helpers
+    // ─────────────────────────────────────────────────────────────
+
+    private boolean isRowEmpty(Row row) {
+        for (int c = row.getFirstCellNum(); c < row.getLastCellNum(); c++) {
+            Cell cell = row.getCell(c);
+            if (cell != null && cell.getCellType() != CellType.BLANK) {
+                String val = getCellStringRaw(cell);
+                if (val != null && !val.isBlank()) return false;
+            }
+        }
+        return true;
+    }
+
+    private String getCellString(Row row, int col) {
+        Cell cell = row.getCell(col, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
+        if (cell == null) return null;
+        String val = getCellStringRaw(cell);
+        return (val == null || val.isBlank()) ? null : val.trim();
+    }
+
+    private String getCellStringRaw(Cell cell) {
+        return switch (cell.getCellType()) {
+            case STRING -> cell.getStringCellValue();
+            case NUMERIC -> {
+                // Avoid 1.0 for integer-like values
+                double d = cell.getNumericCellValue();
+                yield d == Math.floor(d) ? String.valueOf((long) d) : String.valueOf(d);
+            }
+            case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
+            case FORMULA -> {
+                try { yield cell.getStringCellValue(); }
+                catch (Exception e) { yield String.valueOf(cell.getNumericCellValue()); }
+            }
+            default -> null;
+        };
+    }
+
+    private BigDecimal getCellDecimal(Row row, int col) {
+        Cell cell = row.getCell(col, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
+        if (cell == null) return null;
+        try {
+            if (cell.getCellType() == CellType.NUMERIC) {
+                return BigDecimal.valueOf(cell.getNumericCellValue());
+            }
+            String s = getCellStringRaw(cell);
+            return (s == null || s.isBlank()) ? null : new BigDecimal(s.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private Integer getCellInteger(Row row, int col) {
+        BigDecimal d = getCellDecimal(row, col);
+        return d == null ? null : d.intValue();
     }
 }
