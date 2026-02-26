@@ -36,8 +36,18 @@ public class ScanEventService {
      * @param request   barcode + qty
      */
     public ApiResponse<Map<String, Object>> processScan(String scanToken, ScanEventRequest request) {
-        // 1. Extract sessionId from scan token
-        String sessionId = jwtTokenProvider.getSessionIdFromScanToken(scanToken);
+        // 1. Extract sessionId — scan token embeds it; regular JWT needs it in request
+        // body
+        String sessionId;
+        if (jwtTokenProvider.isScanToken(scanToken)) {
+            sessionId = jwtTokenProvider.getSessionIdFromScanToken(scanToken);
+        } else {
+            // Regular user JWT (e.g. Swagger testing) — sessionId must be in request body
+            if (request.getSessionId() == null || request.getSessionId().isBlank()) {
+                return ApiResponse.error("sessionId is required when calling with a regular user JWT token");
+            }
+            sessionId = request.getSessionId();
+        }
 
         // 2. Load session from Redis
         ScanSessionData session = sessionRedis.findById(sessionId)
