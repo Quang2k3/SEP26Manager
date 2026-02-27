@@ -39,8 +39,8 @@ public class ScannerPageController {
                 "<meta name='viewport' content='width=device-width,initial-scale=1.0,user-scalable=no'>" +
                 "<title>Warehouse Scanner (QR)</title>" +
 
-                // html5-qrcode - load with fallback
-                "<script src='https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js'></script>" +
+                // html5-qrcode - load local
+                "<script src='/js/html5-qrcode.min.js'></script>" +
 
                 "<style>" +
                 "*{box-sizing:border-box;margin:0;padding:0}" +
