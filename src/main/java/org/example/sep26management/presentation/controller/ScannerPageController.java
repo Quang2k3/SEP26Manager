@@ -39,8 +39,8 @@ public class ScannerPageController {
                 "<meta name='viewport' content='width=device-width,initial-scale=1.0,user-scalable=no'>" +
                 "<title>Warehouse Scanner (QR)</title>" +
 
-                // html5-qrcode - load local
-                "<script src='/js/html5-qrcode.min.js'></script>" +
+                // html5-qrcode - load local (must include context-path /api)
+                "<script src='/api/js/html5-qrcode.min.js'></script>" +
 
                 "<style>" +
                 "*{box-sizing:border-box;margin:0;padding:0}" +
@@ -217,7 +217,8 @@ public class ScannerPageController {
                 "  setStatus('Đang khởi động camera...');\n" +
                 "  \n" +
                 "  // Check HTTPS - camera requires secure context\n" +
-                "  if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {\n" +
+                "  if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {\n"
+                +
                 "    toast('Cần HTTPS để quét QR!', true);\n" +
                 "    setStatus('Lỗi: Cần HTTPS để truy cập camera');\n" +
                 "    return;\n" +
