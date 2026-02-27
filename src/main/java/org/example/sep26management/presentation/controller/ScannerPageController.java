@@ -238,9 +238,9 @@ public class ScannerPageController {
                 "      console.log('Cameras found:', cameras);\n" +
                 "      \n" +
                 "      if(cameras && cameras.length){\n" +
-                "        var cameraId = cameras[0].id; // Use first available camera\n" +
+                "        var cameraId = null;\n" +
                 "        \n" +
-                "        // Try to find back camera\n" +
+                "        // First: try to find back camera (prefer environment/back/rear)\n" +
                 "        for(var i=0; i<cameras.length; i++){\n" +
                 "          var label = cameras[i].label.toLowerCase();\n" +
                 "          if(label.includes('back') || label.includes('rear') || label.includes('environment')){\n" +
@@ -249,10 +249,17 @@ public class ScannerPageController {
                 "          }\n" +
                 "        }\n" +
                 "        \n" +
+                "        // If no back camera found, use last camera (usually front on iOS)\n" +
+                "        if(!cameraId && cameras.length > 0){\n" +
+                "          cameraId = cameras[cameras.length - 1].id;\n" +
+                "        }\n" +
+                "        \n" +
+                "        console.log('Using camera:', cameraId);\n" +
+                "        \n" +
                 "        qr = new Html5Qrcode('reader');\n" +
                 "        \n" +
-                "        // Simplified config for iOS Safari\n" +
-                "        var config = { fps: 10, qrbox: { width: 250, height: 250 } };\n" +
+                "        // Use facingMode environment to prefer back camera\n" +
+                "        var config = { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: 'environment' } };\n" +
                 "        \n" +
                 "        qr.start(cameraId, config, function(decodedText){\n" +
                 "          var code=(decodedText||'').trim().toUpperCase();\n" +
