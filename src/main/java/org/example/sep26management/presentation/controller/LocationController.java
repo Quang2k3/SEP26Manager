@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.CreateLocationRequest;
+import org.example.sep26management.application.dto.request.UpdateLocationRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.LocationResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
@@ -56,7 +57,23 @@ public class LocationController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+// ─────────────────────────────────────────────────────────────
+    // SCRUM-274: Update Location (UC-LOC-03)
+    // ─────────────────────────────────────────────────────────────
 
+    @PutMapping("/{locationId}")
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<LocationResponse>> updateLocation(
+            @PathVariable Long locationId,
+            @Valid @RequestBody UpdateLocationRequest request,
+            HttpServletRequest httpRequest) {
+
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(locationService.updateLocation(
+                locationId, request, userId,
+                getClientIp(httpRequest),
+                httpRequest.getHeader("User-Agent")));
+    }
 
     // ─────────────────────────────────────────────────────────────
     // Helpers

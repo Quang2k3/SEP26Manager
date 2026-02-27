@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.CreateLocationRequest;
-//import org.example.sep26management.application.dto.request.UpdateLocationRequest;
+import org.example.sep26management.application.dto.request.UpdateLocationRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.LocationResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
@@ -105,7 +105,62 @@ public class LocationService {
                 toResponse(saved, zone.getZoneCode(), null));
     }
 
+// ─────────────────────────────────────────────────────────────
+    // UC-LOC-03: Update Location
+    // BR-LOC-08: location_code immutable
+    // BR-LOC-09: new capacity >= current occupied qty
+    // ─────────────────────────────────────────────────────────────
 
+    @Transactional
+    public ApiResponse<LocationResponse> updateLocation(
+            Long locationId,
+            UpdateLocationRequest request,
+            Long updatedBy,
+            String ipAddress,
+            String userAgent) {
+
+        log.info("Updating location: locationId={}", locationId);
+
+        LocationEntity location = locationRepository.findById(locationId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.LOCATION_NOT_FOUND, locationId)));
+
+        if (Boolean.FALSE.equals(location.getActive())) {
+            throw new BusinessException(MessageConstants.LOCATION_ALREADY_INACTIVE);
+        }
+
+        // BR-LOC-09: new capacity must be >= current occupied qty
+        if (request.getMaxWeightKg() != null) {
+            var currentQty = locationRepository.getCurrentOccupiedQty(locationId);
+            if (currentQty != null && request.getMaxWeightKg().compareTo(
+                    currentQty) < 0) {
+                throw new BusinessException(MessageConstants.LOCATION_CAPACITY_BELOW_CURRENT);
+            }
+        }
+
+        // Apply updates (location_code, zone, type, parent NOT in request = protected)
+        if (request.getMaxWeightKg() != null) location.setMaxWeightKg(request.getMaxWeightKg());
+        if (request.getMaxVolumeM3() != null)  location.setMaxVolumeM3(request.getMaxVolumeM3());
+        if (request.getIsPickingFace() != null) location.setIsPickingFace(request.getIsPickingFace());
+        if (request.getIsStaging() != null)     location.setIsStaging(request.getIsStaging());
+
+        LocationEntity updated = locationRepository.save(location);
+
+        log.info("Location updated: locationId={}", updated.getLocationId());
+
+        auditLogService.logAction(
+                updatedBy, "LOCATION_UPDATED", "LOCATION", updated.getLocationId(),
+                String.format("Location %s updated", updated.getLocationCode()),
+                ipAddress, userAgent);
+
+        // Resolve zone code and parent code for response
+        String zoneCode = zoneRepository.findById(updated.getZoneId())
+                .map(z -> z.getZoneCode()).orElse(null);
+        String parentCode = resolveParentCode(updated.getParentLocationId());
+
+        return ApiResponse.success(MessageConstants.LOCATION_UPDATED_SUCCESS,
+                toResponse(updated, zoneCode, parentCode));
+    }
 
     // Get single location detail
     @Transactional(readOnly = true)
