@@ -130,4 +130,27 @@ public final class MessageConstants {
 
     // ==================== Warehouse Messages ====================
     public static final String WAREHOUSE_NOT_FOUND = "Warehouse not found with ID: %s";
+
+    // ==================== THÊM VÀO MessageConstants.java ====================
+
+    // ==================== Location Messages ====================
+    public static final String LOCATION_CREATED_SUCCESS        = "Location created successfully";
+    public static final String LOCATION_UPDATED_SUCCESS        = "Location updated successfully";
+    public static final String LOCATION_DEACTIVATED_SUCCESS    = "Location deactivated successfully";
+    public static final String LOCATION_LIST_SUCCESS           = "Locations retrieved successfully";
+    public static final String LOCATION_NOT_FOUND              = "Location not found with ID: %s";
+    public static final String LOCATION_CODE_DUPLICATE         = "Location Code '%s' already exists in this zone.";
+    public static final String LOCATION_ZONE_INACTIVE          = "Cannot create location under an inactive zone.";
+    public static final String LOCATION_ALREADY_INACTIVE       = "Location is already inactive.";
+    public static final String LOCATION_HAS_INVENTORY          = "Cannot deactivate location: it still contains inventory.";
+    public static final String LOCATION_HAS_ACTIVE_CHILDREN    = "Cannot deactivate location: it has active child locations. Deactivate children first.";
+    public static final String LOCATION_CAPACITY_BELOW_CURRENT = "New capacity cannot be less than current occupied quantity.";
+    public static final String LOCATION_INVALID_HIERARCHY      = "AISLE must not have a parent location.";
+    public static final String LOCATION_PARENT_REQUIRED        = "%s requires a parent of type %s.";
+    public static final String LOCATION_INVALID_PARENT_TYPE    = "%s requires a parent of type %s, but got %s.";
+    public static final String LOCATION_PARENT_DIFFERENT_ZONE  = "Parent location must belong to the same zone.";
+    public static final String LOCATION_PARENT_INACTIVE        = "Cannot create location under an inactive parent.";
+
+    // ==================== Zone Messages ====================
+    public static final String ZONE_NOT_FOUND = "Zone not found with ID: %s";
 }
