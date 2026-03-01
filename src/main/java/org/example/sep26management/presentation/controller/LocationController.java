@@ -76,6 +76,50 @@ public class LocationController {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // SCRUM-275: Deactivate Location (UC-LOC-04)
+    // ─────────────────────────────────────────────────────────────
+
+    @PatchMapping("/{locationId}/deactivate")
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<Void>> deactivateLocation(
+            @PathVariable Long locationId,
+            HttpServletRequest httpRequest) {
+
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(locationService.deactivateLocation(
+                locationId, userId,
+                getClientIp(httpRequest),
+                httpRequest.getHeader("User-Agent")));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-276: View Location List (UC-LOC-05)
+    // GET /api/v1/locations?warehouseId=1&zoneId=2&locationType=BIN&active=true&keyword=A01&page=0&size=20
+    // ─────────────────────────────────────────────────────────────
+
+    @GetMapping
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<PageResponse<LocationResponse>>> listLocations(
+            @RequestParam Long warehouseId,
+            @RequestParam(required = false) Long zoneId,
+            @RequestParam(required = false) LocationType locationType,
+            @RequestParam(required = false) Boolean active,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        return ResponseEntity.ok(locationService.listLocations(
+                warehouseId, zoneId, locationType, active, keyword, page, size));
+    }
+
+    @GetMapping("/{locationId}")
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<LocationResponse>> getLocationDetail(
+            @PathVariable Long locationId) {
+        return ResponseEntity.ok(locationService.getLocationDetail(locationId));
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
 

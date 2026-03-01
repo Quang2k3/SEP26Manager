@@ -162,6 +162,112 @@ public class LocationService {
                 toResponse(updated, zoneCode, parentCode));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // UC-LOC-04: Deactivate Location
+    // BR-LOC-12: location must be empty (no inventory)
+    // BR-LOC-13: no active child locations
+    // BR-LOC-14: data preserved for history
+    // BR-LOC-15: excluded from putaway/pick/empty-bin after deactivation
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<Void> deactivateLocation(
+            Long locationId,
+            Long deactivatedBy,
+            String ipAddress,
+            String userAgent) {
+
+        log.info("Deactivating location: locationId={}", locationId);
+
+        LocationEntity location = locationRepository.findById(locationId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.LOCATION_NOT_FOUND, locationId)));
+
+        if (Boolean.FALSE.equals(location.getActive())) {
+            throw new BusinessException(MessageConstants.LOCATION_ALREADY_INACTIVE);
+        }
+
+        // BR-LOC-12: must be empty — no inventory in snapshot
+        if (locationRepository.hasInventory(locationId)) {
+            throw new BusinessException(MessageConstants.LOCATION_HAS_INVENTORY);
+        }
+
+        // BR-LOC-13: no active child locations
+        if (locationRepository.existsByParentLocationIdAndActiveTrue(locationId)) {
+            throw new BusinessException(MessageConstants.LOCATION_HAS_ACTIVE_CHILDREN);
+        }
+
+        location.setActive(false);
+        locationRepository.save(location);
+
+        log.info("Location deactivated: locationId={}, code={}", locationId, location.getLocationCode());
+
+        auditLogService.logAction(
+                deactivatedBy, "LOCATION_DEACTIVATED", "LOCATION", locationId,
+                String.format("Location %s deactivated", location.getLocationCode()),
+                ipAddress, userAgent);
+
+        return ApiResponse.success(MessageConstants.LOCATION_DEACTIVATED_SUCCESS);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // UC-LOC-05: View Location List
+    // Filter: keyword, locationType, active, zoneId
+    // BR-LOC-16: parent-child relationships visible
+    // BR-LOC-17: inactive locations visible but clearly marked
+    // BR-LOC-18: read-only
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public ApiResponse<PageResponse<LocationResponse>> listLocations(
+            Long warehouseId,
+            Long zoneId,
+            LocationType locationType,
+            Boolean active,
+            String keyword,
+            int page,
+            int size) {
+
+        log.info("Listing locations: warehouse={}, zone={}, type={}, active={}, keyword={}",
+                warehouseId, zoneId, locationType, active, keyword);
+
+        Pageable pageable = PageRequest.of(page, size > 0 ? size : 20);
+        String kw = (keyword != null && !keyword.isBlank()) ? keyword.trim() : null;
+
+        Page<LocationEntity> locationPage = locationRepository.searchLocations(
+                warehouseId, zoneId, locationType, active, kw, pageable);
+
+        // Batch-resolve zone codes and parent codes for response enrichment
+        Set<Long> zoneIds = locationPage.getContent().stream()
+                .map(LocationEntity::getZoneId).filter(id -> id != null)
+                .collect(Collectors.toSet());
+        Map<Long, String> zoneCodes = zoneRepository.findAllById(zoneIds).stream()
+                .collect(Collectors.toMap(z -> z.getZoneId(), z -> z.getZoneCode()));
+
+        Set<Long> parentIds = locationPage.getContent().stream()
+                .map(LocationEntity::getParentLocationId).filter(id -> id != null)
+                .collect(Collectors.toSet());
+        Map<Long, String> parentCodes = locationRepository.findAllById(parentIds).stream()
+                .collect(Collectors.toMap(LocationEntity::getLocationId, LocationEntity::getLocationCode));
+
+        List<LocationResponse> content = locationPage.getContent().stream()
+                .map(l -> toResponse(l,
+                        l.getZoneId() != null ? zoneCodes.get(l.getZoneId()) : null,
+                        l.getParentLocationId() != null ? parentCodes.get(l.getParentLocationId()) : null))
+                .toList();
+
+        PageResponse<LocationResponse> pageResponse = PageResponse.<LocationResponse>builder()
+                .content(content)
+                .page(locationPage.getNumber())
+                .size(locationPage.getSize())
+                .totalElements(locationPage.getTotalElements())
+                .totalPages(locationPage.getTotalPages())
+                .last(locationPage.isLast())
+                .build();
+
+        return ApiResponse.success(MessageConstants.LOCATION_LIST_SUCCESS, pageResponse);
+    }
+
     // Get single location detail
     @Transactional(readOnly = true)
     public ApiResponse<LocationResponse> getLocationDetail(Long locationId) {
