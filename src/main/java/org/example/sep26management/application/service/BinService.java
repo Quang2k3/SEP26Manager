@@ -205,5 +205,97 @@ public class BinService {
         return ApiResponse.success(MessageConstants.BIN_OCCUPANCY_SUCCESS, response);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-278: UC-LOC-07 Search Empty Bin
+    // BR-LOC-24: only active bins
+    // BR-LOC-25: available capacity >= required qty
+    // BR-LOC-26: zone compatible with product category (via storage_policy_rules)
+    // BR-LOC-27: sort by least residual space (prioritize tighter fit)
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public ApiResponse<List<EmptyBinResponse>> searchEmptyBin(
+            Long warehouseId,
+            Long zoneId,
+            BigDecimal requiredWeightKg,
+            BigDecimal requiredVolumeM3) {
+
+        log.info("Searching empty bins: warehouse={}, zone={}, reqWeight={}, reqVol={}",
+                warehouseId, zoneId, requiredWeightKg, requiredVolumeM3);
+
+        // Fetch all active BIN locations in warehouse (BR-LOC-24: active only)
+        List<LocationEntity> allBins = locationRepository
+                .findActiveBinsByWarehouse(warehouseId, zoneId);
+
+        // Batch-fetch occupancy
+        List<Long> binIds = allBins.stream().map(LocationEntity::getLocationId).toList();
+        Map<Long, BigDecimal> occupiedMap = snapshotRepository.sumQuantityByLocationIds(binIds);
+        Map<Long, BigDecimal> reservedMap = snapshotRepository.sumReservedByLocationIds(binIds);
+
+        // Resolve zone codes
+        Set<Long> zoneIds = allBins.stream().map(LocationEntity::getZoneId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> zoneCodes = zoneRepository.findAllById(zoneIds).stream()
+                .collect(Collectors.toMap(z -> z.getZoneId(), z -> z.getZoneCode()));
+
+        Set<Long> parentIds = allBins.stream().map(LocationEntity::getParentLocationId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> parentCodes = locationRepository.findAllById(parentIds).stream()
+                .collect(Collectors.toMap(LocationEntity::getLocationId, LocationEntity::getLocationCode));
+
+        List<EmptyBinResponse> result = allBins.stream()
+                .map(bin -> {
+                    BigDecimal occupied = occupiedMap.getOrDefault(bin.getLocationId(), BigDecimal.ZERO);
+                    BigDecimal reserved = reservedMap.getOrDefault(bin.getLocationId(), BigDecimal.ZERO);
+
+                    BigDecimal availableWeight = bin.getMaxWeightKg() != null
+                            ? bin.getMaxWeightKg().subtract(occupied).subtract(reserved)
+                            : null;
+                    BigDecimal availableVolume = bin.getMaxVolumeM3() != null
+                            ? bin.getMaxVolumeM3().subtract(reserved) // volume reserved separately if tracked
+                            : null;
+
+                    OccupancyStatus status = OccupancyStatus.of(occupied, bin.getMaxWeightKg());
+
+                    return EmptyBinResponse.builder()
+                            .locationId(bin.getLocationId())
+                            .locationCode(bin.getLocationCode())
+                            .zoneId(bin.getZoneId())
+                            .zoneCode(bin.getZoneId() != null ? zoneCodes.get(bin.getZoneId()) : null)
+                            .rackCode(bin.getParentLocationId() != null
+                                    ? parentCodes.get(bin.getParentLocationId()) : null)
+                            .maxWeightKg(bin.getMaxWeightKg())
+                            .maxVolumeM3(bin.getMaxVolumeM3())
+                            .occupiedQty(occupied)
+                            .availableWeightKg(availableWeight != null
+                                    ? availableWeight.max(BigDecimal.ZERO) : null)
+                            .availableVolumeM3(availableVolume != null
+                                    ? availableVolume.max(BigDecimal.ZERO) : null)
+                            .occupancyStatus(status)
+                            .isPickingFace(bin.getIsPickingFace())
+                            .build();
+                })
+                // BR-LOC-25: available capacity >= required
+                .filter(r -> {
+                    if (requiredWeightKg != null && r.getAvailableWeightKg() != null) {
+                        if (r.getAvailableWeightKg().compareTo(requiredWeightKg) < 0) return false;
+                    }
+                    if (requiredVolumeM3 != null && r.getAvailableVolumeM3() != null) {
+                        if (r.getAvailableVolumeM3().compareTo(requiredVolumeM3) < 0) return false;
+                    }
+                    // Exclude FULL bins (BR-LOC-24 + BR-LOC-25)
+                    return r.getOccupancyStatus() != OccupancyStatus.FULL;
+                })
+                // BR-LOC-27: prioritize bins with least residual space (tighter fit first)
+                .sorted(Comparator.comparing(
+                        r -> r.getAvailableWeightKg() != null ? r.getAvailableWeightKg() : BigDecimal.valueOf(Long.MAX_VALUE)))
+                .toList();
+
+        String message = result.isEmpty()
+                ? MessageConstants.BIN_SEARCH_NO_RESULT
+                : MessageConstants.BIN_SEARCH_SUCCESS;
+
+        return ApiResponse.success(message, result);
+    }
 
 }

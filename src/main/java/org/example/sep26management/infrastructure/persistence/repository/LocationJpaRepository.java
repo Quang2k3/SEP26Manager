@@ -55,7 +55,21 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
             @Param("active") Boolean active,
             @Param("keyword") String keyword,
             Pageable pageable);
-
+    /**
+     * UC-LOC-07: Search Empty Bin — active BIN locations only [BR-LOC-24]
+     * Optionally filtered by zone
+     */
+    @Query("""
+            SELECT l FROM LocationEntity l
+            WHERE l.warehouseId = :warehouseId
+              AND l.locationType = 'BIN'
+              AND l.active = true
+              AND (:zoneId IS NULL OR l.zoneId = :zoneId)
+            ORDER BY l.locationCode ASC
+            """)
+    List<LocationEntity> findActiveBinsByWarehouse(
+            @Param("warehouseId") Long warehouseId,
+            @Param("zoneId") Long zoneId);
     /**
      * BR-LOC-12: check if location has inventory before deactivation
      * Uses inventory_snapshot — sum qty > 0 means location has stock

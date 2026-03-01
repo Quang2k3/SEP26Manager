@@ -64,7 +64,22 @@ public class BinController {
         return ResponseEntity.ok(binService.getBinDetail(locationId));
     }
 
+// ─────────────────────────────────────────────────────────────
+    // SCRUM-278: Search Empty Bin (UC-LOC-07)
+    // GET /api/v1/bins/search-empty?warehouseId=1&zoneId=2&requiredWeightKg=50&requiredVolumeM3=0.5
+    // ─────────────────────────────────────────────────────────────
 
+    @GetMapping("/search-empty")
+    @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
+    public ResponseEntity<ApiResponse<List<EmptyBinResponse>>> searchEmptyBin(
+            @RequestParam Long warehouseId,
+            @RequestParam(required = false) Long zoneId,
+            @RequestParam(required = false) BigDecimal requiredWeightKg,
+            @RequestParam(required = false) BigDecimal requiredVolumeM3) {
+
+        return ResponseEntity.ok(binService.searchEmptyBin(
+                warehouseId, zoneId, requiredWeightKg, requiredVolumeM3));
+    }
 
     // ─────────────────────────────────────────────────────────────
     // Helpers
