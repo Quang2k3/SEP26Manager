@@ -7,19 +7,28 @@ package org.example.sep26management.application.enums;
 public enum LocationType {
     AISLE,
     RACK,
-    BIN;
+    BIN,
+    STAGING;  // Added: exists in DB data (e.g. WH01-INB-STAGE)
 
     /**
      * BR-LOC-04: validate allowed parent type
-     * AISLE's parent = null (under zone directly)
+     * AISLE's parent = null (directly under zone)
      * RACK's parent = AISLE
      * BIN's parent = RACK
+     * STAGING's parent = null (staging areas sit directly under zone like AISLE)
      */
     public LocationType expectedParentType() {
         return switch (this) {
-            case AISLE -> null;   // directly under zone
-            case RACK  -> AISLE;
-            case BIN   -> RACK;
+            case AISLE, STAGING -> null;
+            case RACK            -> AISLE;
+            case BIN             -> RACK;
         };
+    }
+
+    /**
+     * BR-LOC-06: only BIN can store inventory
+     */
+    public boolean canStoreInventory() {
+        return this == BIN;
     }
 }
