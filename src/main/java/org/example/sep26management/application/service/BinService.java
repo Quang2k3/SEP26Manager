@@ -3,6 +3,7 @@ package org.example.sep26management.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
+import org.example.sep26management.application.dto.request.ConfigureBinCapacityRequest;
 import org.example.sep26management.application.dto.response.*;
 import org.example.sep26management.application.enums.LocationType;
 import org.example.sep26management.application.enums.OccupancyStatus;
@@ -28,6 +29,7 @@ public class BinService {
     private final ZoneJpaRepository zoneRepository;
     private final InventorySnapshotJpaRepository snapshotRepository;
     private final PutawayTaskItemJpaRepository putawayTaskItemRepository;
+    private final PickingTaskItemJpaRepository pickingTaskItemRepository;
     private final AuditLogService auditLogService;
 
     // ─────────────────────────────────────────────────────────────
@@ -298,4 +300,94 @@ public class BinService {
         return ApiResponse.success(message, result);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-279: UC-LOC-08 Configure Bin Capacity
+    // BR-LOC-28: capacity > 0
+    // BR-LOC-29: new capacity >= current occupied qty
+    // BR-LOC-31: immediately recalculate available capacity
+    // 7b: block if bin is in an active putaway/picking task
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<BinCapacityResponse> configureBinCapacity(
+            Long locationId,
+            ConfigureBinCapacityRequest request,
+            Long updatedBy,
+            String ipAddress,
+            String userAgent) {
+
+        log.info("Configuring bin capacity: locationId={}", locationId);
+
+        LocationEntity bin = locationRepository.findById(locationId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.LOCATION_NOT_FOUND, locationId)));
+
+        // Must be BIN type
+        if (bin.getLocationType() != LocationType.BIN) {
+            throw new BusinessException(MessageConstants.BIN_ONLY_OPERATION);
+        }
+
+        // Must be active
+        if (Boolean.FALSE.equals(bin.getActive())) {
+            throw new BusinessException(MessageConstants.LOCATION_ALREADY_INACTIVE);
+        }
+
+        // UC-LOC-08 7b: block if bin is in an active putaway or picking task
+        boolean inActivePutaway = putawayTaskItemRepository.existsActiveTaskForLocation(locationId);
+        boolean inActivePicking = pickingTaskItemRepository.existsActiveTaskForLocation(locationId);
+        if (inActivePutaway || inActivePicking) {
+            throw new BusinessException(MessageConstants.BIN_IN_ACTIVE_TASK);
+        }
+
+        // BR-LOC-29: new capacity must not be < current occupied qty
+        BigDecimal currentOccupied = snapshotRepository.sumQuantityByLocationId(locationId);
+        if (currentOccupied == null) currentOccupied = BigDecimal.ZERO;
+
+        if (request.getMaxWeightKg() != null
+                && currentOccupied.compareTo(request.getMaxWeightKg()) > 0) {
+            throw new BusinessException(
+                    String.format(MessageConstants.BIN_CAPACITY_BELOW_OCCUPIED,
+                            currentOccupied, request.getMaxWeightKg()));
+        }
+
+        // Apply update
+        if (request.getMaxWeightKg() != null) bin.setMaxWeightKg(request.getMaxWeightKg());
+        if (request.getMaxVolumeM3() != null)  bin.setMaxVolumeM3(request.getMaxVolumeM3());
+
+        LocationEntity saved = locationRepository.save(bin);
+
+        log.info("Bin capacity updated: locationId={}, maxWeight={}, maxVol={}",
+                locationId, saved.getMaxWeightKg(), saved.getMaxVolumeM3());
+
+        auditLogService.logAction(
+                updatedBy, "BIN_CAPACITY_CONFIGURED", "LOCATION", locationId,
+                String.format("Bin %s capacity: weight=%s kg, volume=%s m³",
+                        saved.getLocationCode(), saved.getMaxWeightKg(), saved.getMaxVolumeM3()),
+                ipAddress, userAgent);
+
+        // BR-LOC-31: recalculate available capacity immediately
+        BigDecimal availableWeight = saved.getMaxWeightKg() != null
+                ? saved.getMaxWeightKg().subtract(currentOccupied).max(BigDecimal.ZERO)
+                : null;
+        BigDecimal availableVolume = saved.getMaxVolumeM3(); // full volume available if no volume tracking
+
+        String zoneCode = saved.getZoneId() != null
+                ? zoneRepository.findById(saved.getZoneId()).map(z -> z.getZoneCode()).orElse(null)
+                : null;
+
+        BinCapacityResponse response = BinCapacityResponse.builder()
+                .locationId(saved.getLocationId())
+                .locationCode(saved.getLocationCode())
+                .zoneId(saved.getZoneId())
+                .zoneCode(zoneCode)
+                .maxWeightKg(saved.getMaxWeightKg())
+                .maxVolumeM3(saved.getMaxVolumeM3())
+                .currentOccupiedQty(currentOccupied)
+                .availableWeightKg(availableWeight)
+                .availableVolumeM3(availableVolume)
+                .updatedAt(saved.getUpdatedAt())
+                .build();
+
+        return ApiResponse.success(MessageConstants.BIN_CAPACITY_CONFIGURED_SUCCESS, response);
+    }
 }

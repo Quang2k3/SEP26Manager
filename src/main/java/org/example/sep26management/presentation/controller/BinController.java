@@ -5,6 +5,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
+import org.example.sep26management.application.dto.request.ConfigureBinCapacityRequest;
 import org.example.sep26management.application.dto.response.*;
 import org.example.sep26management.application.enums.OccupancyStatus;
 import org.example.sep26management.application.service.BinService;
@@ -79,6 +80,25 @@ public class BinController {
 
         return ResponseEntity.ok(binService.searchEmptyBin(
                 warehouseId, zoneId, requiredWeightKg, requiredVolumeM3));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-279: Configure Bin Capacity (UC-LOC-08)
+    // PATCH /api/v1/bins/{locationId}/capacity
+    // ─────────────────────────────────────────────────────────────
+
+    @PatchMapping("/{locationId}/capacity")
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<BinCapacityResponse>> configureBinCapacity(
+            @PathVariable Long locationId,
+            @Valid @RequestBody ConfigureBinCapacityRequest request,
+            HttpServletRequest httpRequest) {
+
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(binService.configureBinCapacity(
+                locationId, request, userId,
+                getClientIp(httpRequest),
+                httpRequest.getHeader("User-Agent")));
     }
 
     // ─────────────────────────────────────────────────────────────
