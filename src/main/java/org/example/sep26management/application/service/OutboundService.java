@@ -37,6 +37,7 @@ public class OutboundService {
     private final InventoryTransactionJpaRepository txnRepository;
     private final SkuJpaRepository skuRepository;
     private final AuditLogService auditLogService;
+    private final LocationJpaRepository locationRepository;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: UC-OUT-01 Create Outbound Order
@@ -54,41 +55,33 @@ public class OutboundService {
 
         log.info("Creating outbound: type={}, warehouse={}", request.getOrderType(), request.getWarehouseId());
 
-        // Validate warehouse
         warehouseRepository.findById(request.getWarehouseId())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.WAREHOUSE_NOT_FOUND, request.getWarehouseId())));
 
-        // BR-OUT-01: validate required fields per type
         validateRequiredFieldsByType(request);
 
         OutboundResponse response;
-
         if (request.getOrderType() == OutboundType.SALES_ORDER) {
             response = createSalesOrder(request, createdBy, ip, ua);
         } else {
             response = createInternalTransfer(request, createdBy, ip, ua);
         }
-
         return ApiResponse.success(MessageConstants.OUTBOUND_CREATED_SUCCESS, response);
     }
 
     private OutboundResponse createSalesOrder(CreateOutboundRequest req, Long createdBy, String ip, String ua) {
-        // Validate customer
         CustomerEntity customer = customerRepository.findById(req.getCustomerId())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.CUSTOMER_NOT_FOUND, req.getCustomerId())));
 
-        // BR-OUT-02: delivery date >= today
         if (req.getDeliveryDate() != null && req.getDeliveryDate().isBefore(LocalDate.now())) {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
         }
 
-        // Check stock availability for all items
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 req.getWarehouseId(), req.getItems());
 
-        // Generate document code — BR-OUT-05: EXP-SAL-YYYYMMDD-NNNN
         String code = generateDocCode("EXP-SAL", req.getWarehouseId(), true);
 
         SalesOrderEntity so = SalesOrderEntity.builder()
@@ -103,7 +96,6 @@ public class OutboundService {
 
         SalesOrderEntity saved = soRepository.save(so);
 
-        // Save items
         List<SalesOrderItemEntity> items = req.getItems().stream()
                 .map(i -> SalesOrderItemEntity.builder()
                         .soId(saved.getSoId())
@@ -121,7 +113,6 @@ public class OutboundService {
     }
 
     private OutboundResponse createInternalTransfer(CreateOutboundRequest req, Long createdBy, String ip, String ua) {
-        // Validate destination warehouse
         WarehouseEntity destWarehouse = warehouseRepository.findById(req.getDestinationWarehouseId())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.WAREHOUSE_NOT_FOUND, req.getDestinationWarehouseId())));
@@ -130,7 +121,6 @@ public class OutboundService {
             throw new BusinessException(MessageConstants.OUTBOUND_SAME_WAREHOUSE);
         }
 
-        // BR-OUT-02
         if (req.getTransferDate() != null && req.getTransferDate().isBefore(LocalDate.now())) {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
         }
@@ -138,7 +128,6 @@ public class OutboundService {
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 req.getWarehouseId(), req.getItems());
 
-        // Generate doc code — BR-OUT-05: EXP-INT-YYYYMMDD-NNNN
         String code = generateDocCode("EXP-INT", req.getWarehouseId(), false);
 
         TransferEntity transfer = TransferEntity.builder()
@@ -169,9 +158,6 @@ public class OutboundService {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-506: UC-OUT-02 Update Outbound Order
-    // BR-OUT-06: only creator can edit DRAFT
-    // BR-OUT-07: all changes logged
-    // BR-OUT-08: stock rechecked on edit
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
@@ -196,28 +182,23 @@ public class OutboundService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
 
-        // Must be DRAFT
         if (!"DRAFT".equals(so.getStatus())) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_EDITABLE);
         }
 
-        // BR-OUT-06: only creator can edit
         if (!so.getCreatedBy().equals(userId)) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
         }
 
-        // BR-OUT-02
         if (req.getDeliveryDate() != null && req.getDeliveryDate().isBefore(LocalDate.now())) {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
         }
 
-        // Update header
         if (req.getCustomerId() != null) so.setCustomerId(req.getCustomerId());
         if (req.getDeliveryDate() != null) so.setRequiredShipDate(req.getDeliveryDate());
         if (req.getNote() != null) so.setNote(req.getNote());
         soRepository.save(so);
 
-        // Replace items — BR-OUT-08: recheck stock
         soItemRepository.deleteBySoId(soId);
         List<SalesOrderItemEntity> newItems = req.getItems().stream()
                 .map(i -> SalesOrderItemEntity.builder()
@@ -289,7 +270,7 @@ public class OutboundService {
     // BR-OUT-09: hard block if insufficient stock
     // BR-OUT-10: final stock check at submission
     // BR-OUT-11: sales order → PENDING_APPROVAL
-    // BR-OUT-12: internal transfer → auto-approve if configured
+    // BR-OUT-12: internal transfer → auto-approve
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
@@ -324,12 +305,10 @@ public class OutboundService {
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
 
-        // BR-OUT-09/10: hard block if any item insufficient
         validateSufficientStock(so.getWarehouseId(), items.stream()
                 .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
                 .toList());
 
-        // BR-OUT-11: sales orders always require approval
         if (req.getNote() != null) so.setNote(req.getNote());
         so.setStatus("PENDING_APPROVAL");
         soRepository.save(so);
@@ -359,7 +338,6 @@ public class OutboundService {
 
         List<TransferItemEntity> items = transferItemRepository.findByTransferId(transferId);
 
-        // BR-OUT-09/10: hard block
         validateSufficientStock(transfer.getFromWarehouseId(), items.stream()
                 .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
                 .toList());
@@ -368,11 +346,11 @@ public class OutboundService {
 
         // BR-OUT-12: internal transfers auto-approve
         transfer.setStatus("APPROVED");
-        transfer.setApprovedAt(java.time.LocalDateTime.now());
-        transfer.setApprovedBy(0L); // 0 = system auto-approved
+        transfer.setApprovedAt(LocalDateTime.now());
+        transfer.setApprovedBy(0L);
         transferRepository.save(transfer);
 
-        // Reserve inventory for auto-approved transfer
+        // BR-OUT-17/18: reserve inventory in single transaction
         reserveInventory(transfer.getFromWarehouseId(), items.stream()
                 .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
                 .toList(), "transfers", transferId, userId);
@@ -385,14 +363,90 @@ public class OutboundService {
                 buildTransferResponse(transfer, items, dest, null));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-508: UC-OUT-04 Approve Outbound Order (MANAGER only)
+    // BR-OUT-14: real-time stock shown on approval screen
+    // BR-OUT-15: warn if post-approval stock < 0 (no minimum field in SkuEntity)
+    // BR-OUT-16: final stock check before committing
+    // BR-OUT-17: reserve inventory on approval
+    // BR-OUT-18: all operations in single @Transactional
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<OutboundResponse> approveSalesOrder(
+            Long soId,
+            ApproveOutboundRequest request,
+            Long managerId, String ip, String ua) {
+
+        log.info("Approving sales order: soId={}, managerId={}", soId, managerId);
+
+        // ── 1. Load order ──────────────────────────────────────────
+        SalesOrderEntity so = soRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
+
+        // Must be PENDING_APPROVAL
+        if (!"PENDING_APPROVAL".equals(so.getStatus())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_PENDING_APPROVAL);
+        }
+
+        List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
+
+        // ── 2. BR-OUT-14: build real-time stock snapshot for response ──
+        List<OutboundResponse.StockWarning> stockSnapshot = buildStockSnapshot(
+                so.getWarehouseId(), items.stream()
+                        .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
+                        .toList());
+
+        // ── 3. BR-OUT-15: warn if any item would drop available stock below 0 ──
+        List<String> belowZeroWarnings = new ArrayList<>();
+        for (SalesOrderItemEntity item : items) {
+            BigDecimal available = getAvailableQty(so.getWarehouseId(), item.getSkuId());
+            BigDecimal afterApproval = available.subtract(item.getOrderedQty());
+            if (afterApproval.compareTo(BigDecimal.ZERO) < 0) {
+                String skuCode = skuRepository.findById(item.getSkuId())
+                        .map(s -> s.getSkuCode()).orElse("SKU#" + item.getSkuId());
+                belowZeroWarnings.add(String.format(
+                        "%s: available=%s, requested=%s, deficit=%s",
+                        skuCode, available, item.getOrderedQty(), afterApproval.abs()));
+            }
+        }
+        // Log warnings but DO NOT block — BR-OUT-15 is a warning, BR-OUT-16 is the hard block
+        if (!belowZeroWarnings.isEmpty()) {
+            log.warn("BR-OUT-15: Stock below zero warning for SO {}: {}", so.getSoCode(), belowZeroWarnings);
+        }
+
+        // ── 4. BR-OUT-16: final hard stock check before committing ──
+        validateSufficientStock(so.getWarehouseId(), items.stream()
+                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
+                .toList());
+
+        // ── 5. BR-OUT-17 + BR-OUT-18: reserve inventory (all in this @Transactional) ──
+        reserveInventory(so.getWarehouseId(), items.stream()
+                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
+                .toList(), "sales_orders", soId, managerId);
+
+        // ── 6. Update order status → APPROVED ──────────────────────
+        so.setStatus("APPROVED");
+        so.setApprovedBy(managerId);
+        so.setApprovedAt(LocalDateTime.now());
+        if (request != null && request.getNote() != null) so.setNote(request.getNote());
+        soRepository.save(so);
+
+        log.info("Sales order {} approved by managerId={}", so.getSoCode(), managerId);
+
+        auditLogService.logAction(managerId, "OUTBOUND_APPROVED", "SALES_ORDER", soId,
+                "Sales order " + so.getSoCode() + " approved, inventory reserved", ip, ua);
+
+        CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
+        return ApiResponse.success(MessageConstants.OUTBOUND_APPROVED_SUCCESS,
+                buildSalesOrderResponse(so, items, customer, stockSnapshot));
+    }
 
     // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
 
-    /**
-     * BR-OUT-05: Generate doc code EXP-SAL-YYYYMMDD-NNNN or EXP-INT-YYYYMMDD-NNNN
-     */
     private String generateDocCode(String prefix, Long warehouseId, boolean isSales) {
         String date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
@@ -403,9 +457,6 @@ public class OutboundService {
         return String.format("%s-%s-%04d", prefix, date, seq);
     }
 
-    /**
-     * BR-OUT-01: validate required fields based on order type
-     */
     private void validateRequiredFieldsByType(CreateOutboundRequest req) {
         if (req.getOrderType() == OutboundType.SALES_ORDER) {
             if (req.getCustomerId() == null)
@@ -420,9 +471,6 @@ public class OutboundService {
         }
     }
 
-    /**
-     * BR-OUT-03/04: Check real-time stock availability, collect warnings
-     */
     private List<OutboundResponse.StockWarning> checkStockAvailability(
             Long warehouseId, List<CreateOutboundRequest.OutboundItemRequest> items) {
 
@@ -444,8 +492,30 @@ public class OutboundService {
     }
 
     /**
-     * BR-OUT-09/10: Hard block — throws exception if any item has insufficient stock
+     * BR-OUT-14: Build real-time stock snapshot for approval screen
+     * Shows current available qty for each item at time of approval
      */
+    private List<OutboundResponse.StockWarning> buildStockSnapshot(
+            Long warehouseId, List<AbstractMap.SimpleEntry<Long, BigDecimal>> items) {
+
+        return items.stream().map(entry -> {
+            Long skuId = entry.getKey();
+            BigDecimal requestedQty = entry.getValue();
+            BigDecimal available = getAvailableQty(warehouseId, skuId);
+            String skuCode = skuRepository.findById(skuId)
+                    .map(s -> s.getSkuCode()).orElse("SKU#" + skuId);
+
+            return OutboundResponse.StockWarning.builder()
+                    .skuId(skuId).skuCode(skuCode)
+                    .requestedQty(requestedQty).availableQty(available)
+                    .message(available.compareTo(requestedQty) < 0
+                            ? String.format(MessageConstants.OUTBOUND_INSUFFICIENT_STOCK_WARNING,
+                            skuCode, available, requestedQty)
+                            : null)
+                    .build();
+        }).toList();
+    }
+
     private void validateSufficientStock(Long warehouseId,
                                          List<AbstractMap.SimpleEntry<Long, BigDecimal>> items) {
 
@@ -466,7 +536,7 @@ public class OutboundService {
     }
 
     /**
-     * Available = snapshot.quantity - snapshot.reserved_qty (aggregated across all lots/locations)
+     * Available = snapshot.quantity - snapshot.reserved_qty (across all lots/locations)
      */
     private BigDecimal getAvailableQty(Long warehouseId, Long skuId) {
         BigDecimal total = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, skuId);
@@ -477,40 +547,72 @@ public class OutboundService {
     }
 
     /**
-     * BR-OUT-17/18: Reserve inventory — update snapshot.reserved_qty + create reservation record
+     * BR-OUT-17/18: Reserve inventory — single transaction
+     * - Tạo reservation record
+     * - Tạo inventory_transaction type=RESERVE với location_id = staging location của warehouse
+     * - Update snapshot.reserved_qty
+     *
+     * NOTE: inventory_transactions.location_id có FK → locations, không cho phép 0 hay NULL.
+     *       Dùng staging location đầu tiên của warehouse làm "virtual" location cho RESERVE txn.
      */
     private void reserveInventory(Long warehouseId,
                                   List<AbstractMap.SimpleEntry<Long, BigDecimal>> items,
                                   String refTable, Long refId, Long userId) {
 
+        // Lấy staging location id cho warehouse — dùng làm locationId cho RESERVE transaction
+        Long stagingLocationId = getFirstStagingOrAnyLocationId(warehouseId);
+
         for (var entry : items) {
             Long skuId = entry.getKey();
             BigDecimal qty = entry.getValue();
 
-            // Create reservation record
+            // 1. Reservation record (không cần locationId)
             ReservationEntity reservation = ReservationEntity.builder()
-                    .warehouseId(warehouseId).skuId(skuId)
-                    .quantity(qty).referenceTable(refTable).referenceId(refId)
+                    .warehouseId(warehouseId)
+                    .skuId(skuId)
+                    .quantity(qty)
+                    .referenceTable(refTable)
+                    .referenceId(refId)
                     .status("OPEN")
                     .build();
             reservationRepository.save(reservation);
 
-            // Create inventory transaction (type: RESERVE)
+            // 2. Inventory transaction — dùng staging location thực tế
             InventoryTransactionEntity txn = InventoryTransactionEntity.builder()
-                    .warehouseId(warehouseId).skuId(skuId)
-                    .quantity(qty.negate())  // negative = reserved out
+                    .warehouseId(warehouseId)
+                    .skuId(skuId)
+                    .locationId(stagingLocationId) // FIX: dùng location thực tế
+                    .quantity(qty.negate())         // negative = reserved out
                     .txnType("RESERVE")
-                    .referenceTable(refTable).referenceId(refId)
+                    .referenceTable(refTable)
+                    .referenceId(refId)
                     .createdBy(userId)
                     .build();
             txnRepository.save(txn);
 
-            // Update snapshot reserved_qty
+            // 3. Increment reserved_qty in snapshot
             snapshotRepository.incrementReservedByWarehouseAndSku(warehouseId, skuId, qty);
         }
     }
 
-    // ─── Response builders ───
+    /**
+     * Lấy staging location đầu tiên của warehouse.
+     * Fallback: lấy bất kỳ location nào của warehouse nếu không có staging.
+     * Dùng cho inventory_transactions.location_id khi không có location cụ thể (RESERVE txn).
+     */
+    private Long getFirstStagingOrAnyLocationId(Long warehouseId) {
+        // Tìm staging location trước
+        return locationRepository.findFirstStagingByWarehouse(warehouseId)
+                .map(loc -> loc.getLocationId())
+                .orElseGet(() ->
+                        locationRepository.findFirstByWarehouseId(warehouseId)
+                                .map(loc -> loc.getLocationId())
+                                .orElseThrow(() -> new BusinessException(
+                                        "No location found for warehouse " + warehouseId + ". Cannot create RESERVE transaction."))
+                );
+    }
+
+    // ─── Response builders ───────────────────────────────────────
 
     private OutboundResponse buildSalesOrderResponse(
             SalesOrderEntity so, List<SalesOrderItemEntity> items,

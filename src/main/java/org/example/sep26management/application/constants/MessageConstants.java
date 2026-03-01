@@ -188,4 +188,5 @@ public final class MessageConstants {
 
     // ==================== Customer Messages ====================
     public static final String CUSTOMER_NOT_FOUND                 = "Customer not found with ID: %s";
+    public static final String OUTBOUND_NOT_PENDING_APPROVAL = "Sales order is not in PENDING_APPROVAL status";
 }
