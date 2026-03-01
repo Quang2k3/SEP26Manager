@@ -3,6 +3,7 @@ package org.example.sep26management.infrastructure.persistence.repository;
 import org.example.sep26management.infrastructure.persistence.entity.InventorySnapshotEntity;
 import org.example.sep26management.infrastructure.persistence.entity.InventorySnapshotId;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -90,4 +91,36 @@ public interface InventorySnapshotJpaRepository
         BigDecimal getQuantity();
         BigDecimal getReservedQty();
     }
+
+    /** Total quantity for a SKU across all locations in warehouse */
+    @Query("""
+            SELECT COALESCE(SUM(s.quantity), 0)
+            FROM InventorySnapshotEntity s
+            WHERE s.warehouseId = :warehouseId AND s.skuId = :skuId
+            """)
+    BigDecimal sumQuantityByWarehouseAndSku(
+            @Param("warehouseId") Long warehouseId,
+            @Param("skuId") Long skuId);
+
+    /** Total reserved for a SKU across all locations in warehouse */
+    @Query("""
+            SELECT COALESCE(SUM(s.reservedQty), 0)
+            FROM InventorySnapshotEntity s
+            WHERE s.warehouseId = :warehouseId AND s.skuId = :skuId
+            """)
+    BigDecimal sumReservedByWarehouseAndSku(
+            @Param("warehouseId") Long warehouseId,
+            @Param("skuId") Long skuId);
+
+    /** Increment reserved_qty for a SKU — called on approval (BR-OUT-17) */
+    @Modifying
+    @Query(value = """
+            UPDATE inventory_snapshot
+            SET reserved_qty = reserved_qty + :qty, last_updated = NOW()
+            WHERE warehouse_id = :warehouseId AND sku_id = :skuId
+            """, nativeQuery = true)
+    void incrementReservedByWarehouseAndSku(
+            @Param("warehouseId") Long warehouseId,
+            @Param("skuId") Long skuId,
+            @Param("qty") java.math.BigDecimal qty);
 }
