@@ -22,10 +22,12 @@ import java.util.Map;
 /**
  * OutboundController
  *
- * SCRUM-505  POST  /api/v1/outbound                           — Create  (KEEPER)
- * SCRUM-506  PUT   /api/v1/outbound/{type}/{id}               — Update  (KEEPER)
- * SCRUM-507  PATCH /api/v1/outbound/{type}/{id}/submit        — Submit  (KEEPER)
- * SCRUM-508  PATCH /api/v1/outbound/sales-orders/{soId}/approve — Approve (MANAGER)
+ * SCRUM-505  POST   /v1/outbound                                  — Create  (KEEPER)
+ * SCRUM-506  PUT    /v1/outbound/sales-orders/{soId}              — Update  (KEEPER)
+ *            PUT    /v1/outbound/transfers/{transferId}           — Update  (KEEPER)
+ * SCRUM-507  PATCH  /v1/outbound/sales-orders/{soId}/submit       — Submit  (KEEPER)
+ *            PATCH  /v1/outbound/transfers/{transferId}/submit    — Submit  (KEEPER)
+ * SCRUM-508  PATCH  /v1/outbound/sales-orders/{soId}/approve      — Approve (MANAGER)
  */
 @RestController
 @RequestMapping("/v1/outbound")
@@ -37,7 +39,6 @@ public class OutboundController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create Outbound Order
-    // POST /api/v1/outbound
     // ─────────────────────────────────────────────────────────────
 
     @PostMapping
@@ -53,8 +54,6 @@ public class OutboundController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-506: Update Outbound Order
-    // PUT /api/v1/outbound/sales-orders/{soId}
-    // PUT /api/v1/outbound/transfers/{transferId}
     // ─────────────────────────────────────────────────────────────
 
     @PutMapping("/sales-orders/{soId}")
@@ -83,8 +82,6 @@ public class OutboundController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-507: Submit Outbound Order
-    // PATCH /api/v1/outbound/sales-orders/{soId}/submit
-    // PATCH /api/v1/outbound/transfers/{transferId}/submit
     // ─────────────────────────────────────────────────────────────
 
     @PatchMapping("/sales-orders/{soId}/submit")
@@ -110,6 +107,33 @@ public class OutboundController {
         if (request == null) request = new SubmitOutboundRequest();
         return ResponseEntity.ok(outboundService.submitOutbound(
                 OutboundType.INTERNAL_TRANSFER, transferId, request,
+                getCurrentUserId(), getClientIp(http), http.getHeader("User-Agent")));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-508: UC-OUT-04 Approve Outbound Order
+    // PATCH /v1/outbound/sales-orders/{soId}/approve
+    // MANAGER only — BR-OUT-11
+    // BR-OUT-14: real-time stock on approval screen
+    // BR-OUT-15: warn if stock < 0 after approval
+    // BR-OUT-16: final stock check before committing
+    // BR-OUT-17: reserve inventory on approval
+    // BR-OUT-18: single transaction
+    // ─────────────────────────────────────────────────────────────
+
+    @PatchMapping("/sales-orders/{soId}/approve")
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<OutboundResponse>> approveSalesOrder(
+            @PathVariable Long soId,
+            @RequestBody(required = false) ApproveOutboundRequest request,
+            HttpServletRequest http) {
+
+        log.info("PATCH /v1/outbound/sales-orders/{}/approve by managerId={}", soId, getCurrentUserId());
+
+        if (request == null) request = new ApproveOutboundRequest();
+
+        return ResponseEntity.ok(outboundService.approveSalesOrder(
+                soId, request,
                 getCurrentUserId(), getClientIp(http), http.getHeader("User-Agent")));
     }
 

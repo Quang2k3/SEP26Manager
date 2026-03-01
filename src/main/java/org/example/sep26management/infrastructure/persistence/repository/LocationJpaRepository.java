@@ -92,4 +92,30 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
             WHERE s.locationId = :locationId
             """)
     java.math.BigDecimal getCurrentOccupiedQty(@Param("locationId") Long locationId);
+
+    /**
+     * UC-OUT-04: Lấy staging location đầu tiên của warehouse
+     * Dùng làm location reference cho RESERVE inventory transaction
+     */
+    @Query("""
+            SELECT l FROM LocationEntity l
+            WHERE l.warehouseId = :warehouseId
+              AND l.isStaging = true
+              AND l.active = true
+            ORDER BY l.locationId ASC
+            LIMIT 1
+            """)
+    Optional<LocationEntity> findFirstStagingByWarehouse(@Param("warehouseId") Long warehouseId);
+
+    /**
+     * Fallback: lấy bất kỳ location active nào của warehouse
+     */
+    @Query("""
+            SELECT l FROM LocationEntity l
+            WHERE l.warehouseId = :warehouseId
+              AND l.active = true
+            ORDER BY l.locationId ASC
+            LIMIT 1
+            """)
+    Optional<LocationEntity> findFirstByWarehouseId(@Param("warehouseId") Long warehouseId);
 }
