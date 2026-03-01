@@ -153,4 +153,13 @@ public final class MessageConstants {
 
     // ==================== Zone Messages ====================
     public static final String ZONE_NOT_FOUND = "Zone not found with ID: %s";
+
+    // ==================== Bin Occupancy Messages (SCRUM-277/278/279) ====================
+    public static final String BIN_OCCUPANCY_SUCCESS         = "Bin occupancy retrieved successfully";
+    public static final String BIN_SEARCH_SUCCESS            = "Available bins found";
+    public static final String BIN_SEARCH_NO_RESULT          = "No available bins found matching your criteria.";
+    public static final String BIN_CAPACITY_CONFIGURED_SUCCESS = "Bin capacity configured successfully";
+    public static final String BIN_ONLY_OPERATION            = "This operation is only applicable to BIN-type locations.";
+    public static final String BIN_IN_ACTIVE_TASK            = "Cannot configure bin capacity: bin is currently involved in an active putaway or picking task.";
+    public static final String BIN_CAPACITY_BELOW_OCCUPIED   = "New capacity (%.2f) cannot be less than current occupied quantity (%.2f).";
 }
