@@ -51,6 +51,35 @@ public class OutboundController {
                         getClientIp(http), http.getHeader("User-Agent")));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-506: Update Outbound Order
+    // PUT /api/v1/outbound/sales-orders/{soId}
+    // PUT /api/v1/outbound/transfers/{transferId}
+    // ─────────────────────────────────────────────────────────────
+
+    @PutMapping("/sales-orders/{soId}")
+    @PreAuthorize("hasRole('KEEPER')")
+    public ResponseEntity<ApiResponse<OutboundResponse>> updateSalesOrder(
+            @PathVariable Long soId,
+            @Valid @RequestBody UpdateOutboundRequest request,
+            HttpServletRequest http) {
+
+        return ResponseEntity.ok(outboundService.updateOutbound(
+                OutboundType.SALES_ORDER, soId, request,
+                getCurrentUserId(), getClientIp(http), http.getHeader("User-Agent")));
+    }
+
+    @PutMapping("/transfers/{transferId}")
+    @PreAuthorize("hasRole('KEEPER')")
+    public ResponseEntity<ApiResponse<OutboundResponse>> updateTransfer(
+            @PathVariable Long transferId,
+            @Valid @RequestBody UpdateOutboundRequest request,
+            HttpServletRequest http) {
+
+        return ResponseEntity.ok(outboundService.updateOutbound(
+                OutboundType.INTERNAL_TRANSFER, transferId, request,
+                getCurrentUserId(), getClientIp(http), http.getHeader("User-Agent")));
+    }
 
 
     // ─────────────────────────────────────────────────────────────
