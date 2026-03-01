@@ -81,6 +81,37 @@ public class OutboundController {
                 getCurrentUserId(), getClientIp(http), http.getHeader("User-Agent")));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-507: Submit Outbound Order
+    // PATCH /api/v1/outbound/sales-orders/{soId}/submit
+    // PATCH /api/v1/outbound/transfers/{transferId}/submit
+    // ─────────────────────────────────────────────────────────────
+
+    @PatchMapping("/sales-orders/{soId}/submit")
+    @PreAuthorize("hasRole('KEEPER')")
+    public ResponseEntity<ApiResponse<OutboundResponse>> submitSalesOrder(
+            @PathVariable Long soId,
+            @RequestBody(required = false) SubmitOutboundRequest request,
+            HttpServletRequest http) {
+
+        if (request == null) request = new SubmitOutboundRequest();
+        return ResponseEntity.ok(outboundService.submitOutbound(
+                OutboundType.SALES_ORDER, soId, request,
+                getCurrentUserId(), getClientIp(http), http.getHeader("User-Agent")));
+    }
+
+    @PatchMapping("/transfers/{transferId}/submit")
+    @PreAuthorize("hasRole('KEEPER')")
+    public ResponseEntity<ApiResponse<OutboundResponse>> submitTransfer(
+            @PathVariable Long transferId,
+            @RequestBody(required = false) SubmitOutboundRequest request,
+            HttpServletRequest http) {
+
+        if (request == null) request = new SubmitOutboundRequest();
+        return ResponseEntity.ok(outboundService.submitOutbound(
+                OutboundType.INTERNAL_TRANSFER, transferId, request,
+                getCurrentUserId(), getClientIp(http), http.getHeader("User-Agent")));
+    }
 
     // ─────────────────────────────────────────────────────────────
     // Helpers

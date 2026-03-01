@@ -284,6 +284,107 @@ public class OutboundService {
                 buildTransferResponse(transfer, newItems, dest, warnings));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-507: UC-OUT-03 Submit Outbound Order
+    // BR-OUT-09: hard block if insufficient stock
+    // BR-OUT-10: final stock check at submission
+    // BR-OUT-11: sales order → PENDING_APPROVAL
+    // BR-OUT-12: internal transfer → auto-approve if configured
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<OutboundResponse> submitOutbound(
+            OutboundType type, Long documentId,
+            SubmitOutboundRequest request,
+            Long userId, String ip, String ua) {
+
+        log.info("Submitting outbound: type={}, id={}", type, documentId);
+
+        if (type == OutboundType.SALES_ORDER) {
+            return submitSalesOrder(documentId, request, userId, ip, ua);
+        } else {
+            return submitTransfer(documentId, request, userId, ip, ua);
+        }
+    }
+
+    private ApiResponse<OutboundResponse> submitSalesOrder(
+            Long soId, SubmitOutboundRequest req, Long userId, String ip, String ua) {
+
+        SalesOrderEntity so = soRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
+
+        if (!"DRAFT".equals(so.getStatus())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_DRAFT);
+        }
+
+        if (!so.getCreatedBy().equals(userId)) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+        }
+
+        List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
+
+        // BR-OUT-09/10: hard block if any item insufficient
+        validateSufficientStock(so.getWarehouseId(), items.stream()
+                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
+                .toList());
+
+        // BR-OUT-11: sales orders always require approval
+        if (req.getNote() != null) so.setNote(req.getNote());
+        so.setStatus("PENDING_APPROVAL");
+        soRepository.save(so);
+
+        auditLogService.logAction(userId, "OUTBOUND_SUBMITTED", "SALES_ORDER", soId,
+                "Sales order " + so.getSoCode() + " submitted for approval", ip, ua);
+
+        CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
+        return ApiResponse.success(MessageConstants.OUTBOUND_SUBMITTED_SUCCESS,
+                buildSalesOrderResponse(so, items, customer, null));
+    }
+
+    private ApiResponse<OutboundResponse> submitTransfer(
+            Long transferId, SubmitOutboundRequest req, Long userId, String ip, String ua) {
+
+        TransferEntity transfer = transferRepository.findById(transferId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, transferId)));
+
+        if (!"DRAFT".equals(transfer.getStatus())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_DRAFT);
+        }
+
+        if (!transfer.getCreatedBy().equals(userId)) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+        }
+
+        List<TransferItemEntity> items = transferItemRepository.findByTransferId(transferId);
+
+        // BR-OUT-09/10: hard block
+        validateSufficientStock(transfer.getFromWarehouseId(), items.stream()
+                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
+                .toList());
+
+        if (req.getNote() != null) transfer.setNote(req.getNote());
+
+        // BR-OUT-12: internal transfers auto-approve
+        transfer.setStatus("APPROVED");
+        transfer.setApprovedAt(java.time.LocalDateTime.now());
+        transfer.setApprovedBy(0L); // 0 = system auto-approved
+        transferRepository.save(transfer);
+
+        // Reserve inventory for auto-approved transfer
+        reserveInventory(transfer.getFromWarehouseId(), items.stream()
+                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
+                .toList(), "transfers", transferId, userId);
+
+        auditLogService.logAction(userId, "OUTBOUND_AUTO_APPROVED", "TRANSFER", transferId,
+                "Internal transfer " + transfer.getTransferCode() + " auto-approved", ip, ua);
+
+        WarehouseEntity dest = warehouseRepository.findById(transfer.getToWarehouseId()).orElse(null);
+        return ApiResponse.success(MessageConstants.OUTBOUND_TRANSFER_AUTO_APPROVED,
+                buildTransferResponse(transfer, items, dest, null));
+    }
+
 
     // ─────────────────────────────────────────────────────────────
     // Helpers
