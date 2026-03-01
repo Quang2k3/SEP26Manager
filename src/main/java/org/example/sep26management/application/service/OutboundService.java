@@ -167,6 +167,223 @@ public class OutboundService {
         return buildTransferResponse(saved, items, destWarehouse, warnings);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-506: UC-OUT-02 Update Outbound Order
+    // BR-OUT-06: only creator can edit DRAFT
+    // BR-OUT-07: all changes logged
+    // BR-OUT-08: stock rechecked on edit
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<OutboundResponse> updateOutbound(
+            OutboundType type, Long documentId,
+            UpdateOutboundRequest request,
+            Long userId, String ip, String ua) {
+
+        log.info("Updating outbound: type={}, id={}", type, documentId);
+
+        if (type == OutboundType.SALES_ORDER) {
+            return updateSalesOrder(documentId, request, userId, ip, ua);
+        } else {
+            return updateTransfer(documentId, request, userId, ip, ua);
+        }
+    }
+
+    private ApiResponse<OutboundResponse> updateSalesOrder(
+            Long soId, UpdateOutboundRequest req, Long userId, String ip, String ua) {
+
+        SalesOrderEntity so = soRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
+
+        // Must be DRAFT
+        if (!"DRAFT".equals(so.getStatus())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_EDITABLE);
+        }
+
+        // BR-OUT-06: only creator can edit
+        if (!so.getCreatedBy().equals(userId)) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+        }
+
+        // BR-OUT-02
+        if (req.getDeliveryDate() != null && req.getDeliveryDate().isBefore(LocalDate.now())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
+        }
+
+        // Update header
+        if (req.getCustomerId() != null) so.setCustomerId(req.getCustomerId());
+        if (req.getDeliveryDate() != null) so.setRequiredShipDate(req.getDeliveryDate());
+        if (req.getNote() != null) so.setNote(req.getNote());
+        soRepository.save(so);
+
+        // Replace items — BR-OUT-08: recheck stock
+        soItemRepository.deleteBySoId(soId);
+        List<SalesOrderItemEntity> newItems = req.getItems().stream()
+                .map(i -> SalesOrderItemEntity.builder()
+                        .soId(soId).skuId(i.getSkuId())
+                        .orderedQty(i.getQuantity()).note(i.getNote())
+                        .build())
+                .toList();
+        soItemRepository.saveAll(newItems);
+
+        List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
+                so.getWarehouseId(), req.getItems().stream()
+                        .map(i -> new CreateOutboundRequest.OutboundItemRequest(i.getSkuId(), i.getQuantity(), i.getNote()))
+                        .toList());
+
+        auditLogService.logAction(userId, "OUTBOUND_UPDATED", "SALES_ORDER", soId,
+                "Sales order " + so.getSoCode() + " updated", ip, ua);
+
+        CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
+        return ApiResponse.success(MessageConstants.OUTBOUND_UPDATED_SUCCESS,
+                buildSalesOrderResponse(so, newItems, customer, warnings));
+    }
+
+    private ApiResponse<OutboundResponse> updateTransfer(
+            Long transferId, UpdateOutboundRequest req, Long userId, String ip, String ua) {
+
+        TransferEntity transfer = transferRepository.findById(transferId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, transferId)));
+
+        if (!"DRAFT".equals(transfer.getStatus())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_EDITABLE);
+        }
+
+        if (!transfer.getCreatedBy().equals(userId)) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+        }
+
+        if (req.getTransferDate() != null && req.getTransferDate().isBefore(LocalDate.now())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
+        }
+
+        if (req.getDestinationWarehouseId() != null) transfer.setToWarehouseId(req.getDestinationWarehouseId());
+        if (req.getNote() != null) transfer.setNote(req.getNote());
+        transferRepository.save(transfer);
+
+        transferItemRepository.deleteByTransferId(transferId);
+        List<TransferItemEntity> newItems = req.getItems().stream()
+                .map(i -> TransferItemEntity.builder()
+                        .transferId(transferId).skuId(i.getSkuId()).quantity(i.getQuantity())
+                        .build())
+                .toList();
+        transferItemRepository.saveAll(newItems);
+
+        List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
+                transfer.getFromWarehouseId(), req.getItems().stream()
+                        .map(i -> new CreateOutboundRequest.OutboundItemRequest(i.getSkuId(), i.getQuantity(), i.getNote()))
+                        .toList());
+
+        auditLogService.logAction(userId, "OUTBOUND_UPDATED", "TRANSFER", transferId,
+                "Transfer " + transfer.getTransferCode() + " updated", ip, ua);
+
+        WarehouseEntity dest = warehouseRepository.findById(transfer.getToWarehouseId()).orElse(null);
+        return ApiResponse.success(MessageConstants.OUTBOUND_UPDATED_SUCCESS,
+                buildTransferResponse(transfer, newItems, dest, warnings));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-507: UC-OUT-03 Submit Outbound Order
+    // BR-OUT-09: hard block if insufficient stock
+    // BR-OUT-10: final stock check at submission
+    // BR-OUT-11: sales order → PENDING_APPROVAL
+    // BR-OUT-12: internal transfer → auto-approve if configured
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<OutboundResponse> submitOutbound(
+            OutboundType type, Long documentId,
+            SubmitOutboundRequest request,
+            Long userId, String ip, String ua) {
+
+        log.info("Submitting outbound: type={}, id={}", type, documentId);
+
+        if (type == OutboundType.SALES_ORDER) {
+            return submitSalesOrder(documentId, request, userId, ip, ua);
+        } else {
+            return submitTransfer(documentId, request, userId, ip, ua);
+        }
+    }
+
+    private ApiResponse<OutboundResponse> submitSalesOrder(
+            Long soId, SubmitOutboundRequest req, Long userId, String ip, String ua) {
+
+        SalesOrderEntity so = soRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
+
+        if (!"DRAFT".equals(so.getStatus())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_DRAFT);
+        }
+
+        if (!so.getCreatedBy().equals(userId)) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+        }
+
+        List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
+
+        // BR-OUT-09/10: hard block if any item insufficient
+        validateSufficientStock(so.getWarehouseId(), items.stream()
+                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
+                .toList());
+
+        // BR-OUT-11: sales orders always require approval
+        if (req.getNote() != null) so.setNote(req.getNote());
+        so.setStatus("PENDING_APPROVAL");
+        soRepository.save(so);
+
+        auditLogService.logAction(userId, "OUTBOUND_SUBMITTED", "SALES_ORDER", soId,
+                "Sales order " + so.getSoCode() + " submitted for approval", ip, ua);
+
+        CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
+        return ApiResponse.success(MessageConstants.OUTBOUND_SUBMITTED_SUCCESS,
+                buildSalesOrderResponse(so, items, customer, null));
+    }
+
+    private ApiResponse<OutboundResponse> submitTransfer(
+            Long transferId, SubmitOutboundRequest req, Long userId, String ip, String ua) {
+
+        TransferEntity transfer = transferRepository.findById(transferId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, transferId)));
+
+        if (!"DRAFT".equals(transfer.getStatus())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_DRAFT);
+        }
+
+        if (!transfer.getCreatedBy().equals(userId)) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+        }
+
+        List<TransferItemEntity> items = transferItemRepository.findByTransferId(transferId);
+
+        // BR-OUT-09/10: hard block
+        validateSufficientStock(transfer.getFromWarehouseId(), items.stream()
+                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
+                .toList());
+
+        if (req.getNote() != null) transfer.setNote(req.getNote());
+
+        // BR-OUT-12: internal transfers auto-approve
+        transfer.setStatus("APPROVED");
+        transfer.setApprovedAt(java.time.LocalDateTime.now());
+        transfer.setApprovedBy(0L); // 0 = system auto-approved
+        transferRepository.save(transfer);
+
+        // Reserve inventory for auto-approved transfer
+        reserveInventory(transfer.getFromWarehouseId(), items.stream()
+                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
+                .toList(), "transfers", transferId, userId);
+
+        auditLogService.logAction(userId, "OUTBOUND_AUTO_APPROVED", "TRANSFER", transferId,
+                "Internal transfer " + transfer.getTransferCode() + " auto-approved", ip, ua);
+
+        WarehouseEntity dest = warehouseRepository.findById(transfer.getToWarehouseId()).orElse(null);
+        return ApiResponse.success(MessageConstants.OUTBOUND_TRANSFER_AUTO_APPROVED,
+                buildTransferResponse(transfer, items, dest, null));
+    }
 
 
     // ─────────────────────────────────────────────────────────────
