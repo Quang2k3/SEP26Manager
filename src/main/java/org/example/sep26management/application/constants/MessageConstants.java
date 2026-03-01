@@ -162,4 +162,30 @@ public final class MessageConstants {
     public static final String BIN_ONLY_OPERATION            = "This operation is only applicable to BIN-type locations.";
     public static final String BIN_IN_ACTIVE_TASK            = "Cannot configure bin capacity: bin is currently involved in an active putaway or picking task.";
     public static final String BIN_CAPACITY_BELOW_OCCUPIED   = "New capacity (%.2f) cannot be less than current occupied quantity (%.2f).";
+
+
+    // ==================== Outbound Messages ====================
+    public static final String OUTBOUND_CREATED_SUCCESS           = "Outbound order created successfully";
+    public static final String OUTBOUND_UPDATED_SUCCESS           = "Outbound order updated successfully";
+    public static final String OUTBOUND_SUBMITTED_SUCCESS         = "Outbound order submitted for approval";
+    public static final String OUTBOUND_TRANSFER_AUTO_APPROVED    = "Internal transfer auto-approved. Ready for shipment";
+    public static final String OUTBOUND_APPROVED_SUCCESS          = "Outbound order approved successfully";
+    public static final String OUTBOUND_REJECTED_SUCCESS          = "Outbound order rejected";
+    public static final String OUTBOUND_NOT_FOUND                 = "Outbound order not found with ID: %s";
+    public static final String OUTBOUND_NOT_EDITABLE              = "This document cannot be edited. Only DRAFT documents are editable.";
+    public static final String OUTBOUND_NOT_CREATOR               = "You can only edit your own draft documents.";
+    public static final String OUTBOUND_NOT_DRAFT                 = "Document status must be DRAFT to perform this action.";
+    public static final String OUTBOUND_NOT_PENDING               = "Document status must be PENDING_APPROVAL to approve.";
+    public static final String OUTBOUND_DATE_MUST_BE_FUTURE       = "Delivery/transfer date must be today or a future date.";
+    public static final String OUTBOUND_SAME_WAREHOUSE            = "Destination warehouse must be different from source warehouse.";
+    public static final String OUTBOUND_CUSTOMER_REQUIRED         = "Customer is required for Sales Order.";
+    public static final String OUTBOUND_DELIVERY_DATE_REQUIRED    = "Delivery date is required for Sales Order.";
+    public static final String OUTBOUND_DESTINATION_REQUIRED      = "Destination warehouse is required for Internal Transfer.";
+    public static final String OUTBOUND_RECEIVER_REQUIRED         = "Receiver name is required for Internal Transfer.";
+    public static final String OUTBOUND_INSUFFICIENT_STOCK_BLOCK  = "Cannot submit order with insufficient stock";
+    public static final String OUTBOUND_INSUFFICIENT_STOCK_WARNING = "Insufficient stock for SKU %s. Available: %s, Requested: %s";
+    public static final String OUTBOUND_REJECTION_REASON_REQUIRED = "Rejection reason is required and must be at least 20 characters.";
+
+    // ==================== Customer Messages ====================
+    public static final String CUSTOMER_NOT_FOUND                 = "Customer not found with ID: %s";
 }
