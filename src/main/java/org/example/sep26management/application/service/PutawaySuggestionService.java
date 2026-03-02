@@ -50,8 +50,8 @@ public class PutawaySuggestionService {
      */
     @Transactional(readOnly = true)
     public Optional<PutawaySuggestion> suggestLocation(Long warehouseId, Long skuId, BigDecimal qty) {
-        // 1. Lookup SKU → Category
-        SkuEntity sku = skuRepo.findById(skuId).orElse(null);
+        // 1. Lookup SKU → Category (eager fetch to avoid LazyInitializationException)
+        SkuEntity sku = skuRepo.findByIdWithCategory(skuId).orElse(null);
         if (sku == null || sku.getCategory() == null) {
             log.warn("Putaway suggestion: SKU {} not found or has no category", skuId);
             return Optional.empty();

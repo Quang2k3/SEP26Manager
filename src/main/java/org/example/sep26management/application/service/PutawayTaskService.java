@@ -4,11 +4,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.request.PutawayConfirmRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskItemEntity;
+import org.example.sep26management.infrastructure.persistence.repository.LocationJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,6 +29,9 @@ public class PutawayTaskService {
     private final PutawayTaskJpaRepository putawayTaskRepo;
     private final PutawayTaskItemJpaRepository putawayTaskItemRepo;
     private final JdbcTemplate jdbcTemplate;
+    private final LocationJpaRepository locationRepo;
+    private final ZoneJpaRepository zoneRepo;
+    private final PutawaySuggestionService putawaySuggestionService;
 
     // ─── List tasks ────────────────────────────────────────────────────────────
 
@@ -40,7 +45,7 @@ public class PutawayTaskService {
         } else {
             tasks = putawayTaskRepo.findAllByOrderByCreatedAtDesc();
         }
-        return ApiResponse.success("OK", tasks.stream().map(t -> toResponse(t, false)).collect(Collectors.toList()));
+        return ApiResponse.success("OK", tasks.stream().map(t -> toResponse(t)).collect(Collectors.toList()));
     }
 
     // ─── Get task detail ───────────────────────────────────────────────────────
@@ -49,9 +54,26 @@ public class PutawayTaskService {
     public ApiResponse<PutawayTaskResponse> getTask(Long taskId) {
         PutawayTaskEntity task = findTask(taskId);
         List<PutawayTaskItemEntity> items = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
-        PutawayTaskResponse response = toResponse(task, false);
-        response.setItems(items.stream().map(this::toItemDto).collect(Collectors.toList()));
+        PutawayTaskResponse response = toResponse(task);
+        response.setItems(items.stream().map(this::toItemDtoEnriched).collect(Collectors.toList()));
         return ApiResponse.success("OK", response);
+    }
+
+    // ─── Get suggestions for a task ───────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public ApiResponse<List<PutawaySuggestion>> getSuggestions(Long taskId) {
+        PutawayTaskEntity task = findTask(taskId);
+        List<PutawayTaskItemEntity> items = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
+
+        List<PutawaySuggestion> suggestions = items.stream()
+                .map(item -> putawaySuggestionService.suggestLocation(
+                        task.getWarehouseId(), item.getSkuId(), item.getQuantity()))
+                .filter(java.util.Optional::isPresent)
+                .map(java.util.Optional::get)
+                .collect(Collectors.toList());
+
+        return ApiResponse.success("OK", suggestions);
     }
 
     // ─── Confirm putaway ───────────────────────────────────────────────────────
@@ -119,7 +141,7 @@ public class PutawayTaskService {
         putawayTaskRepo.save(task);
         log.info("Putaway task {} confirmed by userId={}, status={}", taskId, userId, task.getStatus());
 
-        return ApiResponse.success("Putaway confirmed. Status: " + task.getStatus(), toResponse(task, false));
+        return ApiResponse.success("Putaway confirmed. Status: " + task.getStatus(), toResponse(task));
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -129,7 +151,7 @@ public class PutawayTaskService {
                 .orElseThrow(() -> new RuntimeException("Putaway task not found: " + id));
     }
 
-    private PutawayTaskResponse toResponse(PutawayTaskEntity t, boolean withItems) {
+    private PutawayTaskResponse toResponse(PutawayTaskEntity t) {
         return PutawayTaskResponse.builder()
                 .putawayTaskId(t.getPutawayTaskId())
                 .warehouseId(t.getWarehouseId())
@@ -143,15 +165,54 @@ public class PutawayTaskService {
                 .build();
     }
 
-    private PutawayTaskResponse.PutawayTaskItemDto toItemDto(PutawayTaskItemEntity i) {
-        return PutawayTaskResponse.PutawayTaskItemDto.builder()
+    /**
+     * Enriched item DTO: resolves suggestedLocationId → location code, zone, aisle,
+     * rack, capacity.
+     */
+    private PutawayTaskResponse.PutawayTaskItemDto toItemDtoEnriched(PutawayTaskItemEntity i) {
+        PutawayTaskResponse.PutawayTaskItemDto.PutawayTaskItemDtoBuilder builder = PutawayTaskResponse.PutawayTaskItemDto
+                .builder()
                 .putawayTaskItemId(i.getPutawayTaskItemId())
                 .skuId(i.getSkuId())
                 .lotId(i.getLotId())
                 .quantity(i.getQuantity())
                 .putawayQty(i.getPutawayQty())
                 .suggestedLocationId(i.getSuggestedLocationId())
-                .actualLocationId(i.getActualLocationId())
-                .build();
+                .actualLocationId(i.getActualLocationId());
+
+        // Enrich suggestion details from location hierarchy
+        if (i.getSuggestedLocationId() != null) {
+            locationRepo.findById(i.getSuggestedLocationId()).ifPresent(loc -> {
+                builder.suggestedLocationCode(loc.getLocationCode());
+
+                // Resolve parent rack → aisle
+                if (loc.getParentLocationId() != null) {
+                    locationRepo.findById(loc.getParentLocationId()).ifPresent(rack -> {
+                        builder.suggestedRack(rack.getLocationCode());
+                        if (rack.getParentLocationId() != null) {
+                            locationRepo.findById(rack.getParentLocationId()).ifPresent(aisle -> {
+                                builder.suggestedAisle(aisle.getLocationCode());
+                            });
+                        }
+                    });
+                }
+
+                // Resolve zone code
+                if (loc.getZoneId() != null) {
+                    zoneRepo.findById(loc.getZoneId()).ifPresent(zone -> {
+                        builder.suggestedZoneCode(zone.getZoneCode());
+                    });
+                }
+
+                // Capacity info
+                BigDecimal currentQty = locationRepo.getCurrentOccupiedQty(loc.getLocationId());
+                BigDecimal maxCap = loc.getMaxWeightKg() != null ? loc.getMaxWeightKg() : BigDecimal.ZERO;
+                builder.binCurrentQty(currentQty);
+                builder.binMaxCapacity(maxCap);
+                builder.binAvailableCapacity(maxCap.subtract(currentQty));
+            });
+        }
+
+        return builder.build();
     }
 }
