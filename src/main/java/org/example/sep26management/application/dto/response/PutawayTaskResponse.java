@@ -38,6 +38,13 @@ public class PutawayTaskResponse {
         private BigDecimal quantity;
         private BigDecimal putawayQty;
         private Long suggestedLocationId;
+        private String suggestedLocationCode;
+        private String suggestedZoneCode;
+        private String suggestedAisle;
+        private String suggestedRack;
+        private BigDecimal binCurrentQty;
+        private BigDecimal binMaxCapacity;
+        private BigDecimal binAvailableCapacity;
         private Long actualLocationId;
     }
 }
