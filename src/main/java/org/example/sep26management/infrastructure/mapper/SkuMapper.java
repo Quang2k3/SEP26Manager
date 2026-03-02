@@ -44,6 +44,8 @@ public class SkuMapper {
                 .categoryId(cat != null ? cat.getCategoryId() : null)
                 .categoryCode(cat != null ? cat.getCategoryCode() : null)
                 .categoryName(cat != null ? cat.getCategoryName() : null)
+                .createdAt(entity.getCreatedAt())
+                .updatedAt(entity.getUpdatedAt())
                 .build();
     }
 }

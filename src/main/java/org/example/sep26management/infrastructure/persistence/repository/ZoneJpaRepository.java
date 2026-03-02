@@ -19,4 +19,5 @@ public interface ZoneJpaRepository extends JpaRepository<ZoneEntity, Long> {
      * zone_code = "Z-" + category_code
      */
     Optional<ZoneEntity> findByWarehouseIdAndZoneCode(Long warehouseId, String zoneCode);
+    boolean existsByWarehouseIdAndZoneCode(Long warehouseId, String zoneCode);
 }

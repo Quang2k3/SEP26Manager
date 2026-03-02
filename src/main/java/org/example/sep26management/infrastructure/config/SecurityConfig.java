@@ -44,13 +44,12 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        // Dùng allowedOriginPatterns để hỗ trợ credentials với mọi origin (Swagger UI,
-        // frontend, mobile)
         config.setAllowedOriginPatterns(List.of("*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization", "Content-Type"));
         config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
@@ -60,7 +59,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+//                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .cors(cors -> cors.disable())
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
@@ -71,6 +71,7 @@ public class SecurityConfig {
                                 "/v1/auth/**",
                                 "/v1/scan", // iPhone scanner HTML page (token in URL param)
                                 "/v1/scan/url", // returns scan URL for QR generation
+                                "/js/**", // static JS files (html5-qrcode, etc.)
                                 "/actuator/**",
                                 "/api/actuator/**",
                                 "/swagger-ui/**",
@@ -84,7 +85,9 @@ public class SecurityConfig {
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
                         .requestMatchers("/v1/zones/**").hasRole("MANAGER")
                         .requestMatchers("/v1/category-zone-mappings/**").hasRole("MANAGER") // Zone Management
-                        .requestMatchers("/v1/categories/**").hasAnyRole("ADMIN", "MANAGER")
+                        .requestMatchers("/v1/categories/**").hasAnyRole("MANAGER")
+                        .requestMatchers("/v1/skus/**").authenticated()
+                        .requestMatchers("/v1/locations/**").hasAnyRole("MANAGER")
                         // Authenticated endpoints
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

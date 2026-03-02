@@ -105,4 +105,88 @@ public final class MessageConstants {
     public static final String SKU_CATEGORY_ASSIGNED_SUCCESS = "Category assigned to SKU successfully";
     public static final String SKU_CATEGORY_INACTIVE = "Cannot assign an inactive category to SKU (BR-CAT-08)";
     public static final String SKU_SAME_CATEGORY = "SKU already belongs to this category";
+    public static final String SKU_DETAIL_SUCCESS = "SKU detail retrieved successfully";
+
+    // ==================== SKU Search Messages (UC-B06) ====================
+    public static final String SKU_SEARCH_SUCCESS = "SKU search completed successfully";
+    public static final String SKU_SEARCH_NO_RESULT = "No SKUs found matching your criteria.";
+
+    // ==================== SKU Threshold Messages (UC-B07) ====================
+    public static final String THRESHOLD_UPDATED_SUCCESS = "Thresholds updated successfully";
+    public static final String THRESHOLD_NOT_FOUND = "Threshold configuration not found";
+    public static final String THRESHOLD_MUST_BE_POSITIVE = "Please enter valid positive integers.";
+    public static final String THRESHOLD_MIN_MUST_BE_LESS_THAN_MAX = "Min threshold must be lower than Max threshold.";
+    public static final String SKU_INACTIVE = "SKU is not active";
+
+    // ==================== Import SKU Messages (UC-B08) ====================
+    public static final String IMPORT_SKU_SUCCESS = "SKU import completed";
+    public static final String IMPORT_INVALID_FILE_FORMAT = "Invalid file format. Please use Excel or CSV.";
+    public static final String IMPORT_FILE_TOO_LARGE = "File size exceeds 5MB limit.";
+    public static final String IMPORT_TOO_MANY_ROWS = "File exceeds maximum 1,000 rows per import batch.";
+
+    // ==================== Zone Messages (UC-LOC-01) ====================
+    public static final String ZONE_CREATED_SUCCESS = "Zone created successfully";
+    public static final String ZONE_CODE_DUPLICATE = "Zone Code '%s' already exists in this warehouse.";
+
+    // ==================== Warehouse Messages ====================
+    public static final String WAREHOUSE_NOT_FOUND = "Warehouse not found with ID: %s";
+
+    // ==================== THÊM VÀO MessageConstants.java ====================
+
+    // ==================== Location Messages ====================
+    public static final String LOCATION_CREATED_SUCCESS        = "Location created successfully";
+    public static final String LOCATION_UPDATED_SUCCESS        = "Location updated successfully";
+    public static final String LOCATION_DEACTIVATED_SUCCESS    = "Location deactivated successfully";
+    public static final String LOCATION_LIST_SUCCESS           = "Locations retrieved successfully";
+    public static final String LOCATION_NOT_FOUND              = "Location not found with ID: %s";
+    public static final String LOCATION_CODE_DUPLICATE         = "Location Code '%s' already exists in this zone.";
+    public static final String LOCATION_ZONE_INACTIVE          = "Cannot create location under an inactive zone.";
+    public static final String LOCATION_ALREADY_INACTIVE       = "Location is already inactive.";
+    public static final String LOCATION_HAS_INVENTORY          = "Cannot deactivate location: it still contains inventory.";
+    public static final String LOCATION_HAS_ACTIVE_CHILDREN    = "Cannot deactivate location: it has active child locations. Deactivate children first.";
+    public static final String LOCATION_CAPACITY_BELOW_CURRENT = "New capacity cannot be less than current occupied quantity.";
+    public static final String LOCATION_INVALID_HIERARCHY      = "AISLE must not have a parent location.";
+    public static final String LOCATION_PARENT_REQUIRED        = "%s requires a parent of type %s.";
+    public static final String LOCATION_INVALID_PARENT_TYPE    = "%s requires a parent of type %s, but got %s.";
+    public static final String LOCATION_PARENT_DIFFERENT_ZONE  = "Parent location must belong to the same zone.";
+    public static final String LOCATION_PARENT_INACTIVE        = "Cannot create location under an inactive parent.";
+
+    // ==================== Zone Messages ====================
+    public static final String ZONE_NOT_FOUND = "Zone not found with ID: %s";
+
+    // ==================== Bin Occupancy Messages (SCRUM-277/278/279) ====================
+    public static final String BIN_OCCUPANCY_SUCCESS         = "Bin occupancy retrieved successfully";
+    public static final String BIN_SEARCH_SUCCESS            = "Available bins found";
+    public static final String BIN_SEARCH_NO_RESULT          = "No available bins found matching your criteria.";
+    public static final String BIN_CAPACITY_CONFIGURED_SUCCESS = "Bin capacity configured successfully";
+    public static final String BIN_ONLY_OPERATION            = "This operation is only applicable to BIN-type locations.";
+    public static final String BIN_IN_ACTIVE_TASK            = "Cannot configure bin capacity: bin is currently involved in an active putaway or picking task.";
+    public static final String BIN_CAPACITY_BELOW_OCCUPIED   = "New capacity (%.2f) cannot be less than current occupied quantity (%.2f).";
+
+
+    // ==================== Outbound Messages ====================
+    public static final String OUTBOUND_CREATED_SUCCESS           = "Outbound order created successfully";
+    public static final String OUTBOUND_UPDATED_SUCCESS           = "Outbound order updated successfully";
+    public static final String OUTBOUND_SUBMITTED_SUCCESS         = "Outbound order submitted for approval";
+    public static final String OUTBOUND_TRANSFER_AUTO_APPROVED    = "Internal transfer auto-approved. Ready for shipment";
+    public static final String OUTBOUND_APPROVED_SUCCESS          = "Outbound order approved successfully";
+    public static final String OUTBOUND_REJECTED_SUCCESS          = "Outbound order rejected";
+    public static final String OUTBOUND_NOT_FOUND                 = "Outbound order not found with ID: %s";
+    public static final String OUTBOUND_NOT_EDITABLE              = "This document cannot be edited. Only DRAFT documents are editable.";
+    public static final String OUTBOUND_NOT_CREATOR               = "You can only edit your own draft documents.";
+    public static final String OUTBOUND_NOT_DRAFT                 = "Document status must be DRAFT to perform this action.";
+    public static final String OUTBOUND_NOT_PENDING               = "Document status must be PENDING_APPROVAL to approve.";
+    public static final String OUTBOUND_DATE_MUST_BE_FUTURE       = "Delivery/transfer date must be today or a future date.";
+    public static final String OUTBOUND_SAME_WAREHOUSE            = "Destination warehouse must be different from source warehouse.";
+    public static final String OUTBOUND_CUSTOMER_REQUIRED         = "Customer is required for Sales Order.";
+    public static final String OUTBOUND_DELIVERY_DATE_REQUIRED    = "Delivery date is required for Sales Order.";
+    public static final String OUTBOUND_DESTINATION_REQUIRED      = "Destination warehouse is required for Internal Transfer.";
+    public static final String OUTBOUND_RECEIVER_REQUIRED         = "Receiver name is required for Internal Transfer.";
+    public static final String OUTBOUND_INSUFFICIENT_STOCK_BLOCK  = "Cannot submit order with insufficient stock";
+    public static final String OUTBOUND_INSUFFICIENT_STOCK_WARNING = "Insufficient stock for SKU %s. Available: %s, Requested: %s";
+    public static final String OUTBOUND_REJECTION_REASON_REQUIRED = "Rejection reason is required and must be at least 20 characters.";
+
+    // ==================== Customer Messages ====================
+    public static final String CUSTOMER_NOT_FOUND                 = "Customer not found with ID: %s";
+    public static final String OUTBOUND_NOT_PENDING_APPROVAL = "Sales order is not in PENDING_APPROVAL status";
 }

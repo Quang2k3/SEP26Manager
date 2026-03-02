@@ -5,15 +5,19 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.AssignCategoryToSkuRequest;
-import org.example.sep26management.application.dto.response.ApiResponse;
-import org.example.sep26management.application.dto.response.SkuResponse;
+import org.example.sep26management.application.dto.request.ConfigureSkuThresholdRequest;
+import org.example.sep26management.application.dto.request.SearchSkuRequest;
+import org.example.sep26management.application.dto.response.*;
 import org.example.sep26management.application.service.SkuService;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.Map;
 
 /**
@@ -30,6 +34,87 @@ import java.util.Map;
 public class SkuController {
 
     private final SkuService skuService;
+    /**
+     * UC-268: View SKU Detail
+     * GET /api/v1/skus/{skuId}
+     */
+    @GetMapping("/{skuId}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<SkuResponse>> getSkuDetail(
+            @PathVariable Long skuId) {
+        log.info("GET /v1/skus/{} — view SKU detail", skuId);
+        ApiResponse<SkuResponse> response = skuService.getSkuDetail(skuId);
+        return ResponseEntity.ok(response);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // UC-B06: Search SKU
+    // BR-SKU-06: partial, case-insensitive, skuCode + skuName
+    // GET /api/v1/skus/search?keyword=abc&page=0&size=20
+    // ─────────────────────────────────────────────────────────────
+
+    @GetMapping("/search")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<PageResponse<SkuResponse>>> searchSku(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        SearchSkuRequest request = SearchSkuRequest.builder()
+                .keyword(keyword)
+                .page(page)
+                .size(size)
+                .build();
+
+        return ResponseEntity.ok(skuService.searchSku(request));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // UC-B07: Configure SKU Threshold
+    // PUT /api/v1/skus/{skuId}/threshold
+    // ─────────────────────────────────────────────────────────────
+
+    @PutMapping("/{skuId}/threshold")
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<SkuThresholdResponse>> configureThreshold(
+            @PathVariable Long skuId,
+            @Valid @RequestBody ConfigureSkuThresholdRequest request,
+            HttpServletRequest httpRequest) {
+
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(skuService.configureThreshold(
+                skuId, request, userId,
+                getClientIpAddress(httpRequest),
+                httpRequest.getHeader("User-Agent")));
+    }
+
+    @GetMapping("/{skuId}/threshold")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<SkuThresholdResponse>> getThreshold(
+            @PathVariable Long skuId,
+            @RequestParam Long warehouseId) {
+        return ResponseEntity.ok(skuService.getThreshold(skuId, warehouseId));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // UC-B08: Import SKU from Excel
+    // POST /api/v1/skus/import  (multipart/form-data)
+    // BR-IMP-01: max 5MB, max 1000 rows, .xlsx only
+    // ─────────────────────────────────────────────────────────────
+
+    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('MANAGER')")
+    public ResponseEntity<ApiResponse<ImportSkuResultResponse>> importSku(
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest httpRequest) throws IOException {
+
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(skuService.importSkuFromExcel(
+                file, userId,
+                getClientIpAddress(httpRequest),
+                httpRequest.getHeader("User-Agent")));
+    }
+
     /**
      * Assign category to SKU
      * PATCH /api/v1/skus/{skuId}/assign-category
