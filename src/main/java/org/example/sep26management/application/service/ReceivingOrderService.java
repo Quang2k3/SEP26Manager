@@ -3,6 +3,7 @@ package org.example.sep26management.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.ReceivingItemResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
 import org.example.sep26management.infrastructure.persistence.entity.*;
@@ -32,6 +33,7 @@ public class ReceivingOrderService {
         private final SupplierJpaRepository supplierRepo;
         private final UserJpaRepository userRepo;
         private final JdbcTemplate jdbcTemplate; // Chỉ dùng cho các native INSERT/UPDATE phức tạp (inventory)
+        private final PutawaySuggestionService putawaySuggestionService;
 
         // ─── List ──────────────────────────────────────────────────────────────────
 
@@ -215,6 +217,13 @@ public class ReceivingOrderService {
 
                 for (int i = 0; i < items.size(); i++) {
                         ReceivingItemEntity item = items.get(i);
+
+                        // Suggest putaway location based on zone-category matching
+                        Long suggestedBinId = putawaySuggestionService
+                                        .suggestLocation(order.getWarehouseId(), item.getSkuId(), item.getReceivedQty())
+                                        .map(PutawaySuggestion::getSuggestedLocationId)
+                                        .orElse(stagingLocationId); // fallback to staging
+
                         PutawayTaskItemEntity taskItem = PutawayTaskItemEntity.builder()
                                         .putawayTask(savedTask)
                                         .receivingItemId(item.getReceivingItemId())
@@ -222,7 +231,7 @@ public class ReceivingOrderService {
                                         .lotId(lotIds.get(i))
                                         .quantity(item.getReceivedQty())
                                         .putawayQty(BigDecimal.ZERO)
-                                        .suggestedLocationId(stagingLocationId)
+                                        .suggestedLocationId(suggestedBinId)
                                         .build();
                         putawayTaskItemRepo.save(taskItem);
                 }

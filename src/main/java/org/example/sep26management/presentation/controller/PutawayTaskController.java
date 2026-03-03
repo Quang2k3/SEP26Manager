@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.PutawayConfirmRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
 import org.example.sep26management.application.service.PutawayTaskService;
 import org.springframework.security.core.Authentication;
@@ -34,6 +35,15 @@ public class PutawayTaskController {
     @GetMapping("/{id}")
     public ApiResponse<PutawayTaskResponse> get(@PathVariable Long id) {
         return putawayTaskService.getTask(id);
+    }
+
+    /**
+     * GET /v1/putaway-tasks/{id}/suggestions
+     * Get putaway suggestions for all items in a task (zone-category matching).
+     */
+    @GetMapping("/{id}/suggestions")
+    public ApiResponse<List<PutawaySuggestion>> getSuggestions(@PathVariable Long id) {
+        return putawayTaskService.getSuggestions(id);
     }
 
     /**
