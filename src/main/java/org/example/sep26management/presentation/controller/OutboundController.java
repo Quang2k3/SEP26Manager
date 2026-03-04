@@ -44,6 +44,7 @@ public class OutboundController {
 
     private final OutboundService outboundService;
     private final OutboundListService outboundListService;
+    private final AllocateStockService allocateStockService;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
@@ -148,7 +149,18 @@ public class OutboundController {
         return ResponseEntity.ok(outboundListService.getSummary(warehouseId));
     }
 
-
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-510: Allocate / Reserve Stock
+    // POST /v1/outbound/allocate
+    // ─────────────────────────────────────────────────────────────
+    @PostMapping("/allocate")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    public ResponseEntity<ApiResponse<AllocateStockResponse>> allocateStock(
+            @Valid @RequestBody AllocateStockRequest request,
+            HttpServletRequest http) {
+        return ResponseEntity.ok(allocateStockService.allocateStock(
+                request, getUserId(), getIp(http), ua(http)));
+    }
 
     // ─────────────────────────────────────────────────────────────
     // Helpers
