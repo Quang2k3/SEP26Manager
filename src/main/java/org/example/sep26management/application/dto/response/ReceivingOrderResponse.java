@@ -45,6 +45,12 @@ public class ReceivingOrderResponse {
     private String confirmedByName;
     private LocalDateTime confirmedAt;
 
+    // Reject
+    private Long rejectedBy;
+    private String rejectedByName;
+    private LocalDateTime rejectedAt;
+    private String rejectReason;
+
     // Summary
     private Integer totalLines;
     private BigDecimal totalQty;

@@ -75,6 +75,15 @@ public class ReceivingOrderEntity {
     @Column(name = "confirmed_at")
     private LocalDateTime confirmedAt;
 
+    @Column(name = "rejected_by")
+    private Long rejectedBy;
+
+    @Column(name = "rejected_at")
+    private LocalDateTime rejectedAt;
+
+    @Column(name = "reject_reason", columnDefinition = "TEXT")
+    private String rejectReason;
+
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 

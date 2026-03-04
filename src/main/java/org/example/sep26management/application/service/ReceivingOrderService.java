@@ -83,6 +83,10 @@ public class ReceivingOrderService {
                                 ? userRepo.findById(order.getConfirmedBy()).map(UserEntity::getFullName).orElse(null)
                                 : null;
 
+                String rejectedByName = order.getRejectedBy() != null
+                                ? userRepo.findById(order.getRejectedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+
                 // Map items
                 List<ReceivingItemResponse> itemResponses = items.stream()
                                 .map(item -> toItemResponse(item, skuMap))
@@ -114,6 +118,10 @@ public class ReceivingOrderService {
                                 .confirmedBy(order.getConfirmedBy())
                                 .confirmedByName(confirmedByName)
                                 .confirmedAt(order.getConfirmedAt())
+                                .rejectedBy(order.getRejectedBy())
+                                .rejectedByName(rejectedByName)
+                                .rejectedAt(order.getRejectedAt())
+                                .rejectReason(order.getRejectReason())
                                 .totalLines(totalLines)
                                 .totalQty(totalQty)
                                 .items(itemResponses)
@@ -152,6 +160,34 @@ public class ReceivingOrderService {
 
                 log.info("GRN {} approved by managerId={}", order.getReceivingCode(), managerId);
                 return ApiResponse.success("GRN approved successfully", getOrder(id).getData());
+        }
+
+        // ─── Reject ────────────────────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<ReceivingOrderResponse> reject(Long id, String reason, Long userId) {
+                ReceivingOrderEntity order = findOrder(id);
+
+                // Chỉ cho phép reject khi đang ở trạng thái SUBMITTED hoặc APPROVED
+                if (!"SUBMITTED".equals(order.getStatus()) && !"APPROVED".equals(order.getStatus())) {
+                        throw new RuntimeException(
+                                "Cannot reject GRN in status '" + order.getStatus()
+                                        + "'. Only SUBMITTED or APPROVED GRN can be rejected.");
+                }
+
+                if (reason == null || reason.isBlank()) {
+                        throw new RuntimeException("Reject reason is required");
+                }
+
+                order.setStatus("REJECTED");
+                order.setRejectedBy(userId);
+                order.setRejectedAt(LocalDateTime.now());
+                order.setRejectReason(reason);
+                order.setUpdatedAt(LocalDateTime.now());
+                receivingOrderRepo.save(order);
+
+                log.info("GRN {} rejected by userId={}, reason: {}", order.getReceivingCode(), userId, reason);
+                return ApiResponse.success("GRN rejected successfully", getOrder(id).getData());
         }
 
         // ─── Post ──────────────────────────────────────────────────────────────────
