@@ -457,6 +457,9 @@ CREATE TABLE receiving_orders (
     approved_at TIMESTAMP,
     confirmed_by BIGINT REFERENCES users(user_id),
     confirmed_at TIMESTAMP,
+    rejected_by BIGINT REFERENCES users(user_id),
+    rejected_at TIMESTAMP,
+    reject_reason TEXT,
     note TEXT,
     UNIQUE(warehouse_id, receiving_code)
 );
@@ -1038,7 +1041,8 @@ INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, di
 ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'APPROVED', 'Approved', 'Đã duyệt', 3, '#007bff', false),
 ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'POSTED', 'Posted', 'Đã ghi nhận', 4, '#28a745', false),
 ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'PUTAWAY_DONE', 'Putaway Done', 'Đã cất kho', 5, '#20c997', true),
-((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'CANCELLED', 'Cancelled', 'Đã hủy', 6, '#dc3545', true);
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'CANCELLED', 'Cancelled', 'Đã hủy', 6, '#dc3545', true),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'REJECTED', 'Rejected', 'Bị từ chối', 7, '#dc3545', true);
 
 -- SALES_ORDER_STATUS
 INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 

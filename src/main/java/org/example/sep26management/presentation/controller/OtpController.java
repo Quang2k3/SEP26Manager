@@ -9,7 +9,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.application.constants.MessageConstants;
+import org.example.sep26management.application.dto.request.ForgotPasswordRequest;
 import org.example.sep26management.application.dto.request.ResendOtpRequest;
+import org.example.sep26management.application.dto.request.ResetPasswordRequest;
 import org.example.sep26management.application.dto.request.VerifyOtpRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.LoginResponse;
@@ -27,7 +29,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/v1/auth")
 @RequiredArgsConstructor
 @Slf4j
-@Tag(name = "Authentication - OTP", description = "Email verification with OTP")
+@Tag(name = "Authentication - OTP", description = "Email verification with OTP, forgot password & reset password")
 public class OtpController {
 
         private final OtpService otpService;
@@ -119,6 +121,48 @@ public class OtpController {
 
                 return ResponseEntity.ok(ApiResponse.success(
                                 MessageConstants.OTP_RESENT));
+        }
+
+        /**
+         * UC-AUTH-04: Forgot Password — gửi OTP qua email
+         * POST /api/v1/auth/forgot-password
+         */
+        @PostMapping("/forgot-password")
+        @Operation(summary = "Quên mật khẩu — gửi OTP", description = "Nhập email để nhận mã OTP qua email. Mã OTP có hiệu lực trong vài phút. "
+                        + "Nếu email không tồn tại hoặc tài khoản bị vô hiệu hóa → trả lỗi.")
+        public ResponseEntity<ApiResponse<Void>> forgotPassword(
+                        @Valid @RequestBody ForgotPasswordRequest request) {
+                log.info("POST /v1/auth/forgot-password for email: {}", request.getEmail());
+                authService.forgotPassword(request.getEmail());
+                return ResponseEntity.ok(ApiResponse.success(
+                                "Mã OTP đã được gửi đến email của bạn."));
+        }
+
+        /**
+         * UC-AUTH-05: Reset Password — verify OTP + đặt mật khẩu mới
+         * POST /api/v1/auth/reset-password
+         */
+        @PostMapping("/reset-password")
+        @Operation(summary = "Đặt lại mật khẩu bằng OTP", description = "Nhập email + OTP + mật khẩu mới để đặt lại mật khẩu. "
+                        + "OTP phải đúng và còn hiệu lực. Mật khẩu mới phải có ít nhất 8 ký tự, "
+                        + "chứa chữ hoa, chữ thường, số và ký tự đặc biệt. "
+                        + "Nếu tài khoản đang bị khóa (LOCKED) → tự động mở khóa sau khi reset.")
+        public ResponseEntity<ApiResponse<Void>> resetPassword(
+                        @Valid @RequestBody ResetPasswordRequest request,
+                        HttpServletRequest httpRequest) {
+                String ipAddress = getClientIpAddress(httpRequest);
+                String userAgent = httpRequest.getHeader("User-Agent");
+
+                log.info("POST /v1/auth/reset-password for email: {}", request.getEmail());
+                authService.resetPassword(
+                                request.getEmail(),
+                                request.getOtp(),
+                                request.getNewPassword(),
+                                request.getConfirmPassword(),
+                                ipAddress,
+                                userAgent);
+                return ResponseEntity.ok(ApiResponse.success(
+                                "Mật khẩu đã được đặt lại thành công. Vui lòng đăng nhập."));
         }
 
         // ==================== Helper Methods ====================
