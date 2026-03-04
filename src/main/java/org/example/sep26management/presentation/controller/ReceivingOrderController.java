@@ -3,6 +3,7 @@ package org.example.sep26management.presentation.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.example.sep26management.application.dto.request.RejectRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
 import org.example.sep26management.application.service.ReceivingOrderService;
@@ -56,6 +57,17 @@ public class ReceivingOrderController {
             @PathVariable Long id,
             Authentication auth) {
         return receivingOrderService.approve(id, extractUserId(auth));
+    }
+
+    /** POST /v1/receiving-orders/{id}/reject — Manager/Keeper */
+    @PostMapping("/{id}/reject")
+    @Operation(summary = "Từ chối phiếu nhập kho", description = "Từ chối GRN. Chuyển status từ SUBMITTED/APPROVED → REJECTED. "
+            + "Yêu cầu: phải cung cấp lý do reject (reason).")
+    public ApiResponse<ReceivingOrderResponse> reject(
+            @PathVariable Long id,
+            @RequestBody RejectRequest request,
+            Authentication auth) {
+        return receivingOrderService.reject(id, request.getReason(), extractUserId(auth));
     }
 
     /** POST /v1/receiving-orders/{id}/post — Accountant */

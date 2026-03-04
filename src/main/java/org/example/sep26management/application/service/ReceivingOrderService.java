@@ -309,7 +309,7 @@ public class ReceivingOrderService {
                 }
         }
 
-        /** Response tối giản (list, submit, approve, post) — không cần JOIN. */
+        /** Response tối giản (list, submit, approve, post, reject) — không cần JOIN nặng. */
         private ReceivingOrderResponse toSummaryResponse(ReceivingOrderEntity o) {
                 String createdByName = o.getCreatedBy() != null
                                 ? userRepo.findById(o.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
@@ -319,6 +319,9 @@ public class ReceivingOrderService {
                                 : null;
                 String confirmedByName = o.getConfirmedBy() != null
                                 ? userRepo.findById(o.getConfirmedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+                String rejectedByName = o.getRejectedBy() != null
+                                ? userRepo.findById(o.getRejectedBy()).map(UserEntity::getFullName).orElse(null)
                                 : null;
 
                 return ReceivingOrderResponse.builder()
@@ -340,6 +343,10 @@ public class ReceivingOrderService {
                                 .confirmedBy(o.getConfirmedBy())
                                 .confirmedByName(confirmedByName)
                                 .confirmedAt(o.getConfirmedAt())
+                                .rejectedBy(o.getRejectedBy())
+                                .rejectedByName(rejectedByName)
+                                .rejectedAt(o.getRejectedAt())
+                                .rejectReason(o.getRejectReason())
                                 .build();
         }
 
