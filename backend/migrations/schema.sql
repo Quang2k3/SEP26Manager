@@ -1146,6 +1146,9 @@ CREATE TABLE public.receiving_orders (
     approved_at timestamp without time zone,
     confirmed_by bigint,
     confirmed_at timestamp without time zone,
+    rejected_by bigint,
+    rejected_at timestamp without time zone,
+    reject_reason text,
     note text
 );
 
