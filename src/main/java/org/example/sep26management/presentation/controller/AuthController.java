@@ -1,5 +1,7 @@
 package org.example.sep26management.presentation.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,8 @@ import java.util.Map;
 @RequestMapping("/v1/auth")
 @RequiredArgsConstructor
 @Slf4j
+@Tag(name = "Authentication", description = "Đăng nhập, đăng xuất và lấy thông tin người dùng hiện tại. "
+                + "Login trả về JWT token hoặc yêu cầu OTP verification nếu email chưa được xác thực.")
 public class AuthController {
 
         private final AuthService authService;
@@ -32,6 +36,8 @@ public class AuthController {
          * POST /api/v1/auth/login
          */
         @PostMapping("/login")
+        @Operation(summary = "Đăng nhập hệ thống", description = "Xác thực bằng email + password. Nếu email chưa verified → trả về pendingToken + requiresVerification=true "
+                        + "(cần gọi /verify-otp). Nếu đã verified → trả về JWT token để sử dụng cho các API khác.")
         public ResponseEntity<ApiResponse<LoginResponse>> login(
                         @Valid @RequestBody LoginRequest request,
                         HttpServletRequest httpRequest) {
@@ -58,6 +64,7 @@ public class AuthController {
          * POST /api/v1/auth/logout
          */
         @PostMapping("/logout")
+        @Operation(summary = "Đăng xuất", description = "Ghi log đăng xuất và xóa security context. Client nên xóa JWT token ở phía mình sau khi gọi API này.")
         public ResponseEntity<ApiResponse<Void>> logout(
                         HttpServletRequest httpRequest) {
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -88,6 +95,7 @@ public class AuthController {
          * GET /api/v1/auth/me
          */
         @GetMapping("/me")
+        @Operation(summary = "Lấy thông tin người dùng hiện tại", description = "Trả về thông tin user đang đăng nhập dựa trên JWT token. Bao gồm userId, email, fullName, roleCodes, warehouseIds.")
         public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser() {
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 

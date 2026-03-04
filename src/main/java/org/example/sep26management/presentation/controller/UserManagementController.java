@@ -1,5 +1,7 @@
 package org.example.sep26management.presentation.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 @PreAuthorize("hasAnyRole('MANAGER')")
+@Tag(name = "User Management", description = "Quản lý người dùng: tạo tài khoản, phân quyền, thay đổi trạng thái. Chỉ role MANAGER mới được phép.")
 public class UserManagementController {
 
     private final UserManagementService userManagementService;
@@ -44,6 +47,8 @@ public class UserManagementController {
      * @return ApiResponse with created user details
      */
     @PostMapping("/create-user")
+    @Operation(summary = "Tạo tài khoản mới", description = "Tạo user với email, fullName, role, warehouseId. Password tạm thời được gửi qua email. "
+            + "User mới có status PENDING_VERIFY cho đến khi verify email.")
     public ResponseEntity<ApiResponse<UserResponse>> createUser(
             @Valid @RequestBody CreateUserRequest request,
             HttpServletRequest httpRequest) {
@@ -80,6 +85,7 @@ public class UserManagementController {
      * @return ApiResponse with paginated user list
      */
     @GetMapping("/list-users")
+    @Operation(summary = "Danh sách người dùng", description = "Lấy danh sách users với filter: keyword (email/name), status (ACTIVE/INACTIVE/PENDING_VERIFY/LOCKED). Phân trang.")
     public ResponseEntity<ApiResponse<UserListResponse>> getUserList(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) UserStatus status,
@@ -110,6 +116,7 @@ public class UserManagementController {
      * @return ApiResponse with updated user details
      */
     @PutMapping("/{userId}/assign-role")
+    @Operation(summary = "Phân quyền cho user", description = "Gán role mới cho user (KEEPER/MANAGER/ACCOUNTANT). Role cũ bị thay thế.")
     public ResponseEntity<ApiResponse<UserResponse>> assignRole(
             @PathVariable Long userId,
             @Valid @RequestBody AssignRoleRequest request,
@@ -149,6 +156,7 @@ public class UserManagementController {
      * @return ResponseEntity with updated user details
      */
     @PutMapping("/{userId}/change-status")
+    @Operation(summary = "Thay đổi trạng thái tài khoản", description = "Chuyển status user: ACTIVE ↔ INACTIVE. Có thể set suspendDate và reason.")
     public ResponseEntity<ApiResponse<UserResponse>> changeStatus(
             @PathVariable Long userId,
             @Valid @RequestBody ChangeStatusRequest request,
