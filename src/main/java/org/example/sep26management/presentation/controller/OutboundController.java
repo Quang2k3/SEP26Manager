@@ -45,6 +45,7 @@ public class OutboundController {
     private final OutboundService outboundService;
     private final OutboundListService outboundListService;
     private final AllocateStockService allocateStockService;
+    private final PickListService pickListService;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
@@ -161,6 +162,28 @@ public class OutboundController {
         return ResponseEntity.ok(allocateStockService.allocateStock(
                 request, getUserId(), getIp(http), ua(http)));
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-511: Generate Pick List
+    // POST /v1/outbound/pick-list
+    // GET  /v1/outbound/pick-list/{taskId}
+    // ─────────────────────────────────────────────────────────────
+    @PostMapping("/pick-list")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    public ResponseEntity<ApiResponse<PickListResponse>> generatePickList(
+            @Valid @RequestBody GeneratePickListRequest request,
+            HttpServletRequest http) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(pickListService.generatePickList(request, getUserId(), getIp(http), ua(http)));
+    }
+
+    @GetMapping("/pick-list/{taskId}")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    public ResponseEntity<ApiResponse<PickListResponse>> getPickList(
+            @PathVariable Long taskId) {
+        return ResponseEntity.ok(pickListService.getPickList(taskId));
+    }
+
 
     // ─────────────────────────────────────────────────────────────
     // Helpers
