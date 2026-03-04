@@ -228,6 +228,58 @@ public class AuthService {
         }
 
         /**
+         * UC-AUTH-04: Forgot Password — gửi OTP qua email
+         */
+        public void forgotPassword(String email) {
+                log.info("Forgot password request for email: {}", email);
+
+                UserEntity user = userRepository.findByEmail(email)
+                                .orElseThrow(() -> new BusinessException("Email không tồn tại trong hệ thống."));
+
+                if (user.getStatus() == UserStatus.INACTIVE) {
+                        throw new BusinessException("Tài khoản đã bị vô hiệu hóa. Liên hệ admin.");
+                }
+
+                otpService.generateAndSendOtp(email);
+                log.info("Forgot password OTP sent to: {}", email);
+        }
+
+        /**
+         * UC-AUTH-05: Reset Password — verify OTP + đặt mật khẩu mới
+         */
+        public void resetPassword(String email, String otp, String newPassword, String confirmPassword,
+                        String ipAddress, String userAgent) {
+                log.info("Reset password request for email: {}", email);
+
+                if (!newPassword.equals(confirmPassword)) {
+                        throw new BusinessException("Mật khẩu xác nhận không khớp.");
+                }
+
+                boolean isValid = otpService.verifyOtp(email, otp);
+                if (!isValid) {
+                        throw new BusinessException("Mã OTP không đúng. Vui lòng thử lại.");
+                }
+
+                UserEntity user = userRepository.findByEmail(email)
+                                .orElseThrow(() -> new BusinessException("Email không tồn tại trong hệ thống."));
+
+                user.setPasswordHash(passwordEncoder.encode(newPassword));
+                user.setFailedLoginAttempts(0);
+                user.setLockedUntil(null);
+                if (user.getStatus() == UserStatus.LOCKED) {
+                        user.setStatus(UserStatus.ACTIVE);
+                }
+                userRepository.save(user);
+
+                auditLogService.logAction(
+                                user.getUserId(), "RESET_PASSWORD", "USER", user.getUserId(),
+                                "Password reset via forgot-password OTP",
+                                ipAddress, userAgent);
+
+                log.info("Password reset successfully for: {}", email);
+        }
+
+        /**
          * UC-AUTH-02: Logout
          */
         public ApiResponse<Void> logout(Long userId, String ipAddress, String userAgent) {
