@@ -189,4 +189,22 @@ public final class MessageConstants {
     // ==================== Customer Messages ====================
     public static final String CUSTOMER_NOT_FOUND                 = "Customer not found with ID: %s";
     public static final String OUTBOUND_NOT_PENDING_APPROVAL = "Sales order is not in PENDING_APPROVAL status";
+
+    // ==================== THÊM VÀO MessageConstants.java ====================
+
+    // ==================== Outbound List (SCRUM-509) ====================
+    public static final String OUTBOUND_LIST_SUCCESS     = "Outbound orders retrieved successfully";
+    public static final String OUTBOUND_LIST_EMPTY       = "No outbound orders found";
+
+    // ==================== Allocate Stock (SCRUM-510) ====================
+    public static final String ALLOCATE_SUCCESS          = "Stock allocated successfully";
+    public static final String ALLOCATE_PARTIAL          = "Stock partially allocated. Some items have insufficient stock.";
+    public static final String ALLOCATE_MUST_BE_APPROVED = "Document must be in APPROVED status before allocating stock.";
+    public static final String ALLOCATE_NO_ITEMS         = "No items found in this document to allocate.";
+
+    // ==================== Generate Pick List (SCRUM-511) ====================
+    public static final String PICKLIST_GENERATED_SUCCESS = "Pick list generated successfully";
+    public static final String PICKLIST_MUST_BE_ALLOCATED = "Stock must be allocated before generating a pick list.";
+    public static final String PICKLIST_NO_ALLOCATION     = "No open allocations found for this document. Please allocate stock first.";
+    public static final String PICKLIST_NOT_FOUND         = "Pick list not found with task ID: %s";
 }
