@@ -1,5 +1,7 @@
 package org.example.sep26management.presentation.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,26 +24,32 @@ import java.util.Map;
 /**
  * BinController — Bin occupancy and capacity APIs
  *
- * SCRUM-277  GET   /api/v1/bins/occupancy             — View Bin Occupancy (MANAGER + KEEPER)
- *            GET   /api/v1/bins/{locationId}/occupancy — View Single Bin Detail
- * SCRUM-278  GET   /api/v1/bins/search-empty          — Search Empty Bin  (MANAGER + KEEPER)
- * SCRUM-279  PATCH /api/v1/bins/{locationId}/capacity — Configure Bin Capacity (MANAGER only)
+ * SCRUM-277 GET /api/v1/bins/occupancy — View Bin Occupancy (MANAGER + KEEPER)
+ * GET /api/v1/bins/{locationId}/occupancy — View Single Bin Detail
+ * SCRUM-278 GET /api/v1/bins/search-empty — Search Empty Bin (MANAGER + KEEPER)
+ * SCRUM-279 PATCH /api/v1/bins/{locationId}/capacity — Configure Bin Capacity
+ * (MANAGER only)
  */
 @RestController
 @RequestMapping("/v1/bins")
 @RequiredArgsConstructor
 @Slf4j
+@Tag(name = "Bin Management", description = "Quản lý bin (vị trí lưu trữ nhỏ nhất trong kệ). "
+        + "Xem chiếm dụng (occupancy), tìm bin trống, cấu hình dung lượng bin (maxWeightKg, maxVolumeM3).")
 public class BinController {
 
     private final BinService binService;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-277: View Bin Occupancy (UC-LOC-06)
-    // GET /api/v1/bins/occupancy?warehouseId=1&zoneId=2&occupancyStatus=PARTIAL&page=0&size=20
+    // GET
+    // /api/v1/bins/occupancy?warehouseId=1&zoneId=2&occupancyStatus=PARTIAL&page=0&size=20
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping("/occupancy")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
+    @Operation(summary = "Xem chiếm dụng các bin", description = "Lấy danh sách bin với thông tin occupancy (EMPTY/PARTIAL/FULL). "
+            + "Lọc theo warehouseId, zoneId, occupancyStatus. Phân trang.")
     public ResponseEntity<ApiResponse<PageResponse<BinOccupancyResponse>>> viewBinOccupancy(
             @RequestParam Long warehouseId,
             @RequestParam(required = false) Long zoneId,
@@ -59,19 +67,23 @@ public class BinController {
      */
     @GetMapping("/{locationId}/occupancy")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
+    @Operation(summary = "Chi tiết occupancy 1 bin", description = "Xem chi tiết inventory trong 1 bin cụ thể: danh sách SKU, số lượng, lot, tỉ lệ chiếm dụng.")
     public ResponseEntity<ApiResponse<BinOccupancyResponse>> getBinDetail(
             @PathVariable Long locationId) {
 
         return ResponseEntity.ok(binService.getBinDetail(locationId));
     }
 
-// ─────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
     // SCRUM-278: Search Empty Bin (UC-LOC-07)
-    // GET /api/v1/bins/search-empty?warehouseId=1&zoneId=2&requiredWeightKg=50&requiredVolumeM3=0.5
+    // GET
+    // /api/v1/bins/search-empty?warehouseId=1&zoneId=2&requiredWeightKg=50&requiredVolumeM3=0.5
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping("/search-empty")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
+    @Operation(summary = "Tìm bin trống", description = "Tìm các bin trống (không có inventory) trong warehouse/zone. "
+            + "Có thể lọc theo yêu cầu dung lượng (requiredWeightKg, requiredVolumeM3).")
     public ResponseEntity<ApiResponse<List<EmptyBinResponse>>> searchEmptyBin(
             @RequestParam Long warehouseId,
             @RequestParam(required = false) Long zoneId,
@@ -89,6 +101,7 @@ public class BinController {
 
     @PatchMapping("/{locationId}/capacity")
     @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Cấu hình dung lượng bin (Manager)", description = "Cập nhật maxWeightKg và maxVolumeM3 cho bin. Chỉ role MANAGER. Dùng để set giới hạn lưu trữ cho putaway suggestion.")
     public ResponseEntity<ApiResponse<BinCapacityResponse>> configureBinCapacity(
             @PathVariable Long locationId,
             @Valid @RequestBody ConfigureBinCapacityRequest request,
@@ -107,24 +120,30 @@ public class BinController {
 
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        if (auth == null)
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
         Object details = auth.getDetails();
         if (details instanceof Map) {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) details;
             Object uid = map.get("userId");
-            if (uid instanceof Long) return (Long) uid;
-            if (uid instanceof Integer) return ((Integer) uid).longValue();
-            if (uid != null) return Long.parseLong(uid.toString());
+            if (uid instanceof Long)
+                return (Long) uid;
+            if (uid instanceof Integer)
+                return ((Integer) uid).longValue();
+            if (uid != null)
+                return Long.parseLong(uid.toString());
         }
         throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
     }
 
     private String getClientIp(HttpServletRequest request) {
         String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isEmpty()) return xff.split(",")[0].trim();
+        if (xff != null && !xff.isEmpty())
+            return xff.split(",")[0].trim();
         String xri = request.getHeader("X-Real-IP");
-        if (xri != null && !xri.isEmpty()) return xri;
+        if (xri != null && !xri.isEmpty())
+            return xri;
         return request.getRemoteAddr();
     }
 }

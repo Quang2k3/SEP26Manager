@@ -1,5 +1,7 @@
 package org.example.sep26management.presentation.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -8,9 +10,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Tag(name = "Scanner Page", description = "Trang quét barcode cho iPhone. Trả về URL hoặc trang HTML có camera QR để quét sản phẩm.")
 public class ScannerPageController {
 
     @GetMapping(value = "/v1/scan/url", produces = MediaType.TEXT_PLAIN_VALUE)
+    @Operation(summary = "Lấy URL trang scan", description = "Trả về URL đầy đủ để mở trang quét barcode trên iPhone. Dùng cho QR code.")
     public String getScanUrl(@RequestParam("token") String token, HttpServletRequest request) {
         String base = request.getScheme() + "://" + request.getServerName()
                 + (request.getServerPort() == 80 || request.getServerPort() == 443 ? ""
@@ -19,6 +23,7 @@ public class ScannerPageController {
     }
 
     @GetMapping(value = "/v1/scan", produces = MediaType.TEXT_HTML_VALUE)
+    @Operation(summary = "Trang quét barcode (HTML)", description = "Trả về trang HTML với camera QR scanner. iPhone mở trang này để quét barcode và gửi scan event.")
     public ResponseEntity<String> scannerPage(@RequestParam("token") String token) {
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
@@ -259,7 +264,8 @@ public class ScannerPageController {
                 "        qr = new Html5Qrcode('reader');\n" +
                 "        \n" +
                 "        // Use facingMode environment to prefer back camera\n" +
-                "        var config = { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: 'environment' } };\n" +
+                "        var config = { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: 'environment' } };\n"
+                +
                 "        \n" +
                 "        qr.start(cameraId, config, function(decodedText){\n" +
                 "          var code=(decodedText||'').trim().toUpperCase();\n" +
