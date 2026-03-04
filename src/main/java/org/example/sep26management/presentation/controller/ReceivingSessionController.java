@@ -1,5 +1,7 @@
 package org.example.sep26management.presentation.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.CreateGrnRequest;
@@ -19,12 +21,16 @@ import java.util.Map;
 @RequestMapping("/v1/receiving-sessions")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('KEEPER') or hasRole('MANAGER')")
+@Tag(name = "Receiving Sessions (Scan)", description = "Quản lý phiên scan nhận hàng. "
+        + "Quy trình: Laptop tạo session → sinh QR/scan token cho iPhone → iPhone quét barcode gửi scan event "
+        + "→ Laptop nhận SSE real-time → Tạo GRN (phiếu nhập kho) từ session.")
 public class ReceivingSessionController {
 
     private final ReceivingSessionService receivingSessionService;
 
     /** POST /v1/receiving-sessions — Laptop creates a session */
     @PostMapping
+    @Operation(summary = "Tạo phiên scan mới", description = "Laptop tạo phiên scan. Trả về sessionId và QR code URL để iPhone quét.")
     public ApiResponse<ScanSessionResponse> createSession(Authentication auth) {
         Long userId = extractUserId(auth);
         Long warehouseId = extractWarehouseId(auth);
@@ -33,6 +39,7 @@ public class ReceivingSessionController {
 
     /** POST /v1/receiving-sessions/{id}/scan-token — Generate iPhone scan JWT */
     @PostMapping("/{sessionId}/scan-token")
+    @Operation(summary = "Sinh scan token cho iPhone", description = "Sinh JWT scan token cho iPhone. Token này được dùng làm Bearer token khi gọi POST /v1/scan-events.")
     public ApiResponse<Map<String, String>> generateScanToken(
             @PathVariable String sessionId,
             Authentication auth) {
@@ -42,12 +49,14 @@ public class ReceivingSessionController {
 
     /** GET /v1/receiving-sessions/{id} — Snapshot of current lines */
     @GetMapping("/{sessionId}")
+    @Operation(summary = "Xem snapshot session", description = "Lấy thông tin session hiện tại: danh sách items đã scan, số lượng, trạng thái.")
     public ApiResponse<ScanSessionResponse> getSession(@PathVariable String sessionId) {
         return receivingSessionService.getSession(sessionId);
     }
 
     /** DELETE /v1/receiving-sessions/{id} — Close session */
     @DeleteMapping("/{sessionId}")
+    @Operation(summary = "Đóng session", description = "Xóa phiên scan. iPhone sẽ không gửi được scan event nữa.")
     public ApiResponse<Void> deleteSession(@PathVariable String sessionId) {
         return receivingSessionService.deleteSession(sessionId);
     }
@@ -58,6 +67,7 @@ public class ReceivingSessionController {
      * each scan.
      */
     @GetMapping(value = "/{sessionId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "SSE stream real-time", description = "Laptop subscribe SSE stream. Mỗi lần iPhone scan thành công → server push snapshot mới về laptop qua stream này.")
     public SseEmitter stream(@PathVariable String sessionId) {
         return receivingSessionService.stream(sessionId);
     }
@@ -69,6 +79,8 @@ public class ReceivingSessionController {
      * JWT).
      */
     @PostMapping("/{sessionId}/create-grn")
+    @Operation(summary = "Tạo GRN từ session", description = "Chuyển scan session thành phiếu nhập kho (GRN) trạng thái DRAFT. "
+            + "Cần chọn supplierId và receivingCode. warehouseId lấy từ session.")
     public ApiResponse<Map<String, Object>> createGrn(
             @PathVariable String sessionId,
             @Valid @RequestBody CreateGrnRequest request,

@@ -1,5 +1,7 @@
 package org.example.sep26management.presentation.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +31,8 @@ import java.util.Map;
 @RequestMapping("/v1/categories")
 @RequiredArgsConstructor
 @Slf4j
+@Tag(name = "Category Management", description = "Quản lý danh mục hàng hóa (Category). "
+        + "Mỗi SKU thuộc 1 category, và category được mapping với zone theo convention Z-{categoryCode} cho putaway suggestion.")
 public class CategoryController {
 
     private final CategoryService categoryService;
@@ -39,6 +43,7 @@ public class CategoryController {
      */
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @Operation(summary = "Tạo category mới", description = "Tạo category với categoryCode và categoryName. categoryCode phải unique. Chỉ ADMIN/MANAGER.")
     public ResponseEntity<ApiResponse<CategoryResponse>> createCategory(
             @Valid @RequestBody CreateCategoryRequest request,
             HttpServletRequest httpRequest) {
@@ -65,6 +70,7 @@ public class CategoryController {
      */
     @PutMapping("/{categoryId}")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @Operation(summary = "Cập nhật category", description = "Cập nhật categoryName, description. Chỉ ADMIN/MANAGER.")
     public ResponseEntity<ApiResponse<CategoryResponse>> updateCategory(
             @PathVariable Long categoryId,
             @Valid @RequestBody UpdateCategoryRequest request,
@@ -92,6 +98,7 @@ public class CategoryController {
      */
     @GetMapping("/{categoryId}")
     @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Chi tiết category", description = "Lấy thông tin chi tiết 1 category theo ID.")
     public ResponseEntity<ApiResponse<CategoryResponse>> getCategoryById(
             @PathVariable Long categoryId) {
         ApiResponse<CategoryResponse> response = categoryService.getCategoryById(categoryId);
@@ -104,6 +111,7 @@ public class CategoryController {
      */
     @GetMapping
     @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Danh sách categories", description = "Lấy tất cả categories (bao gồm active và inactive).")
     public ResponseEntity<ApiResponse<List<CategoryResponse>>> getAllCategories() {
         ApiResponse<List<CategoryResponse>> response = categoryService.getAllCategories();
         return ResponseEntity.ok(response);
@@ -115,6 +123,7 @@ public class CategoryController {
      */
     @PatchMapping("/{categoryId}/deactivate")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @Operation(summary = "Vô hiệu hóa category", description = "Vô hiệu hóa category. SKU thuộc category này sẽ không được gợi ý putaway nữa.")
     public ResponseEntity<ApiResponse<CategoryResponse>> deactivateCategory(
             @PathVariable Long categoryId,
             HttpServletRequest httpRequest) {
@@ -134,6 +143,8 @@ public class CategoryController {
      */
     @GetMapping("/tree")
     @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Cây category-zone", description = "Hiển thị cây category với thông tin zone mapping (convention: Z-{categoryCode}). "
+            + "Nếu truyền warehouseId → chỉ hiển thị zone mapping cho warehouse đó.")
     public ResponseEntity<ApiResponse<List<CategoryTreeResponse>>> getCategoryTree(
             @RequestParam(required = false) Long warehouseId) {
         ApiResponse<List<CategoryTreeResponse>> response = categoryService.getCategoryTree(warehouseId);
@@ -147,6 +158,8 @@ public class CategoryController {
      */
     @PostMapping("/{categoryId}/map-to-zone")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @Operation(summary = "Map category vào zone", description = "Tạo mapping giữa category và zone theo convention: zoneCode = 'Z-' + categoryCode. "
+            + "Nếu zone chưa tồn tại → tự động tạo zone mới trong warehouse.")
     public ResponseEntity<ApiResponse<MapCategoryToZoneResponse>> mapCategoryToZone(
             @PathVariable Long categoryId,
             @Valid @RequestBody MapCategoryToZoneRequest request,

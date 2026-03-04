@@ -1,5 +1,7 @@
 package org.example.sep26management.presentation.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -24,16 +26,19 @@ import java.util.Map;
 /**
  * LocationController — Location master data APIs
  *
- * SCRUM-273  POST   /api/v1/locations               — Create Location    (MANAGER)
- * SCRUM-274  PUT    /api/v1/locations/{locationId}   — Update Location    (MANAGER)
- * SCRUM-275  PATCH  /api/v1/locations/{locationId}/deactivate — Deactivate (MANAGER)
- * SCRUM-276  GET    /api/v1/locations               — View Location List  (MANAGER)
- *            GET    /api/v1/locations/{locationId}   — View Location Detail
+ * SCRUM-273 POST /api/v1/locations — Create Location (MANAGER)
+ * SCRUM-274 PUT /api/v1/locations/{locationId} — Update Location (MANAGER)
+ * SCRUM-275 PATCH /api/v1/locations/{locationId}/deactivate — Deactivate
+ * (MANAGER)
+ * SCRUM-276 GET /api/v1/locations — View Location List (MANAGER)
+ * GET /api/v1/locations/{locationId} — View Location Detail
  */
 @RestController
 @RequestMapping("/v1/locations")
 @RequiredArgsConstructor
 @Slf4j
+@Tag(name = "Location Management", description = "Quản lý vị trí lưu trữ trong warehouse. "
+        + "Phân cấp: Zone → Aisle → Rack → Bin. Chỉ BIN mới có thể chứa hàng.")
 public class LocationController {
 
     private final LocationService locationService;
@@ -44,6 +49,8 @@ public class LocationController {
 
     @PostMapping
     @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Tạo location mới (Manager)", description = "Tạo location (AISLE/RACK/BIN/STAGING) trong zone. "
+            + "BIN cần parentLocationId là RACK, RACK cần parent là AISLE.")
     public ResponseEntity<ApiResponse<LocationResponse>> createLocation(
             @Valid @RequestBody CreateLocationRequest request,
             HttpServletRequest httpRequest) {
@@ -57,12 +64,13 @@ public class LocationController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-// ─────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
     // SCRUM-274: Update Location (UC-LOC-03)
     // ─────────────────────────────────────────────────────────────
 
     @PutMapping("/{locationId}")
     @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Cập nhật location (Manager)", description = "Cập nhật thông tin location: locationCode, zoneId, capacity,...")
     public ResponseEntity<ApiResponse<LocationResponse>> updateLocation(
             @PathVariable Long locationId,
             @Valid @RequestBody UpdateLocationRequest request,
@@ -81,6 +89,7 @@ public class LocationController {
 
     @PatchMapping("/{locationId}/deactivate")
     @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Vô hiệu hóa location (Manager)", description = "Vô hiệu hóa location. Không thể deactivate nếu location còn inventory.")
     public ResponseEntity<ApiResponse<Void>> deactivateLocation(
             @PathVariable Long locationId,
             HttpServletRequest httpRequest) {
@@ -94,11 +103,13 @@ public class LocationController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-276: View Location List (UC-LOC-05)
-    // GET /api/v1/locations?warehouseId=1&zoneId=2&locationType=BIN&active=true&keyword=A01&page=0&size=20
+    // GET
+    // /api/v1/locations?warehouseId=1&zoneId=2&locationType=BIN&active=true&keyword=A01&page=0&size=20
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping
     @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Danh sách locations", description = "Lấy danh sách locations với filter: warehouseId, zoneId, locationType (AISLE/RACK/BIN/STAGING), active, keyword. Phân trang.")
     public ResponseEntity<ApiResponse<PageResponse<LocationResponse>>> listLocations(
             @RequestParam Long warehouseId,
             @RequestParam(required = false) Long zoneId,
@@ -114,6 +125,7 @@ public class LocationController {
 
     @GetMapping("/{locationId}")
     @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Chi tiết location", description = "Xem chi tiết 1 location: code, type, zone, parent, capacity, active status.")
     public ResponseEntity<ApiResponse<LocationResponse>> getLocationDetail(
             @PathVariable Long locationId) {
         return ResponseEntity.ok(locationService.getLocationDetail(locationId));
@@ -125,24 +137,30 @@ public class LocationController {
 
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        if (auth == null)
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
         Object details = auth.getDetails();
         if (details instanceof Map) {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) details;
             Object uid = map.get("userId");
-            if (uid instanceof Long) return (Long) uid;
-            if (uid instanceof Integer) return ((Integer) uid).longValue();
-            if (uid != null) return Long.parseLong(uid.toString());
+            if (uid instanceof Long)
+                return (Long) uid;
+            if (uid instanceof Integer)
+                return ((Integer) uid).longValue();
+            if (uid != null)
+                return Long.parseLong(uid.toString());
         }
         throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
     }
 
     private String getClientIp(HttpServletRequest request) {
         String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isEmpty()) return xff.split(",")[0].trim();
+        if (xff != null && !xff.isEmpty())
+            return xff.split(",")[0].trim();
         String xri = request.getHeader("X-Real-IP");
-        if (xri != null && !xri.isEmpty()) return xri;
+        if (xri != null && !xri.isEmpty())
+            return xri;
         return request.getRemoteAddr();
     }
 }

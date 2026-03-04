@@ -1,5 +1,7 @@
 package org.example.sep26management.presentation.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,11 +27,13 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 @PreAuthorize("isAuthenticated()")
+@Tag(name = "User Profile", description = "Quản lý hồ sơ cá nhân: xem, cập nhật thông tin, đổi mật khẩu, upload avatar.")
 public class ProfileController {
 
     private final ProfileService profileService;
 
     @GetMapping("")
+    @Operation(summary = "Xem hồ sơ cá nhân", description = "Lấy thông tin profile của user đang đăng nhập: email, fullName, phone, avatar, roles.")
     public ResponseEntity<ApiResponse<UserProfileResponse>> getProfile() {
         try {
             Long userId = getCurrentUserId();
@@ -45,6 +49,7 @@ public class ProfileController {
     }
 
     @PutMapping(value = "/update-profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Cập nhật hồ sơ", description = "Cập nhật fullName, phone, avatar (upload file). Gửi dưới dạng multipart/form-data.")
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
             @Valid @ModelAttribute UpdateProfileRequest request,
             HttpServletRequest httpRequest) {
@@ -67,6 +72,7 @@ public class ProfileController {
     }
 
     @PostMapping("/change-password")
+    @Operation(summary = "Đổi mật khẩu", description = "Đổi mật khẩu: cần nhập currentPassword + newPassword. Mật khẩu mới phải khác mật khẩu cũ.")
     public ResponseEntity<ApiResponse<Void>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
             HttpServletRequest httpRequest) {
