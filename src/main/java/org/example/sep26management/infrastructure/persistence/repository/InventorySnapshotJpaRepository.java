@@ -123,4 +123,22 @@ public interface InventorySnapshotJpaRepository
             @Param("warehouseId") Long warehouseId,
             @Param("skuId") Long skuId,
             @Param("qty") java.math.BigDecimal qty);
+
+    /**
+     * UC-WXE-05: lock stock at specific location+sku+lot level (BR-WXE-20)
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE inventory_snapshot
+            SET reserved_qty = reserved_qty + :qty, last_updated = NOW()
+            WHERE location_id = :locationId
+              AND sku_id = :skuId
+              AND (:lotId IS NULL OR lot_id = :lotId OR (lot_id IS NULL AND :lotId IS NULL))
+            """, nativeQuery = true)
+    void incrementReservedByLocationAndSku(
+            @Param("locationId") Long locationId,
+            @Param("skuId") Long skuId,
+            @Param("lotId") Long lotId,
+            @Param("qty") java.math.BigDecimal qty);
+
 }
