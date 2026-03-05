@@ -18,7 +18,7 @@ import java.util.Map;
 @RequestMapping("/v1/receiving-orders")
 @RequiredArgsConstructor
 @Tag(name = "Receiving Orders (GRN)", description = "Quản lý phiếu nhập kho (Goods Receipt Note). "
-        + "Quy trình: Tạo GRN từ scan session → SUBMITTED → APPROVED (Manager) → POSTED (Accountant, tự động tạo Putaway Task). "
+        + "Quy trình: Tạo GRN từ scan session → SUBMITTED → APPROVED (Manager) → POSTED (QC, tự động tạo Putaway Task). "
         + "Khi POST, hệ thống tự động gợi ý vị trí putaway dựa trên zone-category matching.")
 public class ReceivingOrderController {
 
@@ -70,9 +70,9 @@ public class ReceivingOrderController {
         return receivingOrderService.reject(id, request.getReason(), extractUserId(auth));
     }
 
-    /** POST /v1/receiving-orders/{id}/post — Accountant */
+    /** POST /v1/receiving-orders/{id}/post — QC */
     @PostMapping("/{id}/post")
-    @Operation(summary = "Xác nhận nhập kho & tạo Putaway Task (Accountant)", description = "Accountant xác nhận GRN. Chuyển status APPROVED → POSTED. "
+    @Operation(summary = "Xác nhận nhập kho & tạo Putaway Task (QC)", description = "QC xác nhận GRN. Chuyển status APPROVED → POSTED. "
             + "Tự động: (1) Tạo inventory tại staging location, (2) Tạo Putaway Task với suggested location "
             + "dựa trên zone-category matching (ví dụ: SKU category 'HC' → zone 'Z-HC' → BIN có dung lượng trống nhất).")
     public ApiResponse<ReceivingOrderResponse> post(
