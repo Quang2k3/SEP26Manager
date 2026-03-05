@@ -539,7 +539,8 @@ CREATE TABLE public.incidents (
     reported_by bigint,
     attachment_id bigint,
     status character varying(50) DEFAULT 'OPEN'::character varying NOT NULL,
-    created_at timestamp without time zone DEFAULT now() NOT NULL
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    receiving_id bigint
 );
 
 
@@ -1092,7 +1093,9 @@ CREATE TABLE public.receiving_items (
     expiry_date date,
     weight_kg numeric(12,2),
     note text,
-    qc_required boolean DEFAULT false NOT NULL
+    qc_required boolean DEFAULT false NOT NULL,
+    condition character varying(20) DEFAULT 'PASS'::character varying,
+    reason_code character varying(100)
 );
 
 
@@ -4945,6 +4948,59 @@ ALTER TABLE ONLY public.zones
 --
 -- PostgreSQL database dump complete
 --
+
+
+--
+-- MIGRATION: Inbound Flow - Enum seed data & FK index
+--
+
+-- Index for incidents.receiving_id
+CREATE INDEX IF NOT EXISTS idx_incident_receiving ON public.incidents(receiving_id) WHERE receiving_id IS NOT NULL;
+
+-- FK: incidents.receiving_id -> receiving_orders
+ALTER TABLE ONLY public.incidents
+    ADD CONSTRAINT incidents_receiving_id_fkey FOREIGN KEY (receiving_id) REFERENCES public.receiving_orders(receiving_id);
+
+-- Enum: INCIDENT_TYPE
+INSERT INTO public.enum_types (enum_type_code, enum_type_name, description)
+VALUES ('INCIDENT_TYPE', 'Incident Type', 'Types of gate check incidents')
+ON CONFLICT (enum_type_code) DO NOTHING;
+
+INSERT INTO public.enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code)
+VALUES
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'SEAL_BROKEN', 'Seal Broken', 'Kẹp chì bị đứt', 1, '#dc3545'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'SEAL_MISMATCH', 'Seal Mismatch', 'Số seal không khớp', 2, '#fd7e14'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'PACKAGING_DAMAGE', 'Packaging Damage', 'Hư hỏng bao bì xe', 3, '#ffc107'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'OTHER', 'Other', 'Khác', 4, '#6c757d')
+ON CONFLICT (enum_type_id, value_code) DO NOTHING;
+
+-- Enum: NC_REASON (Non-Conformance Reason codes for FAIL items)
+INSERT INTO public.enum_types (enum_type_code, enum_type_name, description)
+VALUES ('NC_REASON', 'Non-Conformance Reason', 'Reason codes for item failures during receiving')
+ON CONFLICT (enum_type_code) DO NOTHING;
+
+INSERT INTO public.enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code)
+VALUES
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'NC_REASON'), 'LEAK', 'Leak', 'Rò rỉ', 1, '#dc3545'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'NC_REASON'), 'TORN_PACKAGING', 'Torn Packaging', 'Rách bao bì', 2, '#fd7e14'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'NC_REASON'), 'DENTED', 'Dented', 'Móp méo', 3, '#ffc107'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'NC_REASON'), 'EXPIRED', 'Expired', 'Hết hạn sử dụng', 4, '#dc3545'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'NC_REASON'), 'WRONG_PRODUCT', 'Wrong Product', 'Sai sản phẩm', 5, '#17a2b8'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'NC_REASON'), 'OTHER', 'Other', 'Khác', 6, '#6c757d')
+ON CONFLICT (enum_type_id, value_code) DO NOTHING;
+
+-- Enum: QC_DECISION (Manager decisions for QC failed items)
+INSERT INTO public.enum_types (enum_type_code, enum_type_name, description)
+VALUES ('QC_DECISION', 'QC Decision', 'Manager decisions for QC failed items')
+ON CONFLICT (enum_type_code) DO NOTHING;
+
+INSERT INTO public.enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code)
+VALUES
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'QC_DECISION'), 'SCRAP', 'Scrap', 'Tiêu hủy', 1, '#dc3545'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'QC_DECISION'), 'RETURN', 'Return to Supplier', 'Trả hàng', 2, '#fd7e14'),
+  ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'QC_DECISION'), 'DOWNGRADE', 'Downgrade / Salvage', 'Thanh lý', 3, '#ffc107')
+ON CONFLICT (enum_type_id, value_code) DO NOTHING;
+
 
 \unrestrict DLupeTyv82GatHcqDa9Y0xv7EThKlj8dW3GV5VR8D1pL1Er27LeeSJScibf1s6o
 

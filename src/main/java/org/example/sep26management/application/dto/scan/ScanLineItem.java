@@ -16,4 +16,11 @@ public class ScanLineItem {
     private String skuName;
     private String barcode;
     private BigDecimal qty;
+
+    /** PASS or FAIL */
+    @Builder.Default
+    private String condition = "PASS";
+
+    /** Reason code when condition = FAIL (e.g. LEAK, TORN_PACKAGING, DENTED) */
+    private String reasonCode;
 }

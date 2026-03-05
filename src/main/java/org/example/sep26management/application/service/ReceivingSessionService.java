@@ -153,6 +153,7 @@ public class ReceivingSessionService {
                 // Create line items from session lines
                 List<ReceivingItemEntity> items = new ArrayList<>();
                 for (ScanLineItem line : lines) {
+                        boolean isFail = "FAIL".equalsIgnoreCase(line.getCondition());
                         ReceivingItemEntity item = ReceivingItemEntity.builder()
                                         .receivingOrder(saved)
                                         .skuId(line.getSkuId())
@@ -160,7 +161,9 @@ public class ReceivingSessionService {
                                         .lotNumber(request.getLotNumber())
                                         .expiryDate(request.getExpiryDate())
                                         .manufactureDate(request.getManufactureDate())
-                                        .qcRequired(false)
+                                        .condition(line.getCondition() != null ? line.getCondition() : "PASS")
+                                        .reasonCode(line.getReasonCode())
+                                        .qcRequired(isFail) // FAIL items automatically need QC
                                         .build();
                         items.add(item);
                 }

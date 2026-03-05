@@ -96,6 +96,14 @@ public class ReceivingOrderService {
                 BigDecimal totalQty = items.stream()
                                 .map(ReceivingItemEntity::getReceivedQty)
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal totalOkQty = items.stream()
+                                .filter(i -> "PASS".equalsIgnoreCase(i.getCondition()))
+                                .map(ReceivingItemEntity::getReceivedQty)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal totalDamagedQty = items.stream()
+                                .filter(i -> "FAIL".equalsIgnoreCase(i.getCondition()))
+                                .map(ReceivingItemEntity::getReceivedQty)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
                 ReceivingOrderResponse response = ReceivingOrderResponse.builder()
                                 .receivingId(order.getReceivingId())
@@ -124,6 +132,8 @@ public class ReceivingOrderService {
                                 .rejectReason(order.getRejectReason())
                                 .totalLines(totalLines)
                                 .totalQty(totalQty)
+                                .totalOkQty(totalOkQty)
+                                .totalDamagedQty(totalDamagedQty)
                                 .items(itemResponses)
                                 .build();
 
@@ -171,8 +181,8 @@ public class ReceivingOrderService {
                 // Chỉ cho phép reject khi đang ở trạng thái SUBMITTED hoặc APPROVED
                 if (!"SUBMITTED".equals(order.getStatus()) && !"APPROVED".equals(order.getStatus())) {
                         throw new RuntimeException(
-                                "Cannot reject GRN in status '" + order.getStatus()
-                                        + "'. Only SUBMITTED or APPROVED GRN can be rejected.");
+                                        "Cannot reject GRN in status '" + order.getStatus()
+                                                        + "'. Only SUBMITTED or APPROVED GRN can be rejected.");
                 }
 
                 if (reason == null || reason.isBlank()) {
@@ -309,7 +319,10 @@ public class ReceivingOrderService {
                 }
         }
 
-        /** Response tối giản (list, submit, approve, post, reject) — không cần JOIN nặng. */
+        /**
+         * Response tối giản (list, submit, approve, post, reject) — không cần JOIN
+         * nặng.
+         */
         private ReceivingOrderResponse toSummaryResponse(ReceivingOrderEntity o) {
                 String createdByName = o.getCreatedBy() != null
                                 ? userRepo.findById(o.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
@@ -363,6 +376,8 @@ public class ReceivingOrderService {
                                 .expiryDate(item.getExpiryDate())
                                 .manufactureDate(item.getManufactureDate())
                                 .note(item.getNote())
+                                .condition(item.getCondition())
+                                .reasonCode(item.getReasonCode())
                                 .build();
         }
 }

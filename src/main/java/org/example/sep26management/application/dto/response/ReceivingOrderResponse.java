@@ -54,6 +54,8 @@ public class ReceivingOrderResponse {
     // Summary
     private Integer totalLines;
     private BigDecimal totalQty;
+    private BigDecimal totalOkQty;
+    private BigDecimal totalDamagedQty;
 
     private List<ReceivingItemResponse> items;
 }

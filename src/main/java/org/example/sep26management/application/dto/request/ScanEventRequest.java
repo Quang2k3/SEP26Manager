@@ -22,6 +22,19 @@ public class ScanEventRequest {
     private BigDecimal qty;
 
     /**
+     * PASS = Hàng tốt, FAIL = Hàng lỗi.
+     * Default: PASS nếu không truyền.
+     */
+    @Builder.Default
+    private String condition = "PASS";
+
+    /**
+     * Mã lý do lỗi (chỉ khi condition = FAIL).
+     * VD: LEAK, TORN_PACKAGING, DENTED, OTHER
+     */
+    private String reasonCode;
+
+    /**
      * Required only when calling with a regular user JWT (e.g. Swagger testing).
      * iPhone scanner uses a scan token that already embeds the sessionId — leave
      * null in that case.
