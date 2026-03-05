@@ -2,7 +2,7 @@ package org.example.sep26management.domain.enums;
 
 public enum UserRole {
     MANAGER("Warehouse Manager"),
-    ACCOUNTANT("Warehouse Accountant"),
+    QC("Quality Control"),
     KEEPER("Warehouse Keeper");
 
     private final String displayName;

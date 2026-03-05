@@ -1111,7 +1111,7 @@ INSERT INTO roles (role_code, role_name, description, active)
 VALUES
   ('MANAGER',     'Warehouse Manager', 'Manage warehouse operations', true),
   ('KEEPER',      'Warehouse Keeper',  'Daily warehouse operations',  true),
-  ('ACCOUNTANT',  'Accountant',        'Financial and reporting',     true)
+  ('QC',          'Quality Control',   'Quality checking and posting', true)
 ON CONFLICT (role_code) DO NOTHING;
 
 
@@ -1142,7 +1142,7 @@ VALUES
    (SELECT role_id FROM roles WHERE role_code = 'KEEPER')),
 
   ((SELECT user_id FROM users WHERE email = 'tranhoang1112003@gmail.com'),
-   (SELECT role_id FROM roles WHERE role_code = 'ACCOUNTANT'))
+   (SELECT role_id FROM roles WHERE role_code = 'QC'))
 ON CONFLICT (user_id, role_id) DO NOTHING;
 
 

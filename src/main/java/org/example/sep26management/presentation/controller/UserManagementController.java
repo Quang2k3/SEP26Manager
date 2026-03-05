@@ -116,7 +116,7 @@ public class UserManagementController {
      * @return ApiResponse with updated user details
      */
     @PutMapping("/{userId}/assign-role")
-    @Operation(summary = "Phân quyền cho user", description = "Gán role mới cho user (KEEPER/MANAGER/ACCOUNTANT). Role cũ bị thay thế.")
+    @Operation(summary = "Phân quyền cho user", description = "Gán role mới cho user (KEEPER/MANAGER/QC). Role cũ bị thay thế.")
     public ResponseEntity<ApiResponse<UserResponse>> assignRole(
             @PathVariable Long userId,
             @Valid @RequestBody AssignRoleRequest request,
