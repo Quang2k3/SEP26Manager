@@ -48,6 +48,15 @@ public class ReceivingItemEntity {
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 
+    /** PASS = hàng tốt, FAIL = hàng lỗi */
+    @Column(name = "condition", length = 20)
+    @Builder.Default
+    private String condition = "PASS";
+
+    /** Mã lý do lỗi (khi condition = FAIL). VD: LEAK, TORN_PACKAGING, DENTED */
+    @Column(name = "reason_code", length = 100)
+    private String reasonCode;
+
     @Column(name = "qc_required", nullable = false)
     private Boolean qcRequired;
 

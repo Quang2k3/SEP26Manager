@@ -22,4 +22,10 @@ public class ReceivingItemResponse {
     private LocalDate expiryDate;
     private LocalDate manufactureDate;
     private String note;
+
+    /** PASS or FAIL */
+    private String condition;
+
+    /** Reason code when condition = FAIL */
+    private String reasonCode;
 }

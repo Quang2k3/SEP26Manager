@@ -16,8 +16,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/v1/scan-events")
 @RequiredArgsConstructor
-@Tag(name = "Scan Events", description = "Xử lý sự kiện quét barcode từ iPhone. "
-        + "iPhone gửi barcode + scan token → server tra cứu SKU → cập nhật session → push SSE về laptop.")
+@Tag(name = "Scan Events", description = "Xử lý sự kiện quét barcode từ iPhone/Tablet. "
+        + "Hỗ trợ 2 chế độ: PASS (hàng tốt) và FAIL (hàng lỗi kèm reasonCode).")
 public class ScanEventController {
 
     private final ScanEventService scanEventService;
@@ -27,14 +27,28 @@ public class ScanEventController {
      * Called by the iPhone scanner (Bearer JWT scan token required).
      */
     @PostMapping
-    @Operation(summary = "Gửi sự kiện quét barcode", description = "iPhone gửi barcode đã quét. Yêu cầu Bearer scan token (sinh từ /receiving-sessions/{id}/scan-token). "
-            + "Server tra cứu SKU theo barcode, cập nhật session, và push thông báo real-time về laptop.")
+    @Operation(summary = "Gửi sự kiện quét barcode", description = "Quét barcode với condition=PASS (hàng tốt) hoặc condition=FAIL (hàng lỗi). "
+            + "Khi FAIL, cần kèm reasonCode (VD: LEAK, TORN_PACKAGING, DENTED).")
     public ApiResponse<Map<String, Object>> scan(
             @Valid @RequestBody ScanEventRequest request,
             HttpServletRequest httpRequest) {
 
         String scanToken = extractToken(httpRequest);
         return scanEventService.processScan(scanToken, request);
+    }
+
+    /**
+     * DELETE /v1/scan-events
+     * Remove a specific scan line item (e.g. Keeper scanned wrong item).
+     */
+    @DeleteMapping
+    @Operation(summary = "Xoá dòng quét nhầm", description = "Xoá một dòng khỏi session quét. Cần truyền sessionId, skuId, và condition (PASS/FAIL).")
+    public ApiResponse<Map<String, Object>> removeScanItem(
+            @RequestParam String sessionId,
+            @RequestParam Long skuId,
+            @RequestParam(defaultValue = "PASS") String condition) {
+
+        return scanEventService.removeScanItem(sessionId, skuId, condition);
     }
 
     private String extractToken(HttpServletRequest request) {
