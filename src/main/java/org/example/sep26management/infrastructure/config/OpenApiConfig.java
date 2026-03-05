@@ -26,8 +26,8 @@ public class OpenApiConfig {
                 final String securitySchemeName = "bearerAuth";
 
                 List<Server> servers = new ArrayList<>();
-                servers.add(new Server().url("http://localhost:8080/api").description("Local Development"));
-                servers.add(new Server().url("https://api.cleanhousewms.id.vn/api").description("Production"));
+                servers.add(new Server().url("http://localhost:8080").description("Local Development"));
+                servers.add(new Server().url("https://api.cleanhousewms.id.vn").description("Production"));
 
                 return new OpenAPI()
                                 .servers(servers)
