@@ -19,15 +19,20 @@ import java.util.Map;
 @RestController
 @RequestMapping("/v1/qc-inspections")
 @RequiredArgsConstructor
-@Tag(name = "QC Inspections", description = "Quản lý kiểm định chất lượng. "
-        + "QC xem danh sách hàng chờ kiểm tra → Lập QC Report → Manager duyệt phương án xử lý.")
+@Tag(name = "QC Inspections", description = "Quản lý kiểm định chất lượng (QC). "
+        + "LƯU Ý: Không có API tạo phiếu kiểm định riêng vì hệ thống TỰ ĐỘNG sinh ra phiếu QC Inspection (trạng thái PENDING) "
+        + "khi luồng Scan Nhập Kho (Scan Event) ghi nhận hàng hóa bị lỗi (condition = FAIL kèm lý do rách, móp, v.v). "
+        + "Quy trình: Scanner gửi FAIL event → Server tự tạo phiếu QC → QC xem danh sách chờ khám (list) → Click vào 1 phiếu để xem chi tiết bằng ID (get) → "
+        + "Lập QC Report (thêm chi tiết, ảnh) → Manager duyệt phương án xử lý cuối cùng.")
 public class QcInspectionController {
 
     private final QcInspectionService qcService;
 
     /** GET /v1/qc-inspections?status=PENDING */
     @GetMapping
-    @Operation(summary = "Danh sách kiểm định QC", description = "Lấy danh sách QC inspections. Lọc theo status: PENDING (chờ QC), INSPECTED (đã kiểm), DECIDED (Manager đã quyết định).")
+    @Operation(summary = "Danh sách phiếu kiểm định QC", description = "Lấy danh sách các phiếu QC. Tham số `status` đóng vai trò là FILTER (bộ lọc) không bắt buộc. "
+            + "Nếu không truyền `status`, API trả về tất cả. Nếu truyền `status` (ví dụ: PENDING, INSPECTED, DECIDED) thì chỉ các phiếu có trạng thái tương ứng được lưới ra. "
+            + "Kết quả trả về sẽ báo gồm ID (qcInspectionId) của từng phiếu để QC có thể nhấn vào xem chi tiết.")
     public ApiResponse<List<QcInspectionResponse>> list(
             @RequestParam(required = false) String status) {
         return qcService.listInspections(status);
@@ -35,7 +40,9 @@ public class QcInspectionController {
 
     /** GET /v1/qc-inspections/{id} */
     @GetMapping("/{id}")
-    @Operation(summary = "Chi tiết kiểm định QC")
+    @Operation(summary = "Chi tiết một phiếu kiểm định QC", description = "Lấy chi tiết 1 phiếu QC. "
+            + "Tham số `id` ở đây chính là mã ID (qcInspectionId) - thứ mà bạn lấy được từ dữ liệu trả về của API Danh sách kiểm định (GET /v1/qc-inspections) phía trên. "
+            + "Đúng vậy, luồng thực tế là: Gọi API list -> lấy các ID -> QC chọn 1 dòng -> APP gọi API này truyền ID đó vào để lấy chi tiết.")
     public ApiResponse<QcInspectionResponse> get(@PathVariable Long id) {
         return qcService.getInspection(id);
     }
