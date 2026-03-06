@@ -45,6 +45,7 @@ services:
 
   # Spring Boot Backend
   backend:
+    image: quangnphe/sep26manager-backend:latest
     build:
       context: .
       dockerfile: backend/Dockerfile

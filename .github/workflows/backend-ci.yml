@@ -175,7 +175,7 @@ jobs:
         run: |
           Start-Sleep -Seconds 30
           try {
-            $response = Invoke-WebRequest -Uri http://localhost:8080/api/actuator/health -UseBasicParsing
+            $response = Invoke-WebRequest -Uri http://localhost:8080/actuator/health -UseBasicParsing
             if ($response.StatusCode -eq 200) {
               Write-Host "Backend deployed successfully!"
             }else {
