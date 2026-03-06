@@ -79,7 +79,9 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/api/swagger-ui/**",
                                 "/v3/api-docs/**",
-                                "/api/v3/api-docs/**")
+                                "/api/v3/api-docs/**",
+                                "/v1/health",
+                                "/v1/health/**")
                         .permitAll()
                         // Scan events — requires KEEPER role (iPhone scanner)
                         .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasRole("KEEPER")
