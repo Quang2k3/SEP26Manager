@@ -83,6 +83,10 @@ public class ReceivingOrderService {
                                 ? userRepo.findById(order.getConfirmedBy()).map(UserEntity::getFullName).orElse(null)
                                 : null;
 
+                String rejectedByName = order.getRejectedBy() != null
+                                ? userRepo.findById(order.getRejectedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+
                 // Map items
                 List<ReceivingItemResponse> itemResponses = items.stream()
                                 .map(item -> toItemResponse(item, skuMap))
@@ -90,6 +94,14 @@ public class ReceivingOrderService {
 
                 int totalLines = itemResponses.size();
                 BigDecimal totalQty = items.stream()
+                                .map(ReceivingItemEntity::getReceivedQty)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal totalOkQty = items.stream()
+                                .filter(i -> "PASS".equalsIgnoreCase(i.getCondition()))
+                                .map(ReceivingItemEntity::getReceivedQty)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal totalDamagedQty = items.stream()
+                                .filter(i -> "FAIL".equalsIgnoreCase(i.getCondition()))
                                 .map(ReceivingItemEntity::getReceivedQty)
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
@@ -114,8 +126,14 @@ public class ReceivingOrderService {
                                 .confirmedBy(order.getConfirmedBy())
                                 .confirmedByName(confirmedByName)
                                 .confirmedAt(order.getConfirmedAt())
+                                .rejectedBy(order.getRejectedBy())
+                                .rejectedByName(rejectedByName)
+                                .rejectedAt(order.getRejectedAt())
+                                .rejectReason(order.getRejectReason())
                                 .totalLines(totalLines)
                                 .totalQty(totalQty)
+                                .totalOkQty(totalOkQty)
+                                .totalDamagedQty(totalDamagedQty)
                                 .items(itemResponses)
                                 .build();
 
@@ -152,6 +170,34 @@ public class ReceivingOrderService {
 
                 log.info("GRN {} approved by managerId={}", order.getReceivingCode(), managerId);
                 return ApiResponse.success("GRN approved successfully", getOrder(id).getData());
+        }
+
+        // ─── Reject ────────────────────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<ReceivingOrderResponse> reject(Long id, String reason, Long userId) {
+                ReceivingOrderEntity order = findOrder(id);
+
+                // Chỉ cho phép reject khi đang ở trạng thái SUBMITTED hoặc APPROVED
+                if (!"SUBMITTED".equals(order.getStatus()) && !"APPROVED".equals(order.getStatus())) {
+                        throw new RuntimeException(
+                                        "Cannot reject GRN in status '" + order.getStatus()
+                                                        + "'. Only SUBMITTED or APPROVED GRN can be rejected.");
+                }
+
+                if (reason == null || reason.isBlank()) {
+                        throw new RuntimeException("Reject reason is required");
+                }
+
+                order.setStatus("REJECTED");
+                order.setRejectedBy(userId);
+                order.setRejectedAt(LocalDateTime.now());
+                order.setRejectReason(reason);
+                order.setUpdatedAt(LocalDateTime.now());
+                receivingOrderRepo.save(order);
+
+                log.info("GRN {} rejected by userId={}, reason: {}", order.getReceivingCode(), userId, reason);
+                return ApiResponse.success("GRN rejected successfully", getOrder(id).getData());
         }
 
         // ─── Post ──────────────────────────────────────────────────────────────────
@@ -273,7 +319,10 @@ public class ReceivingOrderService {
                 }
         }
 
-        /** Response tối giản (list, submit, approve, post) — không cần JOIN. */
+        /**
+         * Response tối giản (list, submit, approve, post, reject) — không cần JOIN
+         * nặng.
+         */
         private ReceivingOrderResponse toSummaryResponse(ReceivingOrderEntity o) {
                 String createdByName = o.getCreatedBy() != null
                                 ? userRepo.findById(o.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
@@ -283,6 +332,9 @@ public class ReceivingOrderService {
                                 : null;
                 String confirmedByName = o.getConfirmedBy() != null
                                 ? userRepo.findById(o.getConfirmedBy()).map(UserEntity::getFullName).orElse(null)
+                                : null;
+                String rejectedByName = o.getRejectedBy() != null
+                                ? userRepo.findById(o.getRejectedBy()).map(UserEntity::getFullName).orElse(null)
                                 : null;
 
                 return ReceivingOrderResponse.builder()
@@ -304,6 +356,10 @@ public class ReceivingOrderService {
                                 .confirmedBy(o.getConfirmedBy())
                                 .confirmedByName(confirmedByName)
                                 .confirmedAt(o.getConfirmedAt())
+                                .rejectedBy(o.getRejectedBy())
+                                .rejectedByName(rejectedByName)
+                                .rejectedAt(o.getRejectedAt())
+                                .rejectReason(o.getRejectReason())
                                 .build();
         }
 
@@ -320,6 +376,8 @@ public class ReceivingOrderService {
                                 .expiryDate(item.getExpiryDate())
                                 .manufactureDate(item.getManufactureDate())
                                 .note(item.getNote())
+                                .condition(item.getCondition())
+                                .reasonCode(item.getReasonCode())
                                 .build();
         }
 }

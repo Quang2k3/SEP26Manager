@@ -457,6 +457,9 @@ CREATE TABLE receiving_orders (
     approved_at TIMESTAMP,
     confirmed_by BIGINT REFERENCES users(user_id),
     confirmed_at TIMESTAMP,
+    rejected_by BIGINT REFERENCES users(user_id),
+    rejected_at TIMESTAMP,
+    reject_reason TEXT,
     note TEXT,
     UNIQUE(warehouse_id, receiving_code)
 );
@@ -1038,7 +1041,8 @@ INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, di
 ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'APPROVED', 'Approved', 'Đã duyệt', 3, '#007bff', false),
 ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'POSTED', 'Posted', 'Đã ghi nhận', 4, '#28a745', false),
 ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'PUTAWAY_DONE', 'Putaway Done', 'Đã cất kho', 5, '#20c997', true),
-((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'CANCELLED', 'Cancelled', 'Đã hủy', 6, '#dc3545', true);
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'CANCELLED', 'Cancelled', 'Đã hủy', 6, '#dc3545', true),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'REJECTED', 'Rejected', 'Bị từ chối', 7, '#dc3545', true);
 
 -- SALES_ORDER_STATUS
 INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 
@@ -1107,7 +1111,7 @@ INSERT INTO roles (role_code, role_name, description, active)
 VALUES
   ('MANAGER',     'Warehouse Manager', 'Manage warehouse operations', true),
   ('KEEPER',      'Warehouse Keeper',  'Daily warehouse operations',  true),
-  ('ACCOUNTANT',  'Accountant',        'Financial and reporting',     true)
+  ('QC',          'Quality Control',   'Quality checking and posting', true)
 ON CONFLICT (role_code) DO NOTHING;
 
 
@@ -1138,7 +1142,7 @@ VALUES
    (SELECT role_id FROM roles WHERE role_code = 'KEEPER')),
 
   ((SELECT user_id FROM users WHERE email = 'tranhoang1112003@gmail.com'),
-   (SELECT role_id FROM roles WHERE role_code = 'ACCOUNTANT'))
+   (SELECT role_id FROM roles WHERE role_code = 'QC'))
 ON CONFLICT (user_id, role_id) DO NOTHING;
 
 
@@ -1248,3 +1252,58 @@ INSERT INTO suppliers (supplier_code, supplier_name, phone, email, active)
 VALUES
   ('SUP001', 'Công ty TNHH SWAT', '0281234567', 'supply@swat.vn', true)
 ON CONFLICT (supplier_code) DO NOTHING;
+
+
+-- ============================================================
+-- MIGRATION: Add condition/reasonCode to receiving_items
+-- and receiving_id to incidents for Gate Check flow.
+-- Safe to re-run (uses IF NOT EXISTS logic).
+-- ============================================================
+
+-- 1) Add condition and reason_code columns to receiving_items
+ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS condition VARCHAR(20) DEFAULT 'PASS';
+ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS reason_code VARCHAR(100);
+
+-- 2) Add receiving_id FK to incidents (links incident to a receiving order)
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS receiving_id BIGINT REFERENCES receiving_orders(receiving_id);
+CREATE INDEX IF NOT EXISTS idx_incident_receiving ON incidents(receiving_id) WHERE receiving_id IS NOT NULL;
+
+-- 3) Add new enum values for incident types
+INSERT INTO enum_types (enum_type_code, enum_type_name, description)
+VALUES ('INCIDENT_TYPE', 'Incident Type', 'Types of gate check incidents')
+ON CONFLICT (enum_type_code) DO NOTHING;
+
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code)
+VALUES
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'SEAL_BROKEN', 'Seal Broken', 'Kẹp chì bị đứt', 1, '#dc3545'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'SEAL_MISMATCH', 'Seal Mismatch', 'Số seal không khớp', 2, '#fd7e14'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'PACKAGING_DAMAGE', 'Packaging Damage', 'Hư hỏng bao bì xe', 3, '#ffc107'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'OTHER', 'Other', 'Khác', 4, '#6c757d')
+ON CONFLICT (enum_type_id, value_code) DO NOTHING;
+
+-- 4) Add new enum values for non-conformance reason codes (FAIL reasons)
+INSERT INTO enum_types (enum_type_code, enum_type_name, description)
+VALUES ('NC_REASON', 'Non-Conformance Reason', 'Reason codes for item failures during receiving')
+ON CONFLICT (enum_type_code) DO NOTHING;
+
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code)
+VALUES
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'NC_REASON'), 'LEAK', 'Leak', 'Rò rỉ', 1, '#dc3545'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'NC_REASON'), 'TORN_PACKAGING', 'Torn Packaging', 'Rách bao bì', 2, '#fd7e14'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'NC_REASON'), 'DENTED', 'Dented', 'Móp méo', 3, '#ffc107'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'NC_REASON'), 'EXPIRED', 'Expired', 'Hết hạn sử dụng', 4, '#dc3545'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'NC_REASON'), 'WRONG_PRODUCT', 'Wrong Product', 'Sai sản phẩm', 5, '#17a2b8'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'NC_REASON'), 'OTHER', 'Other', 'Khác', 6, '#6c757d')
+ON CONFLICT (enum_type_id, value_code) DO NOTHING;
+
+-- 5) Add enum values for QC decision types
+INSERT INTO enum_types (enum_type_code, enum_type_name, description)
+VALUES ('QC_DECISION', 'QC Decision', 'Manager decisions for QC failed items')
+ON CONFLICT (enum_type_code) DO NOTHING;
+
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code)
+VALUES
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'QC_DECISION'), 'SCRAP', 'Scrap', 'Tiêu hủy', 1, '#dc3545'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'QC_DECISION'), 'RETURN', 'Return to Supplier', 'Trả hàng', 2, '#fd7e14'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'QC_DECISION'), 'DOWNGRADE', 'Downgrade / Salvage', 'Thanh lý', 3, '#ffc107')
+ON CONFLICT (enum_type_id, value_code) DO NOTHING;

@@ -45,6 +45,9 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
+
+        // Sử dụng allowedOriginPatterns("*") kết hợp với allowCredentials(true)
+        // sẽ tự động reflect Origin của request về response, đáp ứng yêu cầu của Axios.
         config.setAllowedOriginPatterns(List.of("*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
@@ -67,6 +70,7 @@ public class SecurityConfig {
                         // Public endpoints
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(
+                                "/auth/**",
                                 "/api/auth/**",
                                 "/api/v1/auth/**",
                                 "/v1/auth/**",
@@ -78,7 +82,9 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/api/swagger-ui/**",
                                 "/v3/api-docs/**",
-                                "/api/v3/api-docs/**")
+                                "/api/v3/api-docs/**",
+                                "/v1/health",
+                                "/v1/health/**")
                         .permitAll()
                         // Scan events — requires KEEPER role (iPhone scanner)
                         .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasRole("KEEPER")
