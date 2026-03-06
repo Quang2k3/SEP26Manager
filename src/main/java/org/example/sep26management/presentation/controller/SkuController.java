@@ -91,7 +91,7 @@ public class SkuController {
     @PreAuthorize("hasRole('MANAGER')")
     @Operation(summary = "Cấu hình ngưỡng tồn kho (Manager)",
             description = "Set minQty và maxQty cho SKU. "
-                    )
+    )
     public ResponseEntity<ApiResponse<SkuThresholdResponse>> configureThreshold(
             @PathVariable Long skuId,
             @Valid @RequestBody ConfigureSkuThresholdRequest request,
@@ -154,7 +154,13 @@ public class SkuController {
 
     @PatchMapping("/{skuId}/assign-category")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
-    @Operation(summary = "Gán category cho SKU", description = "Gán/thay đổi category của SKU. Việc thay đổi category sẽ ảnh hưởng đến zone gợi ý khi putaway.")
+    @Operation(summary = "Gán category cho SKU",
+            description = "Gán/thay đổi category của SKU.\n\n"
+                    + "**Data yêu cầu:**\n"
+                    + "- `@PathVariable skuId`: ID của SKU — lấy từ kết quả tìm kiếm SKU (`GET /v1/skus/search`).\n"
+                    + "- `Body.categoryCode`: Mã category — **LẤY TỪ** API `GET /v1/categories` (field `categoryCode`). "
+                    + "FE hiển thị `categoryName` cho người dùng chọn, sau đó gửi `categoryCode` lên đây. BE tự resolve ra `categoryId` nội bộ.\n\n"
+                    + "👉 Việc thay đổi category sẽ ảnh hưởng đến zone gợi ý khi putaway.")
     public ResponseEntity<ApiResponse<SkuResponse>> assignCategoryToSku(
             @PathVariable Long skuId,
             @Valid @RequestBody AssignCategoryToSkuRequest request,

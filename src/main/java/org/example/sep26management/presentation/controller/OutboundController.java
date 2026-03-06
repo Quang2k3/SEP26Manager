@@ -59,12 +59,16 @@ public class OutboundController {
     @Operation(summary = "Tạo lệnh xuất kho (DRAFT)", description = "Tạo một lệnh xuất kho mới (Sales Order hoặc Internal Transfer).\n\n"
             + "**Data yêu cầu:** \n"
             + "- `Body.orderType`: Chọn `SALES_ORDER` hoặc `INTERNAL_TRANSFER`.\n"
-            + "- `Body.targetCode`: Mã đơn tham chiếu (VD: SO-2023-001).\n"
-            + "- `Body.lines`: Danh sách các món hàng (skuId) và số lượng cần xuất (expectedQty).\n\n"
+            + "- `Body.customerCode`: Mã khách hàng — **LẤY TỪ** API `GET /v1/customers`. FE hiển thị tên, gửi mã code. (Bắt buộc nếu `SALES_ORDER`).\n"
+            + "- `Body.destinationWarehouseCode`: Mã kho đích — **LẤY TỪ** API `GET /v1/warehouses`. (Bắt buộc nếu `INTERNAL_TRANSFER`).\n"
+            + "- `Body.items`: Danh sách các món hàng (`skuCode` hoặc `skuId`) và số lượng cần xuất (`quantity`).\n\n"
+            + "👉 **Lưu ý:** `warehouseId` (kho nguồn) được lấy tự động từ JWT token — FE **không cần truyền** vào.\n\n"
             + "👉 **Kết quả:** Trả về 1 lệnh xuất có trạng thái `DRAFT` và kèm theo thuộc tính `documentId` (Hay còn gọi là **Outbound ID**). FE sẽ DÙNG `documentId` này cho tất cả các bước tiếp theo.")
     public ResponseEntity<ApiResponse<OutboundResponse>> createOutbound(
             @Valid @RequestBody CreateOutboundRequest request,
             HttpServletRequest http) {
+        // Inject warehouseId from JWT — FE does not need to send this
+        request.setWarehouseId(getWarehouseId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(outboundService.createOutbound(request, getUserId(), getIp(http), ua(http)));
     }
@@ -74,7 +78,12 @@ public class OutboundController {
     // ─────────────────────────────────────────────────────────────
     @PutMapping("/sales-orders/{soId}")
     @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Cập nhật đơn bán hàng (Keeper)", description = "Cập nhật yêu cầu xuất kho loại Đơn Bán Hàng (SO) đang ở trạng thái DRAFT hoặc REJECTED.")
+    @Operation(summary = "Cập nhật đơn bán hàng (Keeper)",
+            description = "Cập nhật yêu cầu xuất kho loại Đơn Bán Hàng (SO) đang ở trạng thái DRAFT.\n\n"
+                    + "**Data yêu cầu:**\n"
+                    + "- `@PathVariable soId`: Mã **Outbound ID** (lấy từ danh sách `GET /v1/outbound`, field `documentId`).\n"
+                    + "- `Body.customerCode` (tuỳ chọn): Mã khách hàng mới — **LẤY TỪ** `GET /v1/customers`.\n"
+                    + "- `Body.items`: Danh sách hàng cần cập nhật.")
     public ResponseEntity<ApiResponse<OutboundResponse>> updateSalesOrder(
             @PathVariable Long soId,
             @Valid @RequestBody UpdateOutboundRequest request,
@@ -85,7 +94,12 @@ public class OutboundController {
 
     @PutMapping("/transfers/{transferId}")
     @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Cập nhật đơn chuyển kho (Keeper)", description = "Cập nhật yêu cầu xuất kho loại Chuyển Kho (Transfer) đang ở trạng thái DRAFT hoặc REJECTED.")
+    @Operation(summary = "Cập nhật đơn chuyển kho (Keeper)",
+            description = "Cập nhật yêu cầu xuất kho loại Chuyển Kho (Transfer) đang ở trạng thái DRAFT.\n\n"
+                    + "**Data yêu cầu:**\n"
+                    + "- `@PathVariable transferId`: Mã **Outbound ID** (lấy từ danh sách `GET /v1/outbound`, field `documentId`).\n"
+                    + "- `Body.destinationWarehouseCode` (tuỳ chọn): Mã kho đích mới — **LẤY TỪ** `GET /v1/warehouses`.\n"
+                    + "- `Body.items`: Danh sách hàng cần cập nhật.")
     public ResponseEntity<ApiResponse<OutboundResponse>> updateTransfer(
             @PathVariable Long transferId,
             @Valid @RequestBody UpdateOutboundRequest request,
@@ -152,11 +166,10 @@ public class OutboundController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Danh sách lệnh xuất kho", description = "Lấy danh sách các đơn xuất kho để hiển thị lên bảng.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `Query.warehouseId` (**RẤT QUAN TRỌNG**): Lấy từ API `GET /v1/auth/me` (property `warehouseIds` mục đầu tiên).\n"
-            + "- Các params khác: `status`, `orderType`, `keyword` dùng để làm bộ lọc Filter.\n\n"
-            + "👉 **Kết quả:** Trả về danh sách. FE lấy thuộc tính `documentId` ở mỗi dòng để thao tác các tính năng detail, submit, approve...")
+            + "- `warehouseId` được lấy **tự động từ JWT token** — FE **không cần truyền**.\n"
+            + "- Các params tuỳ chọn: `status`, `orderType`, `keyword` dùng để filter.\n\n"
+            + "👉 **Kết quả:** Trả về danh sách. FE lấy thuộc tính `documentId` ở mỗi dòng để thao tác detail, submit, approve...")
     public ResponseEntity<ApiResponse<PageResponse<OutboundListResponse>>> listOutbound(
-            @RequestParam Long warehouseId,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) OutboundType orderType,
             @RequestParam(required = false) String keyword,
@@ -166,6 +179,7 @@ public class OutboundController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
+        Long warehouseId = getWarehouseId(); // auto-resolved from JWT
         String role = getCurrentRole();
         return ResponseEntity.ok(outboundListService.listOutbound(
                 warehouseId, status, orderType, keyword, createdBy,
@@ -174,9 +188,9 @@ public class OutboundController {
 
     @GetMapping("/summary")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Thống kê tình trạng lệnh xuất", description = "Lấy dữ liệu thống kê số lượng đơn lệnh xuất theo trạng thái (DRAFT, APPROVED, ALLOCATING...), hỗ trợ hiển thị biểu đồ.")
-    public ResponseEntity<ApiResponse<OutboundSummaryResponse>> getSummary(
-            @RequestParam Long warehouseId) {
+    @Operation(summary = "Thống kê tình trạng lệnh xuất", description = "Lấy dữ liệu thống kê số lượng đơn lệnh xuất theo trạng thái. warehouseId lấy tự động từ JWT.")
+    public ResponseEntity<ApiResponse<OutboundSummaryResponse>> getSummary() {
+        Long warehouseId = getWarehouseId();
         return ResponseEntity.ok(outboundListService.getSummary(warehouseId));
     }
 
@@ -205,10 +219,13 @@ public class OutboundController {
     // ─────────────────────────────────────────────────────────────
     @PostMapping("/pick-list")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
-    @Operation(summary = "Tạo lộ trình đi lấy hàng (Generate Pick List)", description = "Gom những đơn đã Khóa hàng ở trên để in ra 1 tờ giấy (điện tử) chỉ đường cho nhân viên đi lấy hàng.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `Body.outboundIds`: Bản chất là mảng List UUID của các Đơn Xuất (FE hay cho người dùng tick checkbox nhiều dòng rồi nhấn Nút Tạo Pick List. Truyền mảng các ID đó vào đây).\n"
-            + "👉 **Kết quả:** Trả về 1 cái mã `taskId` (Mã Pick List). FE giữ `taskId` này để nhân viên mở danh sách lấy hàng chi tiết bằng API bên dưới.")
+    @Operation(summary = "Tạo lộ trình đi lấy hàng (Generate Pick List)",
+            description = "Gom những đơn đã Khóa hàng để in ra 1 tờ giấy (điện tử) chỉ đường cho nhân viên đi lấy hàng.\n\n"
+                    + "**Data yêu cầu:** \n"
+                    + "- `Body.documentId`: Mã **Outbound ID** — **LẤY TỪ** danh sách `GET /v1/outbound` (field `documentId`). Đây là đơn đã Allocate.\n"
+                    + "- `Body.orderType`: `SALES_ORDER` hoặc `INTERNAL_TRANSFER`.\n"
+                    + "- `Body.assignedTo` (tuỳ chọn): ID nhân viên được phân công lấy hàng.\n\n"
+                    + "👉 **Kết quả:** Trả về 1 cái mã `pickingTaskId` (Mã Pick List). FE giữ `pickingTaskId` này để nhân viên mở danh sách lấy hàng chi tiết bằng API bên dưới.")
     public ResponseEntity<ApiResponse<PickListResponse>> generatePickList(
             @Valid @RequestBody GeneratePickListRequest request,
             HttpServletRequest http) {
@@ -245,6 +262,24 @@ public class OutboundController {
                 return Long.parseLong(uid.toString());
         }
         throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
+    }
+
+    private Long getWarehouseId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null)
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        Object details = auth.getDetails();
+        if (details instanceof Map<?, ?> map) {
+            Object raw = map.get("warehouseIds");
+            if (raw instanceof List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long l)    return l;
+                if (first instanceof Integer i) return i.longValue();
+                if (first instanceof Number n)  return n.longValue();
+                if (first != null)              return Long.parseLong(first.toString());
+            }
+        }
+        throw new RuntimeException("Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
     }
 
     private String getCurrentRole() {

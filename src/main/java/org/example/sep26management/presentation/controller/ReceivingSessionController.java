@@ -91,9 +91,9 @@ public class ReceivingSessionController {
     @Operation(summary = "Tạo GRN từ session", description = "Chốt danh sách các mặt hàng đã quét, đóng session và chuyển hóa thành Phiếu Nhập Kho (GRN) trạng thái DRAFT. \n\n"
             + "**Data yêu cầu:** \n"
             + "- `@PathVariable sessionId`: UUID của session đang quét.\n"
-            + "- `Body.supplierId`: Mã Nhà Cung Cấp, **LẤY TỪ** Dropdown danh sách supplier người dùng chọn trên giao diện nhập hàng.\n"
-            + "- `Body.receivingCode`: Mã kiện/Bill (Ví dụ: PO-001, ngươì dùng tự nhập bằng tay).\n\n"
-            + "👉 **Kết quả trả về:** Dữ liệu chứa thuộc tính `id` (Đây là mã **ORDER ID / GRN ID** số nguyên dương liên kết với kho data). **FE lưu LẠI `id` này** để submit và duyệt đơn ở màn hình tiếp theo.")
+            + "- `Body.supplierCode`: Mã Nhà Cung Cấp — **LẤY TỪ** API `GET /v1/suppliers` (field `supplierCode`). FE hiển thị `supplierName` để người dùng chọn, sau đó gửi `supplierCode` lên đây. BE tự resolve ra `supplierId` nội bộ.\n"
+            + "- `Body.sourceReferenceCode`: Mã kiện/Bill (Ví dụ: PO-001, người dùng tự nhập tay).\n\n"
+            + "👉 **Kết quả trả về:** Dữ liệu chứa thuộc tính `receivingId` (Đây là mã **ORDER ID / GRN ID**). **FE lưu LẠI `receivingId` này** để submit và duyệt đơn ở màn hình tiếp theo.")
     public ApiResponse<Map<String, Object>> createGrn(
             @PathVariable String sessionId,
             @Valid @RequestBody CreateGrnRequest request,

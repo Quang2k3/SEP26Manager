@@ -19,7 +19,12 @@ public class CreateGrnRequest {
     @NotBlank(message = "sourceType is required")
     private String sourceType;
 
-    private Long supplierId;
+    /**
+     * Mã nhà cung cấp (supplierCode) — FE lấy từ dropdown danh sách supplier.
+     * BE sẽ tự tra cứu supplierId từ supplierCode này.
+     * Ví dụ: "SUP-001"
+     */
+    private String supplierCode;
     private String sourceReferenceCode;
 
     /** Lot number applied to all scan lines */

@@ -237,33 +237,34 @@ public class SkuService {
             String ipAddress,
             String userAgent) {
 
-        log.info(LogMessages.SKU_ASSIGNING_CATEGORY, skuId, request.getCategoryId());
+        log.info(LogMessages.SKU_ASSIGNING_CATEGORY, skuId, request.getCategoryCode());
 
         SkuEntity sku = skuJpaRepository.findByIdWithCategory(skuId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.SKU_NOT_FOUND, skuId)));
 
-        CategoryEntity category = categoryRepository.findById(request.getCategoryId())
+        // BE tự resolve categoryId từ categoryCode — FE chỉ cần truyền categoryCode
+        CategoryEntity category = categoryRepository.findByCategoryCode(request.getCategoryCode())
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.CATEGORY_NOT_FOUND, request.getCategoryId())));
+                        "Category not found with code: " + request.getCategoryCode()));
 
         if (!category.getActive()) {
             throw new BusinessException(MessageConstants.SKU_CATEGORY_INACTIVE);
         }
 
         Long currentCategoryId = (sku.getCategory() != null) ? sku.getCategory().getCategoryId() : null;
-        if (request.getCategoryId().equals(currentCategoryId)) {
+        if (category.getCategoryId().equals(currentCategoryId)) {
             throw new BusinessException(MessageConstants.SKU_SAME_CATEGORY);
         }
 
         sku.setCategory(category);
         SkuEntity updatedSku = skuJpaRepository.save(sku);
 
-        log.info(LogMessages.SKU_CATEGORY_ASSIGNED, skuId, request.getCategoryId());
+        log.info(LogMessages.SKU_CATEGORY_ASSIGNED, skuId, category.getCategoryId());
 
         auditLogService.logAction(
                 updatedBy, "SKU_CATEGORY_ASSIGNED", "SKU", skuId,
-                "SKU " + sku.getSkuCode() + " category: " + currentCategoryId + " -> " + request.getCategoryId(),
+                "SKU " + sku.getSkuCode() + " category: " + currentCategoryId + " -> " + category.getCategoryId(),
                 ipAddress, userAgent);
 
         return ApiResponse.success(MessageConstants.SKU_CATEGORY_ASSIGNED_SUCCESS,

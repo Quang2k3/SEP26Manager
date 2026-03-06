@@ -19,12 +19,18 @@ import java.util.List;
 public class UpdateOutboundRequest {
 
     // ─── Sales Order updatable fields ───
-    private Long customerId;
+    /**
+     * Mã khách hàng (customerCode) — FE lấy từ dropdown. BE tự resolve ra customerId.
+     */
+    private String customerCode;
     private LocalDate deliveryDate;   // BR-OUT-02: >= today
     private String referenceOrderCode;
 
     // ─── Internal Transfer updatable fields ───
-    private Long destinationWarehouseId;
+    /**
+     * Mã kho đích (warehouseCode) — FE lấy từ dropdown. BE tự resolve ra destinationWarehouseId.
+     */
+    private String destinationWarehouseCode;
     private String transferReason;
     private String receiverName;
     private String receiverPhone;
