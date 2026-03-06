@@ -56,8 +56,12 @@ public class OutboundController {
     // ─────────────────────────────────────────────────────────────
     @PostMapping
     @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Tạo lệnh xuất kho (Keeper)", description = "Keeper tạo Lệnh xuất kho tĩnh trạng thái DRAFT. Loại lệnh: SALES_ORDER hoặc INTERNAL_TRANSFER. "
-            + "Bao gồm thông tin chung và danh sách hàng hóa (line items).")
+    @Operation(summary = "Tạo lệnh xuất kho (DRAFT)", description = "Tạo một lệnh xuất kho mới (Sales Order hoặc Internal Transfer).\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Body.orderType`: Chọn `SALES_ORDER` hoặc `INTERNAL_TRANSFER`.\n"
+            + "- `Body.targetCode`: Mã đơn tham chiếu (VD: SO-2023-001).\n"
+            + "- `Body.lines`: Danh sách các món hàng (skuId) và số lượng cần xuất (expectedQty).\n\n"
+            + "👉 **Kết quả:** Trả về 1 lệnh xuất có trạng thái `DRAFT` và kèm theo thuộc tính `documentId` (Hay còn gọi là **Outbound ID**). FE sẽ DÙNG `documentId` này cho tất cả các bước tiếp theo.")
     public ResponseEntity<ApiResponse<OutboundResponse>> createOutbound(
             @Valid @RequestBody CreateOutboundRequest request,
             HttpServletRequest http) {
@@ -95,7 +99,10 @@ public class OutboundController {
     // ─────────────────────────────────────────────────────────────
     @PatchMapping("/sales-orders/{soId}/submit")
     @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Trình duyệt đơn bán hàng (Keeper)", description = "Gửi Đơn bán hàng (SO) yêu cầu Manager duyệt. Chuyển trạng thái từ DRAFT/REJECTED sang SUBMITTED.")
+    @Operation(summary = "Trình duyệt lệnh xuất (Submit)", description = "Nhân viên gửi lệnh xuất kho lên cho Manager duyệt.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã **Outbound ID** (Lấy từ bảng danh sách hoặc từ lúc tạo DRAFT). \n"
+            + "👉 Trạng thái chuyển từ `DRAFT` thành `SUBMITTED`.")
     public ResponseEntity<ApiResponse<OutboundResponse>> submitSalesOrder(
             @PathVariable Long soId,
             @RequestBody(required = false) SubmitOutboundRequest request,
@@ -124,7 +131,10 @@ public class OutboundController {
     // ─────────────────────────────────────────────────────────────
     @PatchMapping("/sales-orders/{soId}/approve")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Duyệt lệnh xuất kho (Manager)", description = "Manager duyệt lệnh xuất kho. Chuyển trạng thái từ SUBMITTED sang APPROVED.")
+    @Operation(summary = "Duyệt lệnh xuất kho (Manager)", description = "Manager đồng ý cho phép xuất lô hàng này.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã **Outbound ID**.\n"
+            + "👉 Trạng thái chuyển từ `SUBMITTED` thành `APPROVED`.")
     public ResponseEntity<ApiResponse<OutboundResponse>> approveOutbound(
             @PathVariable Long soId,
             @Valid @RequestBody ApproveOutboundRequest request,
@@ -140,7 +150,11 @@ public class OutboundController {
     // ─────────────────────────────────────────────────────────────
     @GetMapping
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Danh sách lệnh xuất", description = "Lấy danh sách các lệnh xuất kho theo warehouse. Có thể lọc theo status, loại đơn (orderType), ngày, người tạo...")
+    @Operation(summary = "Danh sách lệnh xuất kho", description = "Lấy danh sách các đơn xuất kho để hiển thị lên bảng.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.warehouseId` (**RẤT QUAN TRỌNG**): Lấy từ API `GET /v1/auth/me` (property `warehouseIds` mục đầu tiên).\n"
+            + "- Các params khác: `status`, `orderType`, `keyword` dùng để làm bộ lọc Filter.\n\n"
+            + "👉 **Kết quả:** Trả về danh sách. FE lấy thuộc tính `documentId` ở mỗi dòng để thao tác các tính năng detail, submit, approve...")
     public ResponseEntity<ApiResponse<PageResponse<OutboundListResponse>>> listOutbound(
             @RequestParam Long warehouseId,
             @RequestParam(required = false) String status,
@@ -172,7 +186,11 @@ public class OutboundController {
     // ─────────────────────────────────────────────────────────────
     @PostMapping("/allocate")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
-    @Operation(summary = "Phân bổ tồn kho (Allocate)", description = "Mô phỏng/thực hiện kiểm tra và khoá (reserve) hàng hóa trên BIN để chuyển bị Picking. Cập nhật số lượng ALLOCATED cho các line item.")
+    @Operation(summary = "Giữ/Khóa Hàng (Allocate Stock)", description = "Đây là bước TỰ ĐỘNG CẦN THIẾT trước khi đi lấy hàng. Hệ thống quét kho và khóa số lượng tồn thực tế lại để đơn này không bị thiếu hàng.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Body.documentId`: Chính là cái mã **Outbound ID** (lấy từ Lệnh Xuất đã Approved).\n"
+            + "- `Body.orderType`: `SALES_ORDER` hoặc `INTERNAL_TRANSFER`.\n"
+            + "👉 **Kết quả:** Tồn kho (Inventory) chuyển từ AVAILABLE sang ALLOCATED.")
     public ResponseEntity<ApiResponse<AllocateStockResponse>> allocateStock(
             @Valid @RequestBody AllocateStockRequest request,
             HttpServletRequest http) {
@@ -187,8 +205,10 @@ public class OutboundController {
     // ─────────────────────────────────────────────────────────────
     @PostMapping("/pick-list")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
-    @Operation(summary = "Tạo lệnh lấy hàng (Pick List)", description = "Chuyển các mặt hàng đã được cấp phát (Allocated) thành danh sách chỉ đạo lấy hàng trên từng vị trí BIN cụ thể cho Keeper. "
-            + "Có thể nhóm nhiều lệnh xuất chung để tối ưu đường đi.")
+    @Operation(summary = "Tạo lộ trình đi lấy hàng (Generate Pick List)", description = "Gom những đơn đã Khóa hàng ở trên để in ra 1 tờ giấy (điện tử) chỉ đường cho nhân viên đi lấy hàng.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Body.outboundIds`: Bản chất là mảng List UUID của các Đơn Xuất (FE hay cho người dùng tick checkbox nhiều dòng rồi nhấn Nút Tạo Pick List. Truyền mảng các ID đó vào đây).\n"
+            + "👉 **Kết quả:** Trả về 1 cái mã `taskId` (Mã Pick List). FE giữ `taskId` này để nhân viên mở danh sách lấy hàng chi tiết bằng API bên dưới.")
     public ResponseEntity<ApiResponse<PickListResponse>> generatePickList(
             @Valid @RequestBody GeneratePickListRequest request,
             HttpServletRequest http) {
@@ -198,7 +218,10 @@ public class OutboundController {
 
     @GetMapping("/pick-list/{taskId}")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
-    @Operation(summary = "Chi tiết lệnh lấy hàng", description = "Tìm và trả về danh sách các sản phẩm (Pick lines) kèm gợi ý vị trí BIN mà Keeper cần đến để quét và lấy.")
+    @Operation(summary = "Đọc danh sách Lấy hàng (Chi tiết Pick List)", description = "Xem và đi nhặt hàng theo sự chỉ dẫn.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable taskId`: Mã **Pick List Task ID** lấy từ response lúc tạo mới ở trên.\n"
+            + "👉 **Kết quả:** Trả về 1 list báo cho thủ kho biết: Hãy đến kệ Z-HC lấy 2 cái điện thoại ra đây đóng gói.")
     public ResponseEntity<ApiResponse<PickListResponse>> getPickList(
             @PathVariable Long taskId) {
         return ResponseEntity.ok(pickListService.getPickList(taskId));
