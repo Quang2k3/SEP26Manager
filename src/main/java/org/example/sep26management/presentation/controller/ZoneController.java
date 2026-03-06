@@ -45,15 +45,21 @@ public class ZoneController {
 
     @PostMapping
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Tạo zone mới (Manager)", description = "Tạo zone trong warehouse. zoneCode phải unique trong warehouse. "
-            + "Convention: zoneCode = 'Z-' + categoryCode (ví dụ: Z-HC cho category HC).")
+    @Operation(summary = "Tạo zone mới (Manager)",
+            description = "Tạo zone trong warehouse. zoneCode phải unique trong warehouse. "
+                    + "Convention: zoneCode = 'Z-' + categoryCode (ví dụ: Z-HC cho category HC). "
+                    )
     public ResponseEntity<ApiResponse<ZoneResponse>> createZone(
             @Valid @RequestBody CreateZoneRequest request,
             HttpServletRequest httpRequest) {
 
-        Long userId = getCurrentUserId();
+        Long userId      = getCurrentUserId();
+        Long warehouseId = getCurrentWarehouseId();
+
         ApiResponse<ZoneResponse> response = zoneService.createZone(
-                request, userId,
+                request,
+                warehouseId,
+                userId,
                 getClientIpAddress(httpRequest),
                 httpRequest.getHeader("User-Agent"));
 
@@ -62,16 +68,18 @@ public class ZoneController {
 
     // ─────────────────────────────────────────────────────────────
     // List Zones by warehouse
-    // GET /api/v1/zones?warehouseId=1&activeOnly=true
+    // GET /api/v1/zones?activeOnly=true
+    // warehouseId lấy từ JWT token (không cần truyền vào param)
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Danh sách zones", description = "Lấy danh sách zones trong warehouse. Có thể lọc chỉ zone active.")
+    @Operation(summary = "Danh sách zones", description = "Lấy danh sách zones trong warehouse. warehouseId lấy tự động từ JWT token. Có thể lọc chỉ zone active.")
     public ResponseEntity<ApiResponse<List<ZoneResponse>>> listZones(
-            @RequestParam Long warehouseId,
-            @RequestParam(defaultValue = "false") Boolean activeOnly) {
+            @RequestParam(defaultValue = "false") Boolean activeOnly,
+            Authentication authentication) {
 
+        Long warehouseId = extractWarehouseId(authentication);
         return ResponseEntity.ok(zoneService.listZones(warehouseId, activeOnly));
     }
 
@@ -79,6 +87,40 @@ public class ZoneController {
     // Helpers
     // ─────────────────────────────────────────────────────────────
 
+    private Long extractWarehouseId(Authentication auth) {
+        if (auth != null && auth.getDetails() instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) auth.getDetails();
+            Object raw = map.get("warehouseIds");
+            if (raw instanceof java.util.List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long) return (Long) first;
+                if (first instanceof Integer) return ((Integer) first).longValue();
+                if (first instanceof Number) return ((Number) first).longValue();
+            }
+        }
+        throw new RuntimeException("Cannot extract warehouseId from token");
+    }
+
+    private Long getCurrentWarehouseId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        Object details = auth.getDetails();
+        if (details instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) details;
+            Object raw = map.get("warehouseIds");
+            if (raw instanceof List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long l)    return l;
+                if (first instanceof Integer i) return i.longValue();
+                if (first instanceof Number n)  return n.longValue();
+                if (first != null)              return Long.parseLong(first.toString());
+            }
+        }
+        throw new RuntimeException(
+                "Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
+    }
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null)

@@ -28,31 +28,33 @@ public class ZoneService {
     // ─────────────────────────────────────────────────────────────
     // UC-LOC-01: Create Zone
     // BR-LOC-01: unique zone_code per warehouse
+    //
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public ApiResponse<ZoneResponse> createZone(
             CreateZoneRequest request,
+            Long warehouseId,       // ← nhận từ controller, extract từ JWT
             Long createdBy,
             String ipAddress,
             String userAgent) {
 
-        log.info("Creating zone: code={}, warehouse={}", request.getZoneCode(), request.getWarehouseId());
+        log.info("Creating zone: code={}, warehouse={}", request.getZoneCode(), warehouseId);
 
         // Validate warehouse exists
-        warehouseRepository.findById(request.getWarehouseId())
+        warehouseRepository.findById(warehouseId)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.WAREHOUSE_NOT_FOUND, request.getWarehouseId())));
+                        String.format(MessageConstants.WAREHOUSE_NOT_FOUND, warehouseId)));
 
         // BR-LOC-01: Duplicate zone code check within warehouse
         String zoneCode = request.getZoneCode().toUpperCase().trim();
-        if (zoneRepository.existsByWarehouseIdAndZoneCode(request.getWarehouseId(), zoneCode)) {
+        if (zoneRepository.existsByWarehouseIdAndZoneCode(warehouseId, zoneCode)) {
             throw new BusinessException(
                     String.format(MessageConstants.ZONE_CODE_DUPLICATE, zoneCode));
         }
 
         ZoneEntity zone = ZoneEntity.builder()
-                .warehouseId(request.getWarehouseId())
+                .warehouseId(warehouseId)
                 .zoneCode(zoneCode)
                 .zoneName(request.getZoneName() != null ? request.getZoneName().trim() : null)
                 .active(true)
@@ -64,13 +66,17 @@ public class ZoneService {
 
         auditLogService.logAction(
                 createdBy, "ZONE_CREATED", "ZONE", saved.getZoneId(),
-                String.format("Zone %s created in warehouse %d", saved.getZoneCode(), saved.getWarehouseId()),
+                String.format("Zone %s created in warehouse %d", saved.getZoneCode(), warehouseId),
                 ipAddress, userAgent);
 
         return ApiResponse.success(MessageConstants.ZONE_CREATED_SUCCESS, toResponse(saved));
     }
 
-    // List zones by warehouse
+    // ─────────────────────────────────────────────────────────────
+    // List Zones by warehouse
+    //
+    // ─────────────────────────────────────────────────────────────
+
     @Transactional(readOnly = true)
     public ApiResponse<List<ZoneResponse>> listZones(Long warehouseId, Boolean activeOnly) {
         List<ZoneEntity> zones = Boolean.TRUE.equals(activeOnly)
@@ -80,6 +86,10 @@ public class ZoneService {
         List<ZoneResponse> responses = zones.stream().map(this::toResponse).toList();
         return ApiResponse.success("Zones retrieved", responses);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────
 
     private ZoneResponse toResponse(ZoneEntity zone) {
         return ZoneResponse.builder()

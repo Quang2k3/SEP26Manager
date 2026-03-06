@@ -16,9 +16,6 @@ import lombok.*;
 @Builder
 public class CreateZoneRequest {
 
-    @NotNull(message = "Warehouse ID is required")
-    private Long warehouseId;
-
     @NotBlank(message = "Zone Code is required")
     @Size(max = 50, message = "Zone Code must not exceed 50 characters")
     private String zoneCode;

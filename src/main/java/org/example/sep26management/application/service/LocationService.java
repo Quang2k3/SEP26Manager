@@ -24,7 +24,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -41,23 +40,25 @@ public class LocationService {
     // UC-LOC-02: Create Location
     // BR-LOC-04: hierarchy Zone → Aisle → Rack → Bin
     // BR-LOC-05: location_code unique within zone
+    //
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public ApiResponse<LocationResponse> createLocation(
             CreateLocationRequest request,
+            Long warehouseId,
             Long createdBy,
             String ipAddress,
             String userAgent) {
 
         log.info("Creating location: code={}, type={}, zone={}, warehouse={}",
                 request.getLocationCode(), request.getLocationType(),
-                request.getZoneId(), request.getWarehouseId());
+                request.getZoneId(), warehouseId);
 
         // Validate warehouse exists
-        warehouseRepository.findById(request.getWarehouseId())
+        warehouseRepository.findById(warehouseId)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.WAREHOUSE_NOT_FOUND, request.getWarehouseId())));
+                        String.format(MessageConstants.WAREHOUSE_NOT_FOUND, warehouseId)));
 
         // Validate zone exists and is active
         var zone = zoneRepository.findById(request.getZoneId())
@@ -79,7 +80,7 @@ public class LocationService {
         validateHierarchy(request.getLocationType(), request.getParentLocationId(), request.getZoneId());
 
         LocationEntity location = LocationEntity.builder()
-                .warehouseId(request.getWarehouseId())
+                .warehouseId(warehouseId)
                 .zoneId(request.getZoneId())
                 .locationCode(request.getLocationCode().toUpperCase().trim())
                 .locationType(request.getLocationType())
@@ -105,7 +106,7 @@ public class LocationService {
                 toResponse(saved, zone.getZoneCode(), null));
     }
 
-// ─────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
     // UC-LOC-03: Update Location
     // BR-LOC-08: location_code immutable
     // BR-LOC-09: new capacity >= current occupied qty
@@ -132,15 +133,14 @@ public class LocationService {
         // BR-LOC-09: new capacity must be >= current occupied qty
         if (request.getMaxWeightKg() != null) {
             var currentQty = locationRepository.getCurrentOccupiedQty(locationId);
-            if (currentQty != null && request.getMaxWeightKg().compareTo(
-                    currentQty) < 0) {
+            if (currentQty != null && request.getMaxWeightKg().compareTo(currentQty) < 0) {
                 throw new BusinessException(MessageConstants.LOCATION_CAPACITY_BELOW_CURRENT);
             }
         }
 
-        // Apply updates (location_code, zone, type, parent NOT in request = protected)
-        if (request.getMaxWeightKg() != null) location.setMaxWeightKg(request.getMaxWeightKg());
-        if (request.getMaxVolumeM3() != null)  location.setMaxVolumeM3(request.getMaxVolumeM3());
+        // Apply updates (locationCode, zone, type, parent are immutable)
+        if (request.getMaxWeightKg() != null)  location.setMaxWeightKg(request.getMaxWeightKg());
+        if (request.getMaxVolumeM3() != null)   location.setMaxVolumeM3(request.getMaxVolumeM3());
         if (request.getIsPickingFace() != null) location.setIsPickingFace(request.getIsPickingFace());
         if (request.getIsStaging() != null)     location.setIsStaging(request.getIsStaging());
 
@@ -153,7 +153,6 @@ public class LocationService {
                 String.format("Location %s updated", updated.getLocationCode()),
                 ipAddress, userAgent);
 
-        // Resolve zone code and parent code for response
         String zoneCode = zoneRepository.findById(updated.getZoneId())
                 .map(z -> z.getZoneCode()).orElse(null);
         String parentCode = resolveParentCode(updated.getParentLocationId());
@@ -207,20 +206,17 @@ public class LocationService {
                 String.format("Location %s deactivated", location.getLocationCode()),
                 ipAddress, userAgent);
 
-        return ApiResponse.success(MessageConstants.LOCATION_DEACTIVATED_SUCCESS);
+        return ApiResponse.success(MessageConstants.LOCATION_DEACTIVATED_SUCCESS, null);
     }
 
     // ─────────────────────────────────────────────────────────────
-    // UC-LOC-05: View Location List
-    // Filter: keyword, locationType, active, zoneId
-    // BR-LOC-16: parent-child relationships visible
-    // BR-LOC-17: inactive locations visible but clearly marked
-    // BR-LOC-18: read-only
+    // UC-LOC-05: List Locations
+    //
     // ─────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public ApiResponse<PageResponse<LocationResponse>> listLocations(
-            Long warehouseId,
+            Long warehouseId,       // ← nhận từ controller, extract từ JWT
             Long zoneId,
             LocationType locationType,
             Boolean active,
@@ -237,7 +233,7 @@ public class LocationService {
         Page<LocationEntity> locationPage = locationRepository.searchLocations(
                 warehouseId, zoneId, locationType, active, kw, pageable);
 
-        // Batch-resolve zone codes and parent codes for response enrichment
+        // Batch-resolve zone codes and parent codes
         Set<Long> zoneIds = locationPage.getContent().stream()
                 .map(LocationEntity::getZoneId).filter(id -> id != null)
                 .collect(Collectors.toSet());
@@ -315,19 +311,16 @@ public class LocationService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.LOCATION_NOT_FOUND, parentLocationId)));
 
-        // Validate parent type matches expected
         if (parent.getLocationType() != expectedParent) {
             throw new BusinessException(
                     String.format(MessageConstants.LOCATION_INVALID_PARENT_TYPE,
                             type.name(), expectedParent.name(), parent.getLocationType().name()));
         }
 
-        // Validate parent is in the same zone
         if (!parent.getZoneId().equals(zoneId)) {
             throw new BusinessException(MessageConstants.LOCATION_PARENT_DIFFERENT_ZONE);
         }
 
-        // Parent must be active
         if (Boolean.FALSE.equals(parent.getActive())) {
             throw new BusinessException(MessageConstants.LOCATION_PARENT_INACTIVE);
         }
