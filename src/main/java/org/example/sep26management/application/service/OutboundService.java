@@ -71,9 +71,10 @@ public class OutboundService {
     }
 
     private OutboundResponse createSalesOrder(CreateOutboundRequest req, Long createdBy, String ip, String ua) {
-        CustomerEntity customer = customerRepository.findById(req.getCustomerId())
+        // BE tự resolve customerId từ customerCode — FE chỉ truyền customerCode
+        CustomerEntity customer = customerRepository.findByCustomerCode(req.getCustomerCode())
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.CUSTOMER_NOT_FOUND, req.getCustomerId())));
+                        "Customer not found with code: " + req.getCustomerCode()));
 
         if (req.getDeliveryDate() != null && req.getDeliveryDate().isBefore(LocalDate.now())) {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
@@ -86,7 +87,7 @@ public class OutboundService {
 
         SalesOrderEntity so = SalesOrderEntity.builder()
                 .warehouseId(req.getWarehouseId())
-                .customerId(req.getCustomerId())
+                .customerId(customer.getCustomerId())
                 .soCode(code)
                 .status("DRAFT")
                 .requiredShipDate(req.getDeliveryDate())
@@ -113,11 +114,12 @@ public class OutboundService {
     }
 
     private OutboundResponse createInternalTransfer(CreateOutboundRequest req, Long createdBy, String ip, String ua) {
-        WarehouseEntity destWarehouse = warehouseRepository.findById(req.getDestinationWarehouseId())
+        // BE tự resolve destinationWarehouseId từ destinationWarehouseCode — FE chỉ truyền code
+        WarehouseEntity destWarehouse = warehouseRepository.findByWarehouseCode(req.getDestinationWarehouseCode())
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.WAREHOUSE_NOT_FOUND, req.getDestinationWarehouseId())));
+                        "Destination warehouse not found with code: " + req.getDestinationWarehouseCode()));
 
-        if (req.getDestinationWarehouseId().equals(req.getWarehouseId())) {
+        if (destWarehouse.getWarehouseId().equals(req.getWarehouseId())) {
             throw new BusinessException(MessageConstants.OUTBOUND_SAME_WAREHOUSE);
         }
 
@@ -132,7 +134,7 @@ public class OutboundService {
 
         TransferEntity transfer = TransferEntity.builder()
                 .fromWarehouseId(req.getWarehouseId())
-                .toWarehouseId(req.getDestinationWarehouseId())
+                .toWarehouseId(destWarehouse.getWarehouseId())
                 .transferCode(code)
                 .status("DRAFT")
                 .note(req.getNote())
@@ -194,7 +196,13 @@ public class OutboundService {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
         }
 
-        if (req.getCustomerId() != null) so.setCustomerId(req.getCustomerId());
+        if (req.getCustomerCode() != null) {
+            // BE tự resolve customerId từ customerCode
+            CustomerEntity newCustomer = customerRepository.findByCustomerCode(req.getCustomerCode())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Customer not found with code: " + req.getCustomerCode()));
+            so.setCustomerId(newCustomer.getCustomerId());
+        }
         if (req.getDeliveryDate() != null) so.setRequiredShipDate(req.getDeliveryDate());
         if (req.getNote() != null) so.setNote(req.getNote());
         soRepository.save(so);
@@ -240,7 +248,13 @@ public class OutboundService {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
         }
 
-        if (req.getDestinationWarehouseId() != null) transfer.setToWarehouseId(req.getDestinationWarehouseId());
+        if (req.getDestinationWarehouseCode() != null) {
+            // BE tự resolve destinationWarehouseId từ destinationWarehouseCode
+            WarehouseEntity destWarehouse = warehouseRepository.findByWarehouseCode(req.getDestinationWarehouseCode())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Destination warehouse not found with code: " + req.getDestinationWarehouseCode()));
+            transfer.setToWarehouseId(destWarehouse.getWarehouseId());
+        }
         if (req.getNote() != null) transfer.setNote(req.getNote());
         transferRepository.save(transfer);
 
@@ -459,12 +473,12 @@ public class OutboundService {
 
     private void validateRequiredFieldsByType(CreateOutboundRequest req) {
         if (req.getOrderType() == OutboundType.SALES_ORDER) {
-            if (req.getCustomerId() == null)
+            if (req.getCustomerCode() == null || req.getCustomerCode().isBlank())
                 throw new BusinessException(MessageConstants.OUTBOUND_CUSTOMER_REQUIRED);
             if (req.getDeliveryDate() == null)
                 throw new BusinessException(MessageConstants.OUTBOUND_DELIVERY_DATE_REQUIRED);
         } else {
-            if (req.getDestinationWarehouseId() == null)
+            if (req.getDestinationWarehouseCode() == null || req.getDestinationWarehouseCode().isBlank())
                 throw new BusinessException(MessageConstants.OUTBOUND_DESTINATION_REQUIRED);
             if (req.getReceiverName() == null || req.getReceiverName().isBlank())
                 throw new BusinessException(MessageConstants.OUTBOUND_RECEIVER_REQUIRED);

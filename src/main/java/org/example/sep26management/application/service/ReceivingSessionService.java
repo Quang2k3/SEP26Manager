@@ -10,9 +10,11 @@ import org.example.sep26management.application.dto.scan.ScanSessionData;
 import org.example.sep26management.infrastructure.SseEmitterRegistry;
 import org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity;
 import org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity;
+import org.example.sep26management.infrastructure.persistence.entity.SupplierEntity;
 import org.example.sep26management.infrastructure.persistence.redis.ScanSessionRedisRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ReceivingItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.SupplierJpaRepository;
 import org.example.sep26management.infrastructure.security.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,7 @@ public class ReceivingSessionService {
         private final SseEmitterRegistry sseRegistry;
         private final ReceivingOrderJpaRepository receivingOrderRepo;
         private final ReceivingItemJpaRepository receivingItemRepo;
+        private final SupplierJpaRepository supplierRepo;
 
         @Value("${app.base-url:http://localhost:8080/api}")
         private String baseUrl;
@@ -44,20 +47,20 @@ public class ReceivingSessionService {
                 String sessionId = "RS_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
 
                 ScanSessionData data = ScanSessionData.builder()
-                                .sessionId(sessionId)
-                                .warehouseId(warehouseId)
-                                .createdBy(userId)
-                                .lines(new ArrayList<>())
-                                .build();
+                        .sessionId(sessionId)
+                        .warehouseId(warehouseId)
+                        .createdBy(userId)
+                        .lines(new ArrayList<>())
+                        .build();
 
                 sessionRedis.save(sessionId, data);
                 log.info("Scan session created: {} by userId={}, warehouseId={}", sessionId, userId, warehouseId);
 
                 ScanSessionResponse response = ScanSessionResponse.builder()
-                                .sessionId(sessionId)
-                                .warehouseId(warehouseId)
-                                .lines(new ArrayList<>())
-                                .build();
+                        .sessionId(sessionId)
+                        .warehouseId(warehouseId)
+                        .lines(new ArrayList<>())
+                        .build();
 
                 return ApiResponse.success("Session created", response);
         }
@@ -66,7 +69,7 @@ public class ReceivingSessionService {
 
         public ApiResponse<Map<String, String>> generateScanToken(String sessionId, Long userId) {
                 ScanSessionData session = sessionRedis.findById(sessionId)
-                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
 
                 String token = jwtTokenProvider.generateScanToken(sessionId, session.getWarehouseId());
                 String scanUrl = baseUrl + "/v1/scan?token=" + token;
@@ -74,22 +77,22 @@ public class ReceivingSessionService {
                 log.info("Scan token generated for session {} by userId={}", sessionId, userId);
 
                 return ApiResponse.success("Scan token generated", Map.of(
-                                "sessionId", sessionId,
-                                "scanToken", token,
-                                "scanUrl", scanUrl));
+                        "sessionId", sessionId,
+                        "scanToken", token,
+                        "scanUrl", scanUrl));
         }
 
         // ─── Get session snapshot ─────────────────────────────────────────────────
 
         public ApiResponse<ScanSessionResponse> getSession(String sessionId) {
                 ScanSessionData data = sessionRedis.findById(sessionId)
-                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
 
                 ScanSessionResponse response = ScanSessionResponse.builder()
-                                .sessionId(data.getSessionId())
-                                .warehouseId(data.getWarehouseId())
-                                .lines(data.getLines())
-                                .build();
+                        .sessionId(data.getSessionId())
+                        .warehouseId(data.getWarehouseId())
+                        .lines(data.getLines())
+                        .build();
 
                 return ApiResponse.success("OK", response);
         }
@@ -99,7 +102,7 @@ public class ReceivingSessionService {
         public SseEmitter stream(String sessionId) {
                 // Validate session exists
                 sessionRedis.findById(sessionId)
-                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
 
                 SseEmitter emitter = new SseEmitter(600_000L); // 10 min timeout
                 sseRegistry.register(sessionId, emitter);
@@ -127,7 +130,7 @@ public class ReceivingSessionService {
         @Transactional
         public ApiResponse<Map<String, Object>> createGrn(String sessionId, CreateGrnRequest request, Long userId) {
                 ScanSessionData session = sessionRedis.findById(sessionId)
-                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
 
                 List<ScanLineItem> lines = session.getLines();
                 if (lines == null || lines.isEmpty()) {
@@ -137,16 +140,25 @@ public class ReceivingSessionService {
                 // Generate receiving code: GRN + timestamp suffix
                 String receivingCode = "GRN" + System.currentTimeMillis() % 1_000_000;
 
+                // Resolve supplierId from supplierCode if provided
+                Long supplierId = null;
+                if (request.getSupplierCode() != null && !request.getSupplierCode().isBlank()) {
+                        supplierId = supplierRepo.findBySupplierCode(request.getSupplierCode())
+                                .map(SupplierEntity::getSupplierId)
+                                .orElseThrow(() -> new RuntimeException(
+                                        "Supplier not found with code: " + request.getSupplierCode()));
+                }
+
                 ReceivingOrderEntity order = ReceivingOrderEntity.builder()
-                                .warehouseId(session.getWarehouseId()) // taken from session (set from JWT at creation)
-                                .receivingCode(receivingCode)
-                                .status("DRAFT")
-                                .sourceType(request.getSourceType())
-                                .supplierId(request.getSupplierId())
-                                .sourceReferenceCode(request.getSourceReferenceCode())
-                                .note(request.getNote())
-                                .createdBy(userId)
-                                .build();
+                        .warehouseId(session.getWarehouseId()) // taken from session (set from JWT at creation)
+                        .receivingCode(receivingCode)
+                        .status("DRAFT")
+                        .sourceType(request.getSourceType())
+                        .supplierId(supplierId)
+                        .sourceReferenceCode(request.getSourceReferenceCode())
+                        .note(request.getNote())
+                        .createdBy(userId)
+                        .build();
 
                 ReceivingOrderEntity saved = receivingOrderRepo.save(order);
 
@@ -155,16 +167,16 @@ public class ReceivingSessionService {
                 for (ScanLineItem line : lines) {
                         boolean isFail = "FAIL".equalsIgnoreCase(line.getCondition());
                         ReceivingItemEntity item = ReceivingItemEntity.builder()
-                                        .receivingOrder(saved)
-                                        .skuId(line.getSkuId())
-                                        .receivedQty(line.getQty())
-                                        .lotNumber(request.getLotNumber())
-                                        .expiryDate(request.getExpiryDate())
-                                        .manufactureDate(request.getManufactureDate())
-                                        .condition(line.getCondition() != null ? line.getCondition() : "PASS")
-                                        .reasonCode(line.getReasonCode())
-                                        .qcRequired(isFail) // FAIL items automatically need QC
-                                        .build();
+                                .receivingOrder(saved)
+                                .skuId(line.getSkuId())
+                                .receivedQty(line.getQty())
+                                .lotNumber(request.getLotNumber())
+                                .expiryDate(request.getExpiryDate())
+                                .manufactureDate(request.getManufactureDate())
+                                .condition(line.getCondition() != null ? line.getCondition() : "PASS")
+                                .reasonCode(line.getReasonCode())
+                                .qcRequired(isFail) // FAIL items automatically need QC
+                                .build();
                         items.add(item);
                 }
                 receivingItemRepo.saveAll(items);
@@ -174,12 +186,12 @@ public class ReceivingSessionService {
                 sseRegistry.remove(sessionId);
 
                 log.info("GRN created: {} (receivingId={}) from session {}", receivingCode, saved.getReceivingId(),
-                                sessionId);
+                        sessionId);
 
                 return ApiResponse.success("GRN created successfully", Map.of(
-                                "receivingId", saved.getReceivingId(),
-                                "receivingCode", saved.getReceivingCode(),
-                                "status", saved.getStatus(),
-                                "itemCount", items.size()));
+                        "receivingId", saved.getReceivingId(),
+                        "receivingCode", saved.getReceivingCode(),
+                        "status", saved.getStatus(),
+                        "itemCount", items.size()));
         }
 }
