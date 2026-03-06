@@ -13,6 +13,7 @@ import org.example.sep26management.application.dto.request.UpdateCategoryRequest
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.CategoryResponse;
 import org.example.sep26management.application.dto.response.CategoryTreeResponse;
+import org.example.sep26management.application.dto.response.MapCategoryToZoneResponse;
 import org.example.sep26management.application.service.CategoryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,9 +21,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
-import org.example.sep26management.application.dto.response.CategoryTreeResponse;
-import org.example.sep26management.application.dto.response.MapCategoryToZoneResponse;
-import org.example.sep26management.application.dto.request.MapCategoryToZoneRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -37,13 +35,13 @@ public class CategoryController {
 
     private final CategoryService categoryService;
 
-    /**
-     * Create a new category
-     * POST /api/v1/categories
-     */
+    // ─────────────────────────────────────────────────────────────
+    // POST /v1/categories — Tạo category mới
+    // ─────────────────────────────────────────────────────────────
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @Operation(summary = "Tạo category mới", description = "Tạo category với categoryCode và categoryName. categoryCode phải unique. Chỉ ADMIN/MANAGER.")
+    @Operation(summary = "Tạo category mới",
+            description = "Tạo category với categoryCode và categoryName. categoryCode phải unique. Chỉ ADMIN/MANAGER.")
     public ResponseEntity<ApiResponse<CategoryResponse>> createCategory(
             @Valid @RequestBody CreateCategoryRequest request,
             HttpServletRequest httpRequest) {
@@ -60,17 +58,17 @@ public class CategoryController {
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
         } catch (Exception e) {
             log.error(LogMessages.CATEGORY_CONTROLLER_CREATE_FAILED, e.getMessage(), e);
-            throw e; // Let GlobalExceptionHandler handle it
+            throw e;
         }
     }
 
-    /**
-     * Update an existing category
-     * PUT /api/v1/categories/{categoryId}
-     */
+    // ─────────────────────────────────────────────────────────────
+    // PUT /v1/categories/{categoryId} — Cập nhật category
+    // ─────────────────────��───────────────────────────────────────
     @PutMapping("/{categoryId}")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @Operation(summary = "Cập nhật category", description = "Cập nhật categoryName, description. Chỉ ADMIN/MANAGER.")
+    @Operation(summary = "Cập nhật category",
+            description = "Cập nhật categoryName, description. Chỉ ADMIN/MANAGER.")
     public ResponseEntity<ApiResponse<CategoryResponse>> updateCategory(
             @PathVariable Long categoryId,
             @Valid @RequestBody UpdateCategoryRequest request,
@@ -92,38 +90,38 @@ public class CategoryController {
         }
     }
 
-    /**
-     * Get category by ID
-     * GET /api/v1/categories/{categoryId}
-     */
+    // ─────────────────────────────────────────────────────────────
+    // GET /v1/categories/{categoryId} — Chi tiết 1 category
+    // ─────────────────────────────────────────────────────────────
     @GetMapping("/{categoryId}")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Chi tiết category", description = "Lấy thông tin chi tiết 1 category theo ID.")
+    @Operation(summary = "Chi tiết category",
+            description = "Lấy thông tin chi tiết 1 category theo ID.")
     public ResponseEntity<ApiResponse<CategoryResponse>> getCategoryById(
             @PathVariable Long categoryId) {
         ApiResponse<CategoryResponse> response = categoryService.getCategoryById(categoryId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Get all categories
-     * GET /api/v1/categories
-     */
+    // ─────────────────────────────────────────────────────────────
+    // GET /v1/categories — Danh sách tất cả categories
+    // ─────────────────────────────────────────────────────────────
     @GetMapping
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Danh sách categories", description = "Lấy tất cả categories (bao gồm active và inactive).")
+    @Operation(summary = "Danh sách categories",
+            description = "Lấy tất cả categories (bao gồm active và inactive).")
     public ResponseEntity<ApiResponse<List<CategoryResponse>>> getAllCategories() {
         ApiResponse<List<CategoryResponse>> response = categoryService.getAllCategories();
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * UC: Deactivate category
-     * PATCH /api/v1/categories/{categoryId}/deactivate
-     */
+    // ─────────────────────────────────────────────────────────────
+    // PATCH /v1/categories/{categoryId}/deactivate — Vô hiệu hóa
+    // ─────────────────────────────────────────────────────────────
     @PatchMapping("/{categoryId}/deactivate")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @Operation(summary = "Vô hiệu hóa category", description = "Vô hiệu hóa category. SKU thuộc category này sẽ không được gợi ý putaway nữa.")
+    @Operation(summary = "Vô hiệu hóa category",
+            description = "Vô hiệu hóa category. SKU thuộc category này sẽ không được gợi ý putaway nữa.")
     public ResponseEntity<ApiResponse<CategoryResponse>> deactivateCategory(
             @PathVariable Long categoryId,
             HttpServletRequest httpRequest) {
@@ -136,70 +134,90 @@ public class CategoryController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * UC: View Category Tree
-     * GET /api/v1/categories/tree?warehouseId=1
-     * Shows tree with zone mapping info (convention: Z- + categoryCode)
-     */
+    // ─────────────────────────────────────────────────────────────
+    // GET /v1/categories/tree — Cây category-zone
+    //
+    // ─────────────────────────────────────────────────────────────
     @GetMapping("/tree")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Cây category-zone", description = "Hiển thị cây category với thông tin zone mapping (convention: Z-{categoryCode}). "
-            + "Nếu truyền warehouseId → chỉ hiển thị zone mapping cho warehouse đó.")
-    public ResponseEntity<ApiResponse<List<CategoryTreeResponse>>> getCategoryTree(
-            @RequestParam(required = false) Long warehouseId) {
+    @Operation(summary = "Cây category-zone",
+            description = "Hiển thị cây category kèm thông tin zone mapping (convention: Z-{categoryCode}). ")
+    public ResponseEntity<ApiResponse<List<CategoryTreeResponse>>> getCategoryTree() {
+        Long warehouseId = getCurrentWarehouseId();
         ApiResponse<List<CategoryTreeResponse>> response = categoryService.getCategoryTree(warehouseId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * UC: Map Category to Zone (convention-based)
-     * POST /api/v1/categories/{categoryId}/map-to-zone
-     * Convention: zone_code = "Z-" + category_code
-     */
+    // ─────────────────────────────────────────────────────────────
+    // POST /v1/categories/{categoryId}/map-to-zone
+    //
+    // Convention: zone_code = "Z-" + category_code
+    // ─────────────────────────────────────────────────────────────
     @PostMapping("/{categoryId}/map-to-zone")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @Operation(summary = "Map category vào zone", description = "Tạo mapping giữa category và zone theo convention: zoneCode = 'Z-' + categoryCode. "
-            + "Nếu zone chưa tồn tại → tự động tạo zone mới trong warehouse.")
+    @Operation(summary = "Map category vào zone",
+            description = "Mapping category → zone theo convention: zoneCode = 'Z-' + categoryCode. "
+                    )
     public ResponseEntity<ApiResponse<MapCategoryToZoneResponse>> mapCategoryToZone(
             @PathVariable Long categoryId,
-            @Valid @RequestBody MapCategoryToZoneRequest request,
             HttpServletRequest httpRequest) {
         Long mappedBy = getCurrentUserId();
+        Long warehouseId = getCurrentWarehouseId();
         String ipAddress = getClientIpAddress(httpRequest);
         String userAgent = httpRequest.getHeader("User-Agent");
 
         ApiResponse<MapCategoryToZoneResponse> response = categoryService.mapCategoryToZone(
-                categoryId, request, mappedBy, ipAddress, userAgent);
+                categoryId, warehouseId, mappedBy, ipAddress, userAgent);
         return ResponseEntity.ok(response);
     }
 
     // ============================================
-    // HELPER METHODS (same pattern as UserManagementController)
+    // HELPER METHODS
     // ============================================
 
+    /**
+     * Lấy userId từ JWT token (SecurityContext).
+     */
     private Long getCurrentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-
         if (authentication == null) {
             throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
         }
-
         Object details = authentication.getDetails();
         if (details instanceof Map) {
             @SuppressWarnings("unchecked")
             Map<String, Object> detailsMap = (Map<String, Object>) details;
             Object userIdObj = detailsMap.get("userId");
+            if (userIdObj instanceof Long)    return (Long) userIdObj;
+            if (userIdObj instanceof Integer) return ((Integer) userIdObj).longValue();
+            if (userIdObj != null)            return Long.parseLong(userIdObj.toString());
+        }
+        throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
+    }
 
-            if (userIdObj instanceof Long) {
-                return (Long) userIdObj;
-            } else if (userIdObj instanceof Integer) {
-                return ((Integer) userIdObj).longValue();
-            } else if (userIdObj != null) {
-                return Long.parseLong(userIdObj.toString());
+    /**
+     * Lấy warehouseId đầu tiên từ JWT token (SecurityContext).
+     */
+    private Long getCurrentWarehouseId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) {
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        }
+        Object details = authentication.getDetails();
+        if (details instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) details;
+            Object raw = map.get("warehouseIds");
+            if (raw instanceof List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long l)    return l;
+                if (first instanceof Integer i) return i.longValue();
+                if (first instanceof Number n)  return n.longValue();
+                if (first != null)              return Long.parseLong(first.toString());
             }
         }
-
-        throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
+        throw new RuntimeException(
+                "Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
     }
 
     private String getClientIpAddress(HttpServletRequest request) {
@@ -207,13 +225,10 @@ public class CategoryController {
         if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
             return xForwardedFor.split(",")[0].trim();
         }
-
         String xRealIp = request.getHeader("X-Real-IP");
         if (xRealIp != null && !xRealIp.isEmpty()) {
             return xRealIp;
         }
-
         return request.getRemoteAddr();
     }
-
 }

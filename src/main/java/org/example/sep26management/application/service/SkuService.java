@@ -44,10 +44,10 @@ public class SkuService {
     private final SkuThresholdJpaRepository skuThresholdRepository;
     private final WarehouseJpaRepository warehouseRepository;
 
+    // ─────────────────────────────────────────────────────────────
+    // UC-268: View SKU Detail
+    // ─────────────────────────────────────────────────────────────
 
-    /**
-     * UC-268: View SKU Detail
-     */
     @Transactional(readOnly = true)
     public ApiResponse<SkuResponse> getSkuDetail(Long skuId) {
         log.info("Fetching SKU detail for ID: {}", skuId);
@@ -56,9 +56,7 @@ public class SkuService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.SKU_NOT_FOUND, skuId)));
 
-        SkuResponse response = skuMapper.toResponse(sku);
-
-        return ApiResponse.success("SKU detail retrieved successfully", response);
+        return ApiResponse.success("SKU detail retrieved successfully", skuMapper.toResponse(sku));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -75,7 +73,6 @@ public class SkuService {
         int size = request.getSize() > 0 ? request.getSize() : 20;
         Pageable pageable = PageRequest.of(request.getPage(), size);
 
-        // blank keyword → return all (BR-GEN-01 default view)
         String keyword = (request.getKeyword() != null && !request.getKeyword().isBlank())
                 ? request.getKeyword().trim()
                 : null;
@@ -96,7 +93,6 @@ public class SkuService {
                 .last(page.isLast())
                 .build();
 
-        // MS-SKU-06: empty state message khi không có kết quả
         String message = content.isEmpty()
                 ? MessageConstants.SKU_SEARCH_NO_RESULT
                 : MessageConstants.SKU_SEARCH_SUCCESS;
@@ -108,17 +104,19 @@ public class SkuService {
     // UC-B07: Configure SKU Threshold
     // BR-SKU-07: min < max, both positive integers
     // Upsert: tạo mới nếu chưa có, update nếu đã có
+    //
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public ApiResponse<SkuThresholdResponse> configureThreshold(
             Long skuId,
             ConfigureSkuThresholdRequest request,
+            Long warehouseId,       // ← nhận từ Controller, đã extract từ JWT
             Long updatedBy,
             String ipAddress,
             String userAgent) {
 
-        log.info("Configuring threshold for skuId={}, warehouseId={}", skuId, request.getWarehouseId());
+        log.info("Configuring threshold for skuId={}, warehouseId={}", skuId, warehouseId);
 
         // Validate SKU exists and is active
         SkuEntity sku = skuJpaRepository.findByIdWithCategory(skuId)
@@ -130,9 +128,9 @@ public class SkuService {
         }
 
         // Validate warehouse exists
-        warehouseRepository.findById(request.getWarehouseId())
+        warehouseRepository.findById(warehouseId)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.WAREHOUSE_NOT_FOUND, request.getWarehouseId())));
+                        String.format(MessageConstants.WAREHOUSE_NOT_FOUND, warehouseId)));
 
         // BR-SKU-07: Min < Max validation
         if (request.getMinQty() != null && request.getMaxQty() != null) {
@@ -149,9 +147,9 @@ public class SkuService {
 
         // Upsert threshold
         SkuThresholdEntity threshold = skuThresholdRepository
-                .findByWarehouseIdAndSkuId(request.getWarehouseId(), skuId)
+                .findByWarehouseIdAndSkuId(warehouseId, skuId)
                 .orElse(SkuThresholdEntity.builder()
-                        .warehouseId(request.getWarehouseId())
+                        .warehouseId(warehouseId)
                         .skuId(skuId)
                         .createdBy(updatedBy)
                         .build());
@@ -192,7 +190,11 @@ public class SkuService {
         return ApiResponse.success(MessageConstants.THRESHOLD_UPDATED_SUCCESS, response);
     }
 
+    // ─────────────────────────────────────────────────────────────
     // Get current threshold for a SKU
+    //
+    // ─────────────────────────────────────────────────────────────
+
     @Transactional(readOnly = true)
     public ApiResponse<SkuThresholdResponse> getThreshold(Long skuId, Long warehouseId) {
         SkuEntity sku = skuJpaRepository.findByIdWithCategory(skuId)
@@ -222,10 +224,11 @@ public class SkuService {
         return ApiResponse.success("Threshold retrieved", response);
     }
 
-    /**
-     * UC: Assign Category to SKU
-     * BR: Category must be active
-     */
+    // ─────────────────────────────────────────────────────────────
+    // UC: Assign Category to SKU
+    // BR-CAT-08: Category must be active
+    // ─────────────────────────────────────────────────────────────
+
     @Transactional
     public ApiResponse<SkuResponse> assignCategoryToSku(
             Long skuId,
@@ -236,28 +239,23 @@ public class SkuService {
 
         log.info(LogMessages.SKU_ASSIGNING_CATEGORY, skuId, request.getCategoryId());
 
-        // Find SKU
         SkuEntity sku = skuJpaRepository.findByIdWithCategory(skuId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.SKU_NOT_FOUND, skuId)));
 
-        // Find Category
         CategoryEntity category = categoryRepository.findById(request.getCategoryId())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.CATEGORY_NOT_FOUND, request.getCategoryId())));
 
-        // BR-CAT-08: Inactive category cannot be assigned
         if (!category.getActive()) {
             throw new BusinessException(MessageConstants.SKU_CATEGORY_INACTIVE);
         }
 
-        // Check same category (null-safe)
         Long currentCategoryId = (sku.getCategory() != null) ? sku.getCategory().getCategoryId() : null;
         if (request.getCategoryId().equals(currentCategoryId)) {
             throw new BusinessException(MessageConstants.SKU_SAME_CATEGORY);
         }
 
-        // Assign
         sku.setCategory(category);
         SkuEntity updatedSku = skuJpaRepository.save(sku);
 
@@ -306,7 +304,6 @@ public class SkuService {
         try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
 
-            // Row 0 = header, data starts at row 1
             int lastRow = sheet.getLastRowNum();
 
             // BR-IMP-01: max 1000 rows
@@ -319,10 +316,9 @@ public class SkuService {
                 if (row == null || isRowEmpty(row)) continue;
 
                 totalRows++;
-                int displayRow = rowIdx + 1; // 1-indexed for error messages
+                int displayRow = rowIdx + 1;
 
                 try {
-                    // Parse required fields from Excel template
                     // Col 0: skuCode | Col 1: skuName | Col 2: unit
                     // Col 3: brand   | Col 4: barcode | Col 5: description
                     // Col 6: packageType | Col 7: volumeMl | Col 8: weightG
@@ -331,9 +327,8 @@ public class SkuService {
 
                     String skuCode = getCellString(row, 0);
                     String skuName = getCellString(row, 1);
-                    String unit = getCellString(row, 2);
+                    String unit    = getCellString(row, 2);
 
-                    // Validate mandatory fields [BR-SKU-01]
                     if (skuCode == null || skuCode.isBlank()) {
                         errors.add(ImportSkuResultResponse.RowError.builder()
                                 .rowNumber(displayRow).reason("SKU Code is required").build());
@@ -372,7 +367,6 @@ public class SkuService {
                         continue;
                     }
 
-                    // Build entity
                     SkuEntity sku = SkuEntity.builder()
                             .skuCode(skuCode.trim())
                             .skuName(skuName.trim())
@@ -403,7 +397,6 @@ public class SkuService {
             }
         }
 
-        // Bulk save valid records
         if (!toSave.isEmpty()) {
             skuJpaRepository.saveAll(toSave);
             log.info("SKU import: saved {} records", toSave.size());
@@ -428,10 +421,10 @@ public class SkuService {
         return ApiResponse.success(MessageConstants.IMPORT_SKU_SUCCESS, result);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // Lookup SKU by barcode
+    // ─────────────────────────────────────────────────────────────
 
-    /**
-     * Lookup SKU by barcode.
-     */
     @Transactional(readOnly = true)
     public ApiResponse<SkuResponse> findByBarcode(String barcode) {
         log.info("Looking up SKU by barcode: {}", barcode);
@@ -443,13 +436,14 @@ public class SkuService {
                 })
                 .orElseGet(() -> {
                     log.warn("No active SKU found for barcode: {}", barcode);
-                    return ApiResponse.error("SKU not found for barcode: " + barcode);
+                    return ApiResponse.<SkuResponse>error("SKU not found for barcode: " + barcode);
                 });
     }
 
-    /**
-     * Lookup SKU by SKU code.
-     */
+    // ─────────────────────────────────────────────────────────────
+    // Lookup SKU by SKU code
+    // ─────────────────────────────────────────────────────────────
+
     @Transactional(readOnly = true)
     public ApiResponse<SkuResponse> findBySkuCode(String skuCode) {
         log.info("Looking up SKU by skuCode: {}", skuCode);
@@ -461,7 +455,7 @@ public class SkuService {
                 })
                 .orElseGet(() -> {
                     log.warn("No active SKU found for skuCode: {}", skuCode);
-                    return ApiResponse.error("SKU not found: " + skuCode);
+                    return ApiResponse.<SkuResponse>error("SKU not found: " + skuCode);
                 });
     }
 
@@ -489,9 +483,8 @@ public class SkuService {
 
     private String getCellStringRaw(Cell cell) {
         return switch (cell.getCellType()) {
-            case STRING -> cell.getStringCellValue();
+            case STRING  -> cell.getStringCellValue();
             case NUMERIC -> {
-                // Avoid 1.0 for integer-like values
                 double d = cell.getNumericCellValue();
                 yield d == Math.floor(d) ? String.valueOf((long) d) : String.valueOf(d);
             }

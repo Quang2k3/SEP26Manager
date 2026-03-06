@@ -21,17 +21,17 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
  * LocationController — Location master data APIs
  *
- * SCRUM-273 POST /api/v1/locations — Create Location (MANAGER)
- * SCRUM-274 PUT /api/v1/locations/{locationId} — Update Location (MANAGER)
- * SCRUM-275 PATCH /api/v1/locations/{locationId}/deactivate — Deactivate
- * (MANAGER)
- * SCRUM-276 GET /api/v1/locations — View Location List (MANAGER)
- * GET /api/v1/locations/{locationId} — View Location Detail
+ * SCRUM-273 POST /api/v1/locations              — Create Location (MANAGER)
+ * SCRUM-274 PUT  /api/v1/locations/{locationId} — Update Location (MANAGER)
+ * SCRUM-275 PATCH /api/v1/locations/{locationId}/deactivate — Deactivate (MANAGER)
+ * SCRUM-276 GET  /api/v1/locations              — View Location List (MANAGER)
+ *           GET  /api/v1/locations/{locationId} — View Location Detail
  */
 @RestController
 @RequestMapping("/v1/locations")
@@ -49,15 +49,21 @@ public class LocationController {
 
     @PostMapping
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Tạo location mới (Manager)", description = "Tạo location (AISLE/RACK/BIN/STAGING) trong zone. "
-            + "BIN cần parentLocationId là RACK, RACK cần parent là AISLE.")
+    @Operation(summary = "Tạo location mới (Manager)",
+            description = "Tạo location (AISLE/RACK/BIN/STAGING) trong zone. "
+                    + "BIN cần parentLocationId là RACK, RACK cần parent là AISLE. "
+                    )
     public ResponseEntity<ApiResponse<LocationResponse>> createLocation(
             @Valid @RequestBody CreateLocationRequest request,
             HttpServletRequest httpRequest) {
 
-        Long userId = getCurrentUserId();
+        Long userId      = getCurrentUserId();
+        Long warehouseId = getCurrentWarehouseId();   // ← thêm dòng này
+
         ApiResponse<LocationResponse> response = locationService.createLocation(
-                request, userId,
+                request,
+                warehouseId,                          // ← truyền vào đây
+                userId,
                 getClientIp(httpRequest),
                 httpRequest.getHeader("User-Agent"));
 
@@ -103,25 +109,32 @@ public class LocationController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-276: View Location List (UC-LOC-05)
-    // GET
-    // /api/v1/locations?warehouseId=1&zoneId=2&locationType=BIN&active=true&keyword=A01&page=0&size=20
+    // GET /api/v1/locations?zoneId=2&locationType=BIN&active=true&keyword=A01&page=0&size=20
+    // warehouseId lấy từ JWT token (không cần truyền vào param)
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Danh sách locations", description = "Lấy danh sách locations với filter: warehouseId, zoneId, locationType (AISLE/RACK/BIN/STAGING), active, keyword. Phân trang.")
+    @Operation(summary = "Danh sách locations",
+            description = "Lấy danh sách locations với filter: zoneId, locationType (AISLE/RACK/BIN/STAGING), active, keyword. Phân trang. "
+                    )
     public ResponseEntity<ApiResponse<PageResponse<LocationResponse>>> listLocations(
-            @RequestParam Long warehouseId,
-            @RequestParam(required = false) Long zoneId,
+            @RequestParam(required = false) Long zoneId,              // ← bỏ @RequestParam Long warehouseId
             @RequestParam(required = false) LocationType locationType,
             @RequestParam(required = false) Boolean active,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
+        Long warehouseId = getCurrentWarehouseId();   // ← tự lấy từ JWT
+
         return ResponseEntity.ok(locationService.listLocations(
                 warehouseId, zoneId, locationType, active, keyword, page, size));
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // View Location Detail
+    // ─────────────────────────────────────────────────────────────
 
     @GetMapping("/{locationId}")
     @PreAuthorize("hasRole('MANAGER')")
@@ -134,6 +147,27 @@ public class LocationController {
     // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
+
+    private Long getCurrentWarehouseId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        Object details = auth.getDetails();
+        if (details instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) details;
+            Object raw = map.get("warehouseIds");
+            if (raw instanceof List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long l)    return l;
+                if (first instanceof Integer i) return i.longValue();
+                if (first instanceof Number n)  return n.longValue();
+                if (first != null)              return Long.parseLong(first.toString());
+            }
+        }
+        throw new RuntimeException(
+                "Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
+    }
+
 
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
