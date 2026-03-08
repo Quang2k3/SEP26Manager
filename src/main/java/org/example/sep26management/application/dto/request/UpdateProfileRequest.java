@@ -19,21 +19,26 @@ import java.time.LocalDate;
 @Builder
 public class UpdateProfileRequest {
 
+    @Schema(description = "Họ và tên người dùng", example = "Nguyễn Văn A")
     @NotBlank(message = "Full name cannot be empty")
     @Size(max = 200, message = "Full name cannot exceed 200 characters")
     private String fullName;
 
+    @Schema(description = "Số điện thoại liên lạc", example = "0987654321")
     @NotBlank(message = "Phone number is required")
     @Pattern(regexp = "^[0-9]{9,15}$", message = "Phone number must be between 9 and 15 digits")
     private String phone;
 
+    @Schema(description = "Giới tính", example = "MALE", allowableValues = { "MALE", "FEMALE", "OTHER" })
     private String gender; // MALE, FEMALE, OTHER
 
-    @Schema(example = "2003-03-04", description = "Định dạng yyyy-MM-dd")
+    @Schema(description = "Ngày sinh (Định dạng yyyy-MM-dd)", example = "2003-03-04")
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate dateOfBirth;
 
+    @Schema(description = "Địa chỉ", example = "8 Tôn Thất Thuyết, Hà Nội")
     private String address;
 
+    @Schema(description = "File ảnh đại diện upload lên", type = "string", format = "binary")
     private MultipartFile avatar;
 }

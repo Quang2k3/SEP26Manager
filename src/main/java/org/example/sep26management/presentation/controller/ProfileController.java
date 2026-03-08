@@ -33,7 +33,12 @@ public class ProfileController {
     private final ProfileService profileService;
 
     @GetMapping("")
-    @Operation(summary = "Xem hồ sơ cá nhân", description = "Lấy thông tin profile của user đang đăng nhập: email, fullName, phone, avatar, roles.")
+    @Operation(summary = "Xem hồ sơ cá nhân", description = "Lấy thông tin profile của user đang đăng nhập.\n\n"
+            + "📦 **Giải thích dữ liệu trả về (`data`):**\n"
+            + "- Thông tin chi tiết: `email`, `fullName`, `phone`, `gender` (MALE/FEMALE/OTHER), `dateOfBirth`.\n"
+            + "- `roleCodes`: Danh sách các quyền của hệ thống.\n"
+            + "- `status`: Trạng thái (ACTIVE, INACTIVE).\n"
+            + "- `avatarUrl`: Đường dẫn lấy ảnh đại diện.")
     public ResponseEntity<ApiResponse<UserProfileResponse>> getProfile() {
         try {
             Long userId = getCurrentUserId();
@@ -49,7 +54,8 @@ public class ProfileController {
     }
 
     @PutMapping(value = "/update-profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Cập nhật hồ sơ", description = "Cập nhật fullName, phone, avatar (upload file). Gửi dưới dạng multipart/form-data.")
+    @Operation(summary = "Cập nhật hồ sơ", description = "Cập nhật fullName, phone, avatar (upload file). Gửi dưới dạng `multipart/form-data`.\n\n"
+            + "📦 **Giải thích dữ liệu trả về (`data`):** Trả về toàn bộ thông tin User sau khi đã Update thành công.")
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
             @Valid @ModelAttribute UpdateProfileRequest request,
             HttpServletRequest httpRequest) {
@@ -72,7 +78,8 @@ public class ProfileController {
     }
 
     @PostMapping("/change-password")
-    @Operation(summary = "Đổi mật khẩu", description = "Đổi mật khẩu: cần nhập currentPassword + newPassword. Mật khẩu mới phải khác mật khẩu cũ.")
+    @Operation(summary = "Đổi mật khẩu", description = "Đổi mật khẩu tài khoản đang đăng nhập. Cần nhập `currentPassword` và `newPassword` (phải khác mật khẩu cũ, yêu cầu độ khó).\n\n"
+            + "📦 **Kết quả trả về:** Message thành công, `data` rỗng.")
     public ResponseEntity<ApiResponse<Void>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
             HttpServletRequest httpRequest) {

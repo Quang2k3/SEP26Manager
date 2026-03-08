@@ -53,7 +53,9 @@ public class IncidentController {
 
     /** GET /v1/incidents/{id} */
     @GetMapping("/{id}")
-    @Operation(summary = "Chi tiết sự cố")
+    @Operation(summary = "Chi tiết sự cố", description = "Xem chi tiết một sự cố (bao gồm link ảnh, ID người báo cáo, vv). \n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã Incident ID lấy từ danh sách.")
     public ApiResponse<IncidentResponse> get(@PathVariable Long id) {
         return incidentService.getIncident(id);
     }

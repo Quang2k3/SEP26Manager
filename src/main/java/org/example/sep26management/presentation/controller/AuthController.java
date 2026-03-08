@@ -37,7 +37,12 @@ public class AuthController {
          */
         @PostMapping("/login")
         @Operation(summary = "Đăng nhập hệ thống", description = "Xác thực bằng email + password. Nếu email chưa verified → trả về pendingToken + requiresVerification=true "
-                        + "(cần gọi /verify-otp). Nếu đã verified → trả về JWT token để sử dụng cho các API khác.")
+                        + "(cần gọi /verify-otp). Nếu đã verified → trả về JWT token để sử dụng cho các API khác.\n\n"
+                        + "📦 **Giải thích dữ liệu trả về (`data`):**\n"
+                        + "- `token`: Chuỗi mã token để nhét vào header (Authorization) cho các API sau.\n"
+                        + "- `requiresVerification`: Nếu `true` nghĩa là bắt buộc phải qua bước nhập OTP.\n"
+                        + "- `pendingToken`: Token tạm chứa thông tin xác thực để gọi màn verify OTP.\n"
+                        + "- `user`: Khối object chứa thông tin User đăng nhập.")
         public ResponseEntity<ApiResponse<LoginResponse>> login(
                         @Valid @RequestBody LoginRequest request,
                         HttpServletRequest httpRequest) {
@@ -64,7 +69,8 @@ public class AuthController {
          * POST /v1/auth/logout
          */
         @PostMapping("/logout")
-        @Operation(summary = "Đăng xuất", description = "Ghi log đăng xuất và xóa security context. Client nên xóa JWT token ở phía mình sau khi gọi API này.")
+        @Operation(summary = "Đăng xuất", description = "Ghi log đăng xuất và xóa security context. Client nên xóa JWT token ở phía mình sau khi gọi API này.\n\n"
+                        + "📦 **Kết quả trả về:** Chỉ cần kiểm tra `success: true`.")
         public ResponseEntity<ApiResponse<Void>> logout(
                         HttpServletRequest httpRequest) {
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -95,7 +101,9 @@ public class AuthController {
          * GET /v1/auth/me
          */
         @GetMapping("/me")
-        @Operation(summary = "Lấy thông tin người dùng hiện tại", description = "Trả về thông tin user đang đăng nhập dựa trên JWT token. Bao gồm userId, email, fullName, roleCodes, warehouseIds.")
+        @Operation(summary = "Lấy thông tin người dùng hiện tại", description = "Trả về thông tin user đang đăng nhập dựa trên JWT token.\n\n"
+                        + "📦 **Giải thích dữ liệu trả về (`data`):**\n"
+                        + "- `userId`, `email`, `fullName`, `roleCodes` (danh sách quyền), `warehouseIds` (danh sách ID kho quản lý).")
         public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser() {
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
