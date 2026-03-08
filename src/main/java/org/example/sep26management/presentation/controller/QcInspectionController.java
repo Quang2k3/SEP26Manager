@@ -37,7 +37,11 @@ public class QcInspectionController {
             + "- `Query.status` (Tùy chọn): Lọc theo trạng thái, ví dụ: PENDING, INSPECTED, DECIDED.\n"
             + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
             + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.\n\n"
-            + "👉 **Kết quả:** Trả về danh sách. Kết quả bao gồm ID (`qcInspectionId`) của từng phiếu để QC có thể nhấn vào xem chi tiết.")
+            + "👉 **Kết quả trả về (`data`):** Một mảng danh sách phiếu. Mỗi phiếu chứa:\n"
+            + "- `inspectionId`: ID nội bộ của phiếu, dùng để xem chi tiết hoặc duyệt.\n"
+            + "- `status`: (PENDING, INSPECTED, DECIDED)\n"
+            + "- `skuCode`, `skuName`, `lotNumber`: Thông tin hàng lỗi.\n"
+            + "- `decision`: (SCRAP, RETURN, DOWNGRADE) nếu đã được Manager duyệt.")
     public ApiResponse<PageResponse<QcInspectionResponse>> list(
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
@@ -49,7 +53,13 @@ public class QcInspectionController {
     @GetMapping("/{id}")
     @Operation(summary = "Xem chi tiết phiếu kiểm định", description = "Đọc chi tiết sản phẩm lỗi và hình ảnh đính kèm để QC ra quyết định. \n\n"
             + "**Data yêu cầu:**\n"
-            + "- `@PathVariable id`: Mã ID phiếu kiểm định (Hay gọi là **QC Inspection ID**), **LẤY TỪ** response của API danh sách lô hàng lỗi `GET /v1/qc-inspections` bên trên.")
+            + "- `@PathVariable id`: Mã ID phiếu kiểm định (Hay gọi là **QC Inspection ID**), **LẤY TỪ** response của API danh sách lô hàng lỗi `GET /v1/qc-inspections` bên trên.\n\n"
+            + "📦 **Giải thích dữ liệu trả về (`data`):**\n"
+            + "- `inspectionId`, `inspectionCode`: Mã phiếu QC.\n"
+            + "- `status`: Trạng thái.\n"
+            + "- `lotNumber`, `skuId`, `skuCode`, `skuName`: Thông tin lô hàng và sản phẩm.\n"
+            + "- `remarks`, `attachmentId`: Ghi chú kèm ID hình ảnh hỏng hóc do QC báo cáo.\n"
+            + "- `decision`: Quyết định của Manager (SCRAP, RETURN, DOWNGRADE).")
     public ApiResponse<QcInspectionResponse> get(@PathVariable Long id) {
         return qcService.getInspection(id);
     }
@@ -60,7 +70,8 @@ public class QcInspectionController {
     @Operation(summary = "QC nộp báo cáo kiểm định", description = "QC nhập thông tin chi tiết về lỗi, đính kèm hình ảnh. Sau khi nộp, trạng thái phiếu QC chuyển từ `PENDING` sang `INSPECTED`.\n\n"
             + "**Data yêu cầu:**\n"
             + "- `@PathVariable id`: Mã ID phiếu kiểm định (QC Inspection ID), **LẤY TỪ** response của API danh sách lô hàng lỗi `GET /v1/qc-inspections`.\n"
-            + "- `@RequestBody UpdateQcInspectionRequest`: Dữ liệu báo cáo QC, bao gồm `note` (ghi chú) và `imageUrls` (danh sách URL ảnh).")
+            + "- `@RequestBody UpdateQcInspectionRequest`: Dữ liệu báo cáo QC, bao gồm `remarks` (ghi chú chi tiết) và `attachmentId` (ID URL ảnh).\n\n"
+            + "📦 **Kết quả trả về:** Dữ liệu phiếu QC đã cập nhật thêm `remarks`, `attachmentId`, `inspectedBy` và trạng thái chuyển sang `INSPECTED`.")
     public ApiResponse<QcInspectionResponse> submitReport(
             @PathVariable Long id,
             @RequestBody UpdateQcInspectionRequest request,
@@ -72,7 +83,8 @@ public class QcInspectionController {
     @PostMapping("/{id}/decide")
     @PreAuthorize("hasRole('MANAGER')")
     @Operation(summary = "Ra quyết định xử lý (Manager)", description = "Manager chọn phương án: SCRAP (Tiêu hủy), RETURN (Trả hàng), DOWNGRADE (Thanh lý). "
-            + "Nếu RETURN, hệ thống tự sinh Lệnh xuất trả hàng.")
+            + "Nếu RETURN, hệ thống tự sinh Lệnh xuất trả hàng.\n\n"
+            + "📦 **Kết quả trả về:** Trạng thái phiếu chuyển thành `DECIDED`, cập nhật thêm trường `decision`.")
     public ApiResponse<QcInspectionResponse> decide(
             @PathVariable Long id,
             @Valid @RequestBody QcDecisionRequest request,
