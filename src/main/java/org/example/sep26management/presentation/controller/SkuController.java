@@ -42,7 +42,7 @@ public class SkuController {
 
     /**
      * UC-268: View SKU Detail
-     * GET /api/v1/skus/{skuId}
+     * GET /v1/skus/{skuId}
      */
     @GetMapping("/{skuId}")
     @PreAuthorize("isAuthenticated()")
@@ -57,7 +57,7 @@ public class SkuController {
     // ─────────────────────────────────────────────────────────────
     // UC-B06: Search SKU
     // BR-SKU-06: partial, case-insensitive, skuCode + skuName
-    // GET /api/v1/skus/search?keyword=abc&page=0&size=20
+    // GET /v1/skus/search?keyword=abc&page=0&size=20
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping("/search")
@@ -79,7 +79,7 @@ public class SkuController {
 
     // ─────────────────────────────────────────────────────────────
     // UC-B07: Configure SKU Threshold
-    // PUT /api/v1/skus/{skuId}/threshold
+    // PUT /v1/skus/{skuId}/threshold
     // ─────────────────────────────────────────────────────────────
 
     @PutMapping("/{skuId}/threshold")
@@ -108,7 +108,7 @@ public class SkuController {
 
     // ─────────────────────────────────────────────────────────────
     // UC-B08: Import SKU from Excel
-    // POST /api/v1/skus/import (multipart/form-data)
+    // POST /v1/skus/import (multipart/form-data)
     // BR-IMP-01: max 5MB, max 1000 rows, .xlsx only
     // ─────────────────────────────────────────────────────────────
 
@@ -129,7 +129,7 @@ public class SkuController {
 
     /**
      * Assign category to SKU
-     * PATCH /api/v1/skus/{skuId}/assign-category
+     * PATCH /v1/skus/{skuId}/assign-category
      */
     @PatchMapping("/{skuId}/assign-category")
     @Operation(summary = "Gán category cho SKU", description = "Gán/thay đổi category của SKU. Việc thay đổi category sẽ ảnh hưởng đến zone gợi ý khi putaway.")
@@ -182,7 +182,7 @@ public class SkuController {
      * Called by the scan-event flow when an iPhone scans a product.
      * Also useful for quick debug/test via Swagger.
      * <p>
-     * GET /api/v1/skus/barcode/{barcode}
+     * GET /v1/skus/barcode/{barcode}
      *
      * @param barcode barcode value scanned from the product
      * @return 200 with SkuResponse if found, 404 if no active SKU matches
@@ -206,7 +206,7 @@ public class SkuController {
     /**
      * Lookup SKU by SKU code.
      * <p>
-     * GET /api/v1/skus/code/{skuCode}
+     * GET /v1/skus/code/{skuCode}
      *
      * @param skuCode the SKU code (e.g. SKU001)
      * @return 200 with SkuResponse if found, 404 if not found

@@ -19,7 +19,7 @@ public class ScannerPageController {
         String base = request.getScheme() + "://" + request.getServerName()
                 + (request.getServerPort() == 80 || request.getServerPort() == 443 ? ""
                         : ":" + request.getServerPort());
-        return base + "/api/v1/scan?token=" + token + "&v=qr3";
+        return base + "/v1/scan?token=" + token + "&v=qr3";
     }
 
     @GetMapping(value = "/v1/scan", produces = MediaType.TEXT_HTML_VALUE)

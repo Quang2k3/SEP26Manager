@@ -125,7 +125,7 @@ public class OtpController {
 
         /**
          * UC-AUTH-04: Forgot Password — gửi OTP qua email
-         * POST /api/v1/auth/forgot-password
+         * POST /v1/auth/forgot-password
          */
         @PostMapping("/forgot-password")
         @Operation(summary = "Quên mật khẩu — gửi OTP", description = "Nhập email để nhận mã OTP qua email. Mã OTP có hiệu lực trong vài phút. "
@@ -140,7 +140,7 @@ public class OtpController {
 
         /**
          * UC-AUTH-05: Reset Password — verify OTP + đặt mật khẩu mới
-         * POST /api/v1/auth/reset-password
+         * POST /v1/auth/reset-password
          */
         @PostMapping("/reset-password")
         @Operation(summary = "Đặt lại mật khẩu bằng OTP", description = "Nhập email + OTP + mật khẩu mới để đặt lại mật khẩu. "

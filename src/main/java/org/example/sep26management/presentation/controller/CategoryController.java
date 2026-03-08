@@ -67,7 +67,7 @@ public class CategoryController {
 
     /**
      * Update an existing category
-     * PUT /api/v1/categories/{categoryId}
+     * PUT /v1/categories/{categoryId}
      */
     @PutMapping("/{categoryId}")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
@@ -95,7 +95,7 @@ public class CategoryController {
 
     /**
      * Get category by ID
-     * GET /api/v1/categories/{categoryId}
+     * GET /v1/categories/{categoryId}
      */
     @GetMapping("/{categoryId}")
     @PreAuthorize("isAuthenticated()")
@@ -108,7 +108,7 @@ public class CategoryController {
 
     /**
      * Get all categories
-     * GET /api/v1/categories
+     * GET /v1/categories
      */
     @GetMapping
     @PreAuthorize("isAuthenticated()")
@@ -125,7 +125,7 @@ public class CategoryController {
 
     /**
      * UC: Deactivate category
-     * PATCH /api/v1/categories/{categoryId}/deactivate
+     * PATCH /v1/categories/{categoryId}/deactivate
      */
     @PatchMapping("/{categoryId}/deactivate")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
@@ -144,7 +144,7 @@ public class CategoryController {
 
     /**
      * UC: View Category Tree
-     * GET /api/v1/categories/tree?warehouseId=1
+     * GET /v1/categories/tree?warehouseId=1
      * Shows tree with zone mapping info (convention: Z- + categoryCode)
      */
     @GetMapping("/tree")
@@ -159,7 +159,7 @@ public class CategoryController {
 
     /**
      * UC: Map Category to Zone (convention-based)
-     * POST /api/v1/categories/{categoryId}/map-to-zone
+     * POST /v1/categories/{categoryId}/map-to-zone
      * Convention: zone_code = "Z-" + category_code
      */
     @PostMapping("/{categoryId}/map-to-zone")

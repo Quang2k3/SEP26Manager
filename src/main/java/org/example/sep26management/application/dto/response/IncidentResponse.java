@@ -2,6 +2,7 @@ package org.example.sep26management.application.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
+import org.example.sep26management.application.enums.IncidentType;
 
 import java.time.LocalDateTime;
 
@@ -16,7 +17,7 @@ public class IncidentResponse {
     private Long incidentId;
     private Long warehouseId;
     private String incidentCode;
-    private String incidentType;
+    private IncidentType incidentType;
     private String severity;
     private LocalDateTime occurredAt;
     private String description;

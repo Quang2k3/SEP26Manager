@@ -26,8 +26,10 @@ import java.util.Map;
 /**
  * ZoneController — Zone master data APIs
  *
- * UC-LOC-01 POST /api/v1/zones — Create Zone (MANAGER only)
- * GET /api/v1/zones — List zones by warehouse
+ * UC-LOC-01 POST /v1/zones — Create Zone (MANAGER only)
+ * GET /v1/zones — List zones by warehouse
+ * SCRUM-272 PATCH /v1/zones/{zoneId}/deactivate — Deactivate
+ * (MANAGER)apping("/v1/zones")
  */
 @RestController
 @RequestMapping("/v1/zones")
@@ -64,7 +66,7 @@ public class ZoneController {
 
     // ─────────────────────────────────────────────────────────────
     // List Zones by warehouse
-    // GET /api/v1/zones?warehouseId=1&activeOnly=true
+    // GET /v1/zones?warehouseId=1&activeOnly=true
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping

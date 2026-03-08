@@ -24,10 +24,12 @@ import java.util.Map;
 /**
  * BinController — Bin occupancy and capacity APIs
  *
- * SCRUM-277 GET /api/v1/bins/occupancy — View Bin Occupancy (MANAGER + KEEPER)
- * GET /api/v1/bins/{locationId}/occupancy — View Single Bin Detail
- * SCRUM-278 GET /api/v1/bins/search-empty — Search Empty Bin (MANAGER + KEEPER)
- * SCRUM-279 PATCH /api/v1/bins/{locationId}/capacity — Configure Bin Capacity
+ * SCRUM-277 GET /v1/bins/occupancy — View Bin Occupancy (MANAGER + KEEPER)
+ * GET /v1/bins/{locationId}/occupancy — View Single Bin Detail
+ * SCRUM-278 * GET /v1/bins — List Bins (paginated/filtered)
+ * POST /v1/bins — Create Bin
+ * PUT /v1/bins/{locationId} — Update Bin
+ * PATCH /v1/bins/{locationId}/deactivate — Deactivate Bin Capacity
  * (MANAGER only)
  */
 @RestController
@@ -43,7 +45,7 @@ public class BinController {
     // ─────────────────────────────────────────────────────────────
     // SCRUM-277: View Bin Occupancy (UC-LOC-06)
     // GET
-    // /api/v1/bins/occupancy?warehouseId=1&zoneId=2&occupancyStatus=PARTIAL&page=0&size=20
+    // GET /v1/bins?warehouseId=1&zoneId=2&active=true&page=0&size=20
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping("/occupancy")

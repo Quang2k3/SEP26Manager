@@ -70,10 +70,10 @@ public class SecurityConfig {
                         // Public endpoints
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(
-                                "/auth/**",
-                                "/api/auth/**",
-                                "/api/v1/auth/**",
                                 "/v1/auth/**",
+                                "/v1/test/**",
+                                "/v1/ping",
+                                "/v1/scanner/**",
                                 "/v1/scan", // iPhone scanner HTML page (token in URL param)
                                 "/v1/scan/url", // returns scan URL for QR generation
                                 "/js/**", // static JS files (html5-qrcode, etc.)
@@ -82,8 +82,7 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/api/swagger-ui/**",
                                 "/v3/api-docs/**",
-                                "/api/v3/api-docs/**",
-                                "/v1/health",
+                                "/v3/api-docs/**", // Swagger JSON endpoints "/v1/health",
                                 "/v1/health/**")
                         .permitAll()
                         // Scan events — requires KEEPER role (iPhone scanner)

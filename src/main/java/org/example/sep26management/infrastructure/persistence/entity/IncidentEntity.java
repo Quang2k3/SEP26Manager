@@ -2,6 +2,7 @@ package org.example.sep26management.infrastructure.persistence.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.example.sep26management.application.enums.IncidentType;
 
 import java.time.LocalDateTime;
 
@@ -25,8 +26,9 @@ public class IncidentEntity {
     @Column(name = "incident_code", nullable = false, length = 100)
     private String incidentCode;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "incident_type", nullable = false, length = 50)
-    private String incidentType;
+    private IncidentType incidentType;
 
     @Column(name = "severity", nullable = false, length = 50)
     @Builder.Default

@@ -53,7 +53,7 @@ public class IncidentService {
 
         IncidentEntity saved = incidentRepo.save(incident);
 
-        log.info("Incident created: {} type={} by userId={}", code, request.getIncidentType(), userId);
+        log.info("Incident created: {} type={} by userId={}", code, request.getIncidentType().name(), userId);
 
         return ApiResponse.success("Incident reported successfully", toResponse(saved));
     }
@@ -145,14 +145,17 @@ public class IncidentService {
     // ─── Helper: convert to response ────────────────────────────────────────
 
     private IncidentResponse toResponse(IncidentEntity e) {
-        String reportedByName = e.getReportedBy() != null
-                ? userRepo.findById(e.getReportedBy()).map(UserEntity::getFullName).orElse(null)
-                : null;
+        String reportedByName = null;
+        if (e.getReportedBy() != null) {
+            reportedByName = userRepo.findById(e.getReportedBy())
+                    .map(UserEntity::getFullName).orElse(null);
+        }
 
-        String receivingCode = e.getReceivingId() != null
-                ? receivingOrderRepo.findById(e.getReceivingId())
-                        .map(ReceivingOrderEntity::getReceivingCode).orElse(null)
-                : null;
+        String receivingCode = null;
+        if (e.getReceivingId() != null) {
+            receivingCode = receivingOrderRepo.findById(e.getReceivingId())
+                    .map(ReceivingOrderEntity::getReceivingCode).orElse(null);
+        }
 
         return IncidentResponse.builder()
                 .incidentId(e.getIncidentId())
