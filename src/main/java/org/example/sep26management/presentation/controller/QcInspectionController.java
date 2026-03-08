@@ -92,14 +92,6 @@ public class QcInspectionController {
         return qcService.makeDecision(id, request, extractUserId(auth));
     }
 
-    /** POST /v1/qc-inspections/mock-data — Generate mock QC data */
-    @PostMapping("/mock-data")
-    @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Tạo dữ liệu QC mẫu", description = "Tạo 5 phiếu kiểm định QC mẫu (PENDING) từ các lô hàng (Lot) có sẵn trong kho. Dùng để FE test giao diện.")
-    public ApiResponse<java.util.List<QcInspectionResponse>> generateMockData(Authentication auth) {
-        return qcService.generateMockData(extractUserId(auth));
-    }
-
     @SuppressWarnings("unchecked")
     private Long extractUserId(Authentication auth) {
         if (auth != null && auth.getDetails() instanceof Map) {
