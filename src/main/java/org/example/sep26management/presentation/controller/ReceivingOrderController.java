@@ -5,13 +5,15 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.RejectRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
 import org.example.sep26management.application.service.ReceivingOrderService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import org.springframework.web.bind.annotation.*;
+
 import java.util.Map;
 
 @RestController
@@ -26,10 +28,17 @@ public class ReceivingOrderController {
 
     /** GET /v1/receiving-orders?status=SUBMITTED */
     @GetMapping
-    @Operation(summary = "Danh sách phiếu nhập kho", description = "Lấy danh sách GRN. Có thể lọc theo status: SUBMITTED, APPROVED, POSTED. "
-            + "Response bao gồm thông tin supplier, warehouse, người tạo/duyệt/xác nhận.")
-    public ApiResponse<List<ReceivingOrderResponse>> list(@RequestParam(required = false) String status) {
-        return receivingOrderService.listOrders(status);
+    @Operation(summary = "Danh sách Phiếu nhập kho (List GRN)", description = "Lấy danh sách các phiếu nhập kho (GRN) để hiển thị lên bảng.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.status` (Tùy chọn): Lọc theo trạng thái, ví dụ: DRAFT, SUBMITTED, APPROVED.\n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định là `0`.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định là `10`.\n\n"
+            + "👉 **Kết quả:** Trả về danh sách. FE dùng thuộc tính `receivingCode` (GRN ID) hoặc `receivingId` của mỗi dòng để thao tác tính năng Detail, Duyệt (Approve)...")
+    public ApiResponse<PageResponse<ReceivingOrderResponse>> list(
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return receivingOrderService.listOrders(status, page, size);
     }
 
     /** GET /v1/receiving-orders/{id} */

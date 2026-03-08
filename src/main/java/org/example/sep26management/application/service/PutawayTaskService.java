@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.request.PutawayConfirmRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskEntity;
@@ -12,6 +13,9 @@ import org.example.sep26management.infrastructure.persistence.repository.Locatio
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,16 +40,32 @@ public class PutawayTaskService {
     // ─── List tasks ────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public ApiResponse<List<PutawayTaskResponse>> listTasks(Long assignedTo, String status) {
-        List<PutawayTaskEntity> tasks;
+    public ApiResponse<PageResponse<PutawayTaskResponse>> listTasks(Long assignedTo, String status, int page,
+            int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<PutawayTaskEntity> tasksPage;
         if (assignedTo != null && status != null) {
-            tasks = putawayTaskRepo.findByAssignedToAndStatusOrderByCreatedAtDesc(assignedTo, status);
+            tasksPage = putawayTaskRepo.findByAssignedToAndStatusOrderByCreatedAtDesc(assignedTo, status, pageable);
         } else if (status != null) {
-            tasks = putawayTaskRepo.findByWarehouseIdAndStatusOrderByCreatedAtDesc(null, status);
+            tasksPage = putawayTaskRepo.findByWarehouseIdAndStatusOrderByCreatedAtDesc(null, status, pageable);
         } else {
-            tasks = putawayTaskRepo.findAllByOrderByCreatedAtDesc();
+            tasksPage = putawayTaskRepo.findAllByOrderByCreatedAtDesc(pageable);
         }
-        return ApiResponse.success("OK", tasks.stream().map(t -> toResponse(t)).collect(Collectors.toList()));
+
+        List<PutawayTaskResponse> content = tasksPage.getContent().stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+
+        PageResponse<PutawayTaskResponse> pageResponse = PageResponse.<PutawayTaskResponse>builder()
+                .content(content)
+                .page(tasksPage.getNumber())
+                .size(tasksPage.getSize())
+                .totalElements(tasksPage.getTotalElements())
+                .totalPages(tasksPage.getTotalPages())
+                .last(tasksPage.isLast())
+                .build();
+
+        return ApiResponse.success("OK", pageResponse);
     }
 
     // ─── Get task detail ───────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.CreateZoneRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.ZoneResponse;
 import org.example.sep26management.application.service.ZoneService;
 import org.springframework.http.HttpStatus;
@@ -18,7 +19,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import org.springframework.web.bind.annotation.*;
+
 import java.util.Map;
 
 /**
@@ -67,12 +69,19 @@ public class ZoneController {
 
     @GetMapping
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Danh sách zones", description = "Lấy danh sách zones trong warehouse. Có thể lọc chỉ zone active.")
-    public ResponseEntity<ApiResponse<List<ZoneResponse>>> listZones(
+    @Operation(summary = "Danh sách zones", description = "Lấy danh sách zones trong warehouse. Có thể lọc chỉ zone active.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.warehouseId` (Bắt buộc): ID của kho.\n"
+            + "- `Query.activeOnly` (Tùy chọn): Lọc theo trạng thái active.\n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
+    public ResponseEntity<ApiResponse<PageResponse<ZoneResponse>>> listZones(
             @RequestParam Long warehouseId,
-            @RequestParam(defaultValue = "false") Boolean activeOnly) {
+            @RequestParam(defaultValue = "false") Boolean activeOnly,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
 
-        return ResponseEntity.ok(zoneService.listZones(warehouseId, activeOnly));
+        return ResponseEntity.ok(zoneService.listZones(warehouseId, activeOnly, page, size));
     }
 
     // ─────────────────────────────────────────────────────────────

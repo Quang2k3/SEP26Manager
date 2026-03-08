@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.request.QcDecisionRequest;
 import org.example.sep26management.application.dto.request.UpdateQcInspectionRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.QcInspectionResponse;
 import org.example.sep26management.infrastructure.persistence.entity.InventoryLotEntity;
 import org.example.sep26management.infrastructure.persistence.entity.QcInspectionEntity;
@@ -16,6 +17,9 @@ import org.example.sep26management.infrastructure.persistence.repository.QcInspe
 import org.example.sep26management.infrastructure.persistence.repository.QuarantineHoldJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,16 +40,26 @@ public class QcInspectionService {
     // ─── List QC Inspections ────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public ApiResponse<List<QcInspectionResponse>> listInspections(String status) {
-        List<QcInspectionEntity> inspections = status != null && !status.isBlank()
-                ? qcRepo.findByStatusOrderByCreatedAtDesc(status)
-                : qcRepo.findAllByOrderByCreatedAtDesc();
+    public ApiResponse<PageResponse<QcInspectionResponse>> listInspections(String status, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<QcInspectionEntity> inspectionsPage = status != null && !status.isBlank()
+                ? qcRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
+                : qcRepo.findAllByOrderByCreatedAtDesc(pageable);
 
-        List<QcInspectionResponse> result = inspections.stream()
+        List<QcInspectionResponse> content = inspectionsPage.getContent().stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
 
-        return ApiResponse.success("OK", result);
+        PageResponse<QcInspectionResponse> pageResponse = PageResponse.<QcInspectionResponse>builder()
+                .content(content)
+                .page(inspectionsPage.getNumber())
+                .size(inspectionsPage.getSize())
+                .totalElements(inspectionsPage.getTotalElements())
+                .totalPages(inspectionsPage.getTotalPages())
+                .last(inspectionsPage.isLast())
+                .build();
+
+        return ApiResponse.success("OK", pageResponse);
     }
 
     // ─── Get QC Inspection Detail ───────────────────────────────────────────

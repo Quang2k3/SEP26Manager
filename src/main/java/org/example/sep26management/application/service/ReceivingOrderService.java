@@ -3,11 +3,15 @@ package org.example.sep26management.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.ReceivingItemResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
 import org.example.sep26management.infrastructure.persistence.entity.*;
 import org.example.sep26management.infrastructure.persistence.repository.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,16 +42,27 @@ public class ReceivingOrderService {
         // ─── List ──────────────────────────────────────────────────────────────────
 
         @Transactional(readOnly = true)
-        public ApiResponse<List<ReceivingOrderResponse>> listOrders(String status) {
-                List<ReceivingOrderEntity> orders = status != null && !status.isBlank()
-                                ? receivingOrderRepo.findByStatusOrderByCreatedAtDesc(status)
-                                : receivingOrderRepo.findAllByOrderByCreatedAtDesc();
+        public ApiResponse<PageResponse<ReceivingOrderResponse>> listOrders(String status, int page, int size) {
+                Pageable pageable = PageRequest.of(page, size);
 
-                List<ReceivingOrderResponse> result = orders.stream()
+                Page<ReceivingOrderEntity> ordersPage = status != null && !status.isBlank()
+                                ? receivingOrderRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
+                                : receivingOrderRepo.findAllByOrderByCreatedAtDesc(pageable);
+
+                List<ReceivingOrderResponse> content = ordersPage.getContent().stream()
                                 .map(o -> toSummaryResponse(o))
                                 .collect(Collectors.toList());
 
-                return ApiResponse.success("OK", result);
+                PageResponse<ReceivingOrderResponse> pageResponse = PageResponse.<ReceivingOrderResponse>builder()
+                                .content(content)
+                                .page(ordersPage.getNumber())
+                                .size(ordersPage.getSize())
+                                .totalElements(ordersPage.getTotalElements())
+                                .totalPages(ordersPage.getTotalPages())
+                                .last(ordersPage.isLast())
+                                .build();
+
+                return ApiResponse.success("OK", pageResponse);
         }
 
         // ─── Get (với enriched fields đầy đủ) ─────────────────────────────────────

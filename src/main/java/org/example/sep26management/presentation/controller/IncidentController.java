@@ -8,12 +8,14 @@ import org.example.sep26management.application.dto.request.CreateIncidentRequest
 import org.example.sep26management.application.dto.request.RejectRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.IncidentResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.service.IncidentService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import org.springframework.web.bind.annotation.*;
+
 import java.util.Map;
 
 @RestController
@@ -37,10 +39,16 @@ public class IncidentController {
 
     /** GET /v1/incidents?status=OPEN */
     @GetMapping
-    @Operation(summary = "Danh sách sự cố", description = "Lấy danh sách sự cố (có thể lọc theo status: OPEN, APPROVED, REJECTED).")
-    public ApiResponse<List<IncidentResponse>> list(
-            @RequestParam(required = false) String status) {
-        return incidentService.listIncidents(status);
+    @Operation(summary = "Danh sách sự cố", description = "Lấy danh sách sự cố.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.status` (Tùy chọn): Lọc theo trạng thái, ví dụ: OPEN, APPROVED, REJECTED.\n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
+    public ApiResponse<PageResponse<IncidentResponse>> list(
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return incidentService.listIncidents(status, page, size);
     }
 
     /** GET /v1/incidents/{id} */

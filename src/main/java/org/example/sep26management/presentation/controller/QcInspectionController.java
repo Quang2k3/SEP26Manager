@@ -7,13 +7,15 @@ import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.QcDecisionRequest;
 import org.example.sep26management.application.dto.request.UpdateQcInspectionRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.QcInspectionResponse;
 import org.example.sep26management.application.service.QcInspectionService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import org.springframework.web.bind.annotation.*;
+
 import java.util.Map;
 
 @RestController
@@ -30,12 +32,17 @@ public class QcInspectionController {
 
     /** GET /v1/qc-inspections?status=PENDING */
     @GetMapping
-    @Operation(summary = "Danh sách phiếu kiểm định QC", description = "Lấy danh sách các phiếu QC. Tham số `status` đóng vai trò là FILTER (bộ lọc) không bắt buộc. "
-            + "Nếu không truyền `status`, API trả về tất cả. Nếu truyền `status` (ví dụ: PENDING, INSPECTED, DECIDED) thì chỉ các phiếu có trạng thái tương ứng được lưới ra. "
-            + "Kết quả trả về sẽ báo gồm ID (qcInspectionId) của từng phiếu để QC có thể nhấn vào xem chi tiết.")
-    public ApiResponse<List<QcInspectionResponse>> list(
-            @RequestParam(required = false) String status) {
-        return qcService.listInspections(status);
+    @Operation(summary = "Danh sách phiếu kiểm định QC", description = "Lấy danh sách các phiếu QC. Tham số `status` đóng vai trò là FILTER (bộ lọc).\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.status` (Tùy chọn): Lọc theo trạng thái, ví dụ: PENDING, INSPECTED, DECIDED.\n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.\n\n"
+            + "👉 **Kết quả:** Trả về danh sách. Kết quả bao gồm ID (`qcInspectionId`) của từng phiếu để QC có thể nhấn vào xem chi tiết.")
+    public ApiResponse<PageResponse<QcInspectionResponse>> list(
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return qcService.listInspections(status, page, size);
     }
 
     /** GET /v1/qc-inspections/{id} */

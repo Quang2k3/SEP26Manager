@@ -83,15 +83,22 @@ public class BinController {
     @GetMapping("/search-empty")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
     @Operation(summary = "Tìm bin trống", description = "Tìm các bin trống (không có inventory) trong warehouse/zone. "
-            + "Có thể lọc theo yêu cầu dung lượng (requiredWeightKg, requiredVolumeM3).")
-    public ResponseEntity<ApiResponse<List<EmptyBinResponse>>> searchEmptyBin(
+            + "Có thể lọc theo yêu cầu dung lượng (requiredWeightKg, requiredVolumeM3).\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.warehouseId` (Bắt buộc): ID của kho.\n"
+            + "- `Query.zoneId` (Tùy chọn): Lọc theo ID khu vực.\n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
+    public ResponseEntity<ApiResponse<PageResponse<EmptyBinResponse>>> searchEmptyBin(
             @RequestParam Long warehouseId,
             @RequestParam(required = false) Long zoneId,
             @RequestParam(required = false) BigDecimal requiredWeightKg,
-            @RequestParam(required = false) BigDecimal requiredVolumeM3) {
+            @RequestParam(required = false) BigDecimal requiredVolumeM3,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
 
         return ResponseEntity.ok(binService.searchEmptyBin(
-                warehouseId, zoneId, requiredWeightKg, requiredVolumeM3));
+                warehouseId, zoneId, requiredWeightKg, requiredVolumeM3, page, size));
     }
 
     // ─────────────────────────────────────────────────────────────

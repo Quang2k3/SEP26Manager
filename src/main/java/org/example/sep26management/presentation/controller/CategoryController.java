@@ -13,6 +13,7 @@ import org.example.sep26management.application.dto.request.UpdateCategoryRequest
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.CategoryResponse;
 import org.example.sep26management.application.dto.response.CategoryTreeResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.service.CategoryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -111,9 +112,14 @@ public class CategoryController {
      */
     @GetMapping
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Danh sách categories", description = "Lấy tất cả categories (bao gồm active và inactive).")
-    public ResponseEntity<ApiResponse<List<CategoryResponse>>> getAllCategories() {
-        ApiResponse<List<CategoryResponse>> response = categoryService.getAllCategories();
+    @Operation(summary = "Danh sách categories", description = "Lấy tất cả categories (bao gồm active và inactive).\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
+    public ResponseEntity<ApiResponse<PageResponse<CategoryResponse>>> getAllCategories(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        ApiResponse<PageResponse<CategoryResponse>> response = categoryService.getAllCategories(page, size);
         return ResponseEntity.ok(response);
     }
 

@@ -8,10 +8,14 @@ import org.example.sep26management.application.dto.request.CreateCategoryRequest
 import org.example.sep26management.application.dto.request.UpdateCategoryRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.CategoryResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.CategoryEntity;
 import org.example.sep26management.infrastructure.persistence.repository.CategoryJpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.example.sep26management.application.dto.response.CategoryTreeResponse;
@@ -158,7 +162,8 @@ public class CategoryService {
         }
         if ((oldParentId == null && updatedCategory.getParentCategoryId() != null)
                 || (oldParentId != null && !oldParentId.equals(updatedCategory.getParentCategoryId()))) {
-            auditDetails.append(String.format(" | ParentId: %s -> %s", oldParentId, updatedCategory.getParentCategoryId()));
+            auditDetails
+                    .append(String.format(" | ParentId: %s -> %s", oldParentId, updatedCategory.getParentCategoryId()));
         }
         if (!oldActive.equals(updatedCategory.getActive())) {
             auditDetails.append(String.format(" | Active: %s -> %s", oldActive, updatedCategory.getActive()));
@@ -203,12 +208,12 @@ public class CategoryService {
      * Get all categories
      */
     @Transactional(readOnly = true)
-    public ApiResponse<List<CategoryResponse>> getAllCategories() {
+    public ApiResponse<PageResponse<CategoryResponse>> getAllCategories(int page, int size) {
         log.info(LogMessages.CATEGORY_LIST_FETCHING);
+        Pageable pageable = PageRequest.of(page, size);
+        Page<CategoryEntity> categoriesPage = categoryRepository.findAll(pageable);
 
-        List<CategoryEntity> categories = categoryRepository.findAll();
-
-        List<CategoryResponse> responses = categories.stream()
+        List<CategoryResponse> content = categoriesPage.getContent().stream()
                 .map(cat -> {
                     String parentName = null;
                     if (cat.getParentCategoryId() != null) {
@@ -220,7 +225,16 @@ public class CategoryService {
                 })
                 .collect(Collectors.toList());
 
-        return ApiResponse.success(MessageConstants.CATEGORY_LIST_SUCCESS, responses);
+        PageResponse<CategoryResponse> pageResponse = PageResponse.<CategoryResponse>builder()
+                .content(content)
+                .page(categoriesPage.getNumber())
+                .size(categoriesPage.getSize())
+                .totalElements(categoriesPage.getTotalElements())
+                .totalPages(categoriesPage.getTotalPages())
+                .last(categoriesPage.isLast())
+                .build();
+
+        return ApiResponse.success(MessageConstants.CATEGORY_LIST_SUCCESS, pageResponse);
     }
 
     // ==========================================================
@@ -343,7 +357,7 @@ public class CategoryService {
      *
      * Flow:
      * 1. Lấy category_code từ category
-     * 2. Tính zone_code = "Z-" + category_code  (e.g. "HC" → "Z-HC")
+     * 2. Tính zone_code = "Z-" + category_code (e.g. "HC" → "Z-HC")
      * 3. Tìm zone trong warehouse theo zone_code
      * 4. Validate: zone phải tồn tại + active, category phải active
      * 5. Trả về kết quả mapping
