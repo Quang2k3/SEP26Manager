@@ -1,17 +1,20 @@
 package org.example.sep26management.infrastructure.persistence.repository;
 
 import org.example.sep26management.infrastructure.persistence.entity.IncidentEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 
 public interface IncidentJpaRepository extends JpaRepository<IncidentEntity, Long> {
 
-    List<IncidentEntity> findByWarehouseIdAndStatusOrderByCreatedAtDesc(Long warehouseId, String status);
+    Page<IncidentEntity> findByWarehouseIdAndStatusOrderByCreatedAtDesc(Long warehouseId, String status,
+            Pageable pageable);
 
-    List<IncidentEntity> findByStatusOrderByCreatedAtDesc(String status);
+    Page<IncidentEntity> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
 
     List<IncidentEntity> findByReceivingIdOrderByCreatedAtDesc(Long receivingId);
 
-    List<IncidentEntity> findAllByOrderByCreatedAtDesc();
+    Page<IncidentEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
 }

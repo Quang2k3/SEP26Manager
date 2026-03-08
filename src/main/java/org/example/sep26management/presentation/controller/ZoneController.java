@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.CreateZoneRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.ZoneResponse;
 import org.example.sep26management.application.service.ZoneService;
 import org.springframework.http.HttpStatus;
@@ -18,14 +19,17 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import org.springframework.web.bind.annotation.*;
+
 import java.util.Map;
 
 /**
  * ZoneController — Zone master data APIs
  *
- * UC-LOC-01 POST /api/v1/zones — Create Zone (MANAGER only)
- * GET /api/v1/zones — List zones by warehouse
+ * UC-LOC-01 POST /v1/zones — Create Zone (MANAGER only)
+ * GET /v1/zones — List zones by warehouse
+ * SCRUM-272 PATCH /v1/zones/{zoneId}/deactivate — Deactivate
+ * (MANAGER)apping("/v1/zones")
  */
 @RestController
 @RequestMapping("/v1/zones")
@@ -68,19 +72,24 @@ public class ZoneController {
 
     // ─────────────────────────────────────────────────────────────
     // List Zones by warehouse
-    // GET /api/v1/zones?activeOnly=true
-    // warehouseId lấy từ JWT token (không cần truyền vào param)
+    // GET /v1/zones?warehouseId=1&activeOnly=true
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Danh sách zones", description = "Lấy danh sách zones trong warehouse. warehouseId lấy tự động từ JWT token. Có thể lọc chỉ zone active.")
-    public ResponseEntity<ApiResponse<List<ZoneResponse>>> listZones(
+    @Operation(summary = "Danh sách zones", description = "Lấy danh sách zones trong warehouse. Có thể lọc chỉ zone active.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.warehouseId` (Bắt buộc): ID của kho.\n"
+            + "- `Query.activeOnly` (Tùy chọn): Lọc theo trạng thái active.\n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
+    public ResponseEntity<ApiResponse<PageResponse<ZoneResponse>>> listZones(
+            @RequestParam Long warehouseId,
             @RequestParam(defaultValue = "false") Boolean activeOnly,
-            Authentication authentication) {
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
 
-        Long warehouseId = extractWarehouseId(authentication);
-        return ResponseEntity.ok(zoneService.listZones(warehouseId, activeOnly));
+        return ResponseEntity.ok(zoneService.listZones(warehouseId, activeOnly, page, size));
     }
 
     // ─────────────────────────────────────────────────────────────

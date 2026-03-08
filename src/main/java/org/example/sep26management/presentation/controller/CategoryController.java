@@ -13,6 +13,7 @@ import org.example.sep26management.application.dto.request.UpdateCategoryRequest
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.CategoryResponse;
 import org.example.sep26management.application.dto.response.CategoryTreeResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.MapCategoryToZoneResponse;
 import org.example.sep26management.application.service.CategoryService;
 import org.springframework.http.HttpStatus;
@@ -62,9 +63,10 @@ public class CategoryController {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // PUT /v1/categories/{categoryId} — Cập nhật category
-    // ─────────────────────��───────────────────────────────────────
+    /**
+     * Update an existing category
+     * PUT /v1/categories/{categoryId}
+     */
     @PutMapping("/{categoryId}")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
     @Operation(summary = "Cập nhật category",
@@ -90,9 +92,10 @@ public class CategoryController {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // GET /v1/categories/{categoryId} — Chi tiết 1 category
-    // ─────────────────────────────────────────────────────────────
+    /**
+     * Get category by ID
+     * GET /v1/categories/{categoryId}
+     */
     @GetMapping("/{categoryId}")
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Chi tiết category",
@@ -103,21 +106,27 @@ public class CategoryController {
         return ResponseEntity.ok(response);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // GET /v1/categories — Danh sách tất cả categories
-    // ─────────────────────────────────────────────────────────────
+    /**
+     * Get all categories
+     * GET /v1/categories
+     */
     @GetMapping
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Danh sách categories",
-            description = "Lấy tất cả categories (bao gồm active và inactive).")
-    public ResponseEntity<ApiResponse<List<CategoryResponse>>> getAllCategories() {
-        ApiResponse<List<CategoryResponse>> response = categoryService.getAllCategories();
+    @Operation(summary = "Danh sách categories", description = "Lấy tất cả categories (bao gồm active và inactive).\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
+    public ResponseEntity<ApiResponse<PageResponse<CategoryResponse>>> getAllCategories(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        ApiResponse<PageResponse<CategoryResponse>> response = categoryService.getAllCategories(page, size);
         return ResponseEntity.ok(response);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // PATCH /v1/categories/{categoryId}/deactivate — Vô hiệu hóa
-    // ─────────────────────────────────────────────────────────────
+    /**
+     * UC: Deactivate category
+     * PATCH /v1/categories/{categoryId}/deactivate
+     */
     @PatchMapping("/{categoryId}/deactivate")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
     @Operation(summary = "Vô hiệu hóa category",
@@ -134,10 +143,11 @@ public class CategoryController {
         return ResponseEntity.ok(response);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // GET /v1/categories/tree — Cây category-zone
-    //
-    // ─────────────────────────────────────────────────────────────
+    /**
+     * UC: View Category Tree
+     * GET /v1/categories/tree?warehouseId=1
+     * Shows tree with zone mapping info (convention: Z- + categoryCode)
+     */
     @GetMapping("/tree")
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Cây category-zone",
@@ -148,11 +158,11 @@ public class CategoryController {
         return ResponseEntity.ok(response);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // POST /v1/categories/{categoryId}/map-to-zone
-    //
-    // Convention: zone_code = "Z-" + category_code
-    // ─────────────────────────────────────────────────────────────
+    /**
+     * UC: Map Category to Zone (convention-based)
+     * POST /v1/categories/{categoryId}/map-to-zone
+     * Convention: zone_code = "Z-" + category_code
+     */
     @PostMapping("/{categoryId}/map-to-zone")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
     @Operation(summary = "Map category vào zone",

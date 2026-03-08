@@ -27,11 +27,12 @@ import java.util.Map;
 /**
  * LocationController — Location master data APIs
  *
- * SCRUM-273 POST /api/v1/locations              — Create Location (MANAGER)
- * SCRUM-274 PUT  /api/v1/locations/{locationId} — Update Location (MANAGER)
- * SCRUM-275 PATCH /api/v1/locations/{locationId}/deactivate — Deactivate (MANAGER)
- * SCRUM-276 GET  /api/v1/locations              — View Location List (MANAGER)
- *           GET  /api/v1/locations/{locationId} — View Location Detail
+ * SCRUM-273 POST /v1/locations — Create Location (MANAGER)
+ * SCRUM-274 PUT /v1/locations/{locationId} — Update Location (MANAGER)
+ * SCRUM-275 PATCH /v1/locations/{locationId}/deactivate — Deactivate
+ * (MANAGER)
+ * SCRUM-276 GET /v1/locations — View Location List (MANAGER)
+ * GET /v1/locations/{locationId} — View Location Detail
  */
 @RestController
 @RequestMapping("/v1/locations")
@@ -109,8 +110,8 @@ public class LocationController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-276: View Location List (UC-LOC-05)
-    // GET /api/v1/locations?zoneId=2&locationType=BIN&active=true&keyword=A01&page=0&size=20
-    // warehouseId lấy từ JWT token (không cần truyền vào param)
+    // GET
+    // /v1/locations?warehouseId=1&zoneId=2&locationType=BIN&active=true&keyword=A01&page=0&size=20
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping

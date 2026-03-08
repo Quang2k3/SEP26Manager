@@ -40,7 +40,7 @@ public class UserManagementController {
 
     /**
      * Create a new user
-     * POST /api/v1/users/create
+     * POST /v1/users/create
      * 
      * @param request     CreateUserRequest with user details
      * @param httpRequest HTTP request for IP and user agent extraction
@@ -75,7 +75,7 @@ public class UserManagementController {
 
     /**
      * Get list of users with pagination and filtering
-     * GET /api/v1/users
+     * GET /v1/users
      * 
      * @param keyword Optional keyword to search by email or name
      * @param status  Optional status filter (ACTIVE, INACTIVE, PENDING_VERIFY,
@@ -107,7 +107,7 @@ public class UserManagementController {
 
     /**
      * Assign a new role to a user
-     * PUT /api/v1/users/{userId}/assign-role
+     * PUT /v1/users/{userId}/assign-role
      * Only MANAGER can perform this action (enforced by class-level @PreAuthorize)
      * 
      * @param userId      Target user ID whose role will be changed
@@ -147,7 +147,7 @@ public class UserManagementController {
 
     /**
      * Change user status (ACTIVE/INACTIVE)
-     * PUT /api/v1/users/{userId}/change-status
+     * PUT /v1/users/{userId}/change-status
      *
      * @param userId      Target user ID
      * @param request     ChangeStatusRequest with new status, optional suspend date

@@ -24,11 +24,13 @@ import java.util.Map;
 /**
  * BinController — Bin occupancy and capacity APIs
  *
- * SCRUM-277 GET /api/v1/bins/occupancy              — View Bin Occupancy (MANAGER + KEEPER)
- *           GET /api/v1/bins/{locationId}/occupancy — View Single Bin Detail
- * SCRUM-278 GET /api/v1/bins/search-empty           — Search Empty Bin (MANAGER + KEEPER)
- * SCRUM-279 PATCH /api/v1/bins/{locationId}/capacity — Configure Bin Capacity (MANAGER only)
- *
+ * SCRUM-277 GET /v1/bins/occupancy — View Bin Occupancy (MANAGER + KEEPER)
+ * GET /v1/bins/{locationId}/occupancy — View Single Bin Detail
+ * SCRUM-278 * GET /v1/bins — List Bins (paginated/filtered)
+ * POST /v1/bins — Create Bin
+ * PUT /v1/bins/{locationId} — Update Bin
+ * PATCH /v1/bins/{locationId}/deactivate — Deactivate Bin Capacity
+ * (MANAGER only)
  */
 @RestController
 @RequestMapping("/v1/bins")
@@ -42,8 +44,8 @@ public class BinController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-277: View Bin Occupancy (UC-LOC-06)
-    // GET /api/v1/bins/occupancy?zoneId=2&occupancyStatus=PARTIAL&page=0&size=20
-    // warehouseId lấy từ JWT token
+    // GET
+    // GET /v1/bins?warehouseId=1&zoneId=2&active=true&page=0&size=20
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping("/occupancy")
@@ -85,16 +87,23 @@ public class BinController {
     @GetMapping("/search-empty")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
     @Operation(summary = "Tìm bin trống", description = "Tìm các bin trống (không có inventory) trong warehouse/zone. "
-            + "Có thể lọc theo yêu cầu dung lượng (requiredWeightKg, requiredVolumeM3). warehouseId lấy tự động từ JWT token.")
-    public ResponseEntity<ApiResponse<List<EmptyBinResponse>>> searchEmptyBin(
-            Authentication authentication,
+            + "Có thể lọc theo yêu cầu dung lượng (requiredWeightKg, requiredVolumeM3).\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `Query.warehouseId` (Bắt buộc): ID của kho.\n"
+            + "- `Query.zoneId` (Tùy chọn): Lọc theo ID khu vực.\n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
+    public ResponseEntity<ApiResponse<PageResponse<EmptyBinResponse>>> searchEmptyBin(
+            @RequestParam Long warehouseId,
             @RequestParam(required = false) Long zoneId,
             @RequestParam(required = false) BigDecimal requiredWeightKg,
-            @RequestParam(required = false) BigDecimal requiredVolumeM3) {
+            @RequestParam(required = false) BigDecimal requiredVolumeM3,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
 
         Long warehouseId = extractWarehouseId(authentication);
         return ResponseEntity.ok(binService.searchEmptyBin(
-                warehouseId, zoneId, requiredWeightKg, requiredVolumeM3));
+                warehouseId, zoneId, requiredWeightKg, requiredVolumeM3, page, size));
     }
 
     // ─────────────────────────────────────────────────────────────

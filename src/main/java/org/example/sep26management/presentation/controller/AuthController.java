@@ -33,7 +33,7 @@ public class AuthController {
 
         /**
          * UC-AUTH-01: Login
-         * POST /api/v1/auth/login
+         * POST /v1/auth/login
          */
         @PostMapping("/login")
         @Operation(summary = "Đăng nhập hệ thống", description = "Xác thực bằng email + password. Nếu email chưa verified → trả về pendingToken + requiresVerification=true "
@@ -61,7 +61,7 @@ public class AuthController {
 
         /**
          * UC-AUTH-02: Logout
-         * POST /api/v1/auth/logout
+         * POST /v1/auth/logout
          */
         @PostMapping("/logout")
         @Operation(summary = "Đăng xuất", description = "Ghi log đăng xuất và xóa security context. Client nên xóa JWT token ở phía mình sau khi gọi API này.")
@@ -92,7 +92,7 @@ public class AuthController {
 
         /**
          * Get current user info from token
-         * GET /api/v1/auth/me
+         * GET /v1/auth/me
          */
         @GetMapping("/me")
         @Operation(summary = "Lấy thông tin người dùng hiện tại", description = "Trả về thông tin user đang đăng nhập dựa trên JWT token. Bao gồm userId, email, fullName, roleCodes, warehouseIds.")

@@ -5,12 +5,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.request.CreateIncidentRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.IncidentResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.infrastructure.persistence.entity.IncidentEntity;
 import org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
 import org.example.sep26management.infrastructure.persistence.repository.IncidentJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,7 +53,7 @@ public class IncidentService {
 
         IncidentEntity saved = incidentRepo.save(incident);
 
-        log.info("Incident created: {} type={} by userId={}", code, request.getIncidentType(), userId);
+        log.info("Incident created: {} type={} by userId={}", code, request.getIncidentType().name(), userId);
 
         return ApiResponse.success("Incident reported successfully", toResponse(saved));
     }
@@ -57,16 +61,26 @@ public class IncidentService {
     // ─── List Incidents ─────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public ApiResponse<List<IncidentResponse>> listIncidents(String status) {
-        List<IncidentEntity> incidents = status != null && !status.isBlank()
-                ? incidentRepo.findByStatusOrderByCreatedAtDesc(status)
-                : incidentRepo.findAllByOrderByCreatedAtDesc();
+    public ApiResponse<PageResponse<IncidentResponse>> listIncidents(String status, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<IncidentEntity> incidentsPage = status != null && !status.isBlank()
+                ? incidentRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
+                : incidentRepo.findAllByOrderByCreatedAtDesc(pageable);
 
-        List<IncidentResponse> result = incidents.stream()
+        List<IncidentResponse> content = incidentsPage.getContent().stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
 
-        return ApiResponse.success("OK", result);
+        PageResponse<IncidentResponse> pageResponse = PageResponse.<IncidentResponse>builder()
+                .content(content)
+                .page(incidentsPage.getNumber())
+                .size(incidentsPage.getSize())
+                .totalElements(incidentsPage.getTotalElements())
+                .totalPages(incidentsPage.getTotalPages())
+                .last(incidentsPage.isLast())
+                .build();
+
+        return ApiResponse.success("OK", pageResponse);
     }
 
     // ─── Get Incident ───────────────────────────────────────────────────────
@@ -131,14 +145,17 @@ public class IncidentService {
     // ─── Helper: convert to response ────────────────────────────────────────
 
     private IncidentResponse toResponse(IncidentEntity e) {
-        String reportedByName = e.getReportedBy() != null
-                ? userRepo.findById(e.getReportedBy()).map(UserEntity::getFullName).orElse(null)
-                : null;
+        String reportedByName = null;
+        if (e.getReportedBy() != null) {
+            reportedByName = userRepo.findById(e.getReportedBy())
+                    .map(UserEntity::getFullName).orElse(null);
+        }
 
-        String receivingCode = e.getReceivingId() != null
-                ? receivingOrderRepo.findById(e.getReceivingId())
-                        .map(ReceivingOrderEntity::getReceivingCode).orElse(null)
-                : null;
+        String receivingCode = null;
+        if (e.getReceivingId() != null) {
+            receivingCode = receivingOrderRepo.findById(e.getReceivingId())
+                    .map(ReceivingOrderEntity::getReceivingCode).orElse(null);
+        }
 
         return IncidentResponse.builder()
                 .incidentId(e.getIncidentId())

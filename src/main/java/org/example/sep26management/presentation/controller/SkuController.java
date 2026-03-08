@@ -45,11 +45,10 @@ public class SkuController {
 
     private final SkuService skuService;
 
-    // ─────────────────────────────────────────────────────────────
-    // UC-B05: View SKU Detail
-    // GET /api/v1/skus/{skuId}
-    // ─────────────────────────────────────────────────────────────
-
+    /**
+     * UC-268: View SKU Detail
+     * GET /v1/skus/{skuId}
+     */
     @GetMapping("/{skuId}")
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Chi tiết SKU", description = "Xem thông tin chi tiết SKU: skuCode, skuName, barcode, weight, volume, category, image,...")
@@ -62,7 +61,7 @@ public class SkuController {
     // ─────────────────────────────────────────────────────────────
     // UC-B06: Search SKU
     // BR-SKU-06: partial, case-insensitive, skuCode + skuName
-    // GET /api/v1/skus/search?keyword=abc&page=0&size=20
+    // GET /v1/skus/search?keyword=abc&page=0&size=20
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping("/search")
@@ -84,7 +83,7 @@ public class SkuController {
 
     // ─────────────────────────────────────────────────────────────
     // UC-B07: Configure SKU Threshold
-    // PUT /api/v1/skus/{skuId}/threshold
+    // PUT /v1/skus/{skuId}/threshold
     // ─────────────────────────────────────────────────────────────
 
     @PutMapping("/{skuId}/threshold")
@@ -127,8 +126,8 @@ public class SkuController {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // UC-B08: Import SKU from Excel (MANAGER)
-    // POST /api/v1/skus/import (multipart/form-data)
+    // UC-B08: Import SKU from Excel
+    // POST /v1/skus/import (multipart/form-data)
     // BR-IMP-01: max 5MB, max 1000 rows, .xlsx only
     // ─────────────────────────────────────────────────────────────
 
@@ -147,11 +146,10 @@ public class SkuController {
                 httpRequest.getHeader("User-Agent")));
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Assign category to SKU
-    // PATCH /api/v1/skus/{skuId}/assign-category
-    // ─────────────────────────────────────────────────────────────
-
+    /**
+     * Assign category to SKU
+     * PATCH /v1/skus/{skuId}/assign-category
+     */
     @PatchMapping("/{skuId}/assign-category")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
     @Operation(summary = "Gán category cho SKU",
@@ -236,5 +234,55 @@ public class SkuController {
         if (xri != null && !xri.isEmpty())
             return xri;
         return request.getRemoteAddr();
+    }
+
+    /**
+     * UC-B06 — Lookup SKU by barcode.
+     * Called by the scan-event flow when an iPhone scans a product.
+     * Also useful for quick debug/test via Swagger.
+     * <p>
+     * GET /v1/skus/barcode/{barcode}
+     *
+     * @param barcode barcode value scanned from the product
+     * @return 200 with SkuResponse if found, 404 if no active SKU matches
+     */
+    @GetMapping("/barcode/{barcode}")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Tra cứu SKU theo barcode", description = "Tìm SKU active theo barcode. Dùng cho quét barcode từ iPhone hoặc test nhanh trên Swagger.")
+    public ResponseEntity<ApiResponse<SkuResponse>> findByBarcode(
+            @PathVariable String barcode) {
+
+        log.info("GET /v1/skus/barcode/{} — barcode lookup", barcode);
+
+        ApiResponse<SkuResponse> response = skuService.findByBarcode(barcode);
+
+        if (Boolean.TRUE.equals(response.getSuccess())) {
+            return ResponseEntity.ok(response);
+        }
+        return ResponseEntity.status(404).body(response);
+    }
+
+    /**
+     * Lookup SKU by SKU code.
+     * <p>
+     * GET /v1/skus/code/{skuCode}
+     *
+     * @param skuCode the SKU code (e.g. SKU001)
+     * @return 200 with SkuResponse if found, 404 if not found
+     */
+    @GetMapping("/code/{skuCode}")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Tra cứu SKU theo mã", description = "Tìm SKU theo skuCode (ví dụ: SKU001). Trả về 404 nếu không tìm thấy.")
+    public ResponseEntity<ApiResponse<SkuResponse>> findBySkuCode(
+            @PathVariable String skuCode) {
+
+        log.info("GET /v1/skus/code/{} — skuCode lookup", skuCode);
+
+        ApiResponse<SkuResponse> response = skuService.findBySkuCode(skuCode);
+
+        if (Boolean.TRUE.equals(response.getSuccess())) {
+            return ResponseEntity.ok(response);
+        }
+        return ResponseEntity.status(404).body(response);
     }
 }

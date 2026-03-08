@@ -5,17 +5,22 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.request.QcDecisionRequest;
 import org.example.sep26management.application.dto.request.UpdateQcInspectionRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.QcInspectionResponse;
 import org.example.sep26management.infrastructure.persistence.entity.InventoryLotEntity;
 import org.example.sep26management.infrastructure.persistence.entity.QcInspectionEntity;
 import org.example.sep26management.infrastructure.persistence.entity.QuarantineHoldEntity;
 import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
+import org.example.sep26management.infrastructure.persistence.repository.InventoryLotJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.InventorySnapshotJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.QcInspectionJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.QuarantineHoldJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,20 +37,31 @@ public class QcInspectionService {
     private final QuarantineHoldJpaRepository quarantineRepo;
     private final SkuJpaRepository skuRepo;
     private final UserJpaRepository userRepo;
+    private final InventoryLotJpaRepository inventoryLotRepo;
 
     // ─── List QC Inspections ────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public ApiResponse<List<QcInspectionResponse>> listInspections(String status) {
-        List<QcInspectionEntity> inspections = status != null && !status.isBlank()
-                ? qcRepo.findByStatusOrderByCreatedAtDesc(status)
-                : qcRepo.findAllByOrderByCreatedAtDesc();
+    public ApiResponse<PageResponse<QcInspectionResponse>> listInspections(String status, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<QcInspectionEntity> inspectionsPage = status != null && !status.isBlank()
+                ? qcRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
+                : qcRepo.findAllByOrderByCreatedAtDesc(pageable);
 
-        List<QcInspectionResponse> result = inspections.stream()
+        List<QcInspectionResponse> content = inspectionsPage.getContent().stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
 
-        return ApiResponse.success("OK", result);
+        PageResponse<QcInspectionResponse> pageResponse = PageResponse.<QcInspectionResponse>builder()
+                .content(content)
+                .page(inspectionsPage.getNumber())
+                .size(inspectionsPage.getSize())
+                .totalElements(inspectionsPage.getTotalElements())
+                .totalPages(inspectionsPage.getTotalPages())
+                .last(inspectionsPage.isLast())
+                .build();
+
+        return ApiResponse.success("OK", pageResponse);
     }
 
     // ─── Get QC Inspection Detail ───────────────────────────────────────────
@@ -132,6 +148,63 @@ public class QcInspectionService {
         response.setDecision(decision);
 
         return ApiResponse.success("Decision recorded: " + decision, response);
+    }
+
+    // ─── Generate Mock QC Data ───────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<List<QcInspectionResponse>> generateMockData(Long managerId) {
+        // Fetch up to 5 lots that don't already have QC inspections (to avoid
+        // duplicates, though DB might allow PENDING)
+        // For simplicity, just fetch 5 random lots.
+        Pageable limit = PageRequest.of(0, 5);
+        List<InventoryLotEntity> lots = inventoryLotRepo.findAll(limit).getContent();
+
+        if (lots.isEmpty()) {
+            throw new RuntimeException(
+                    "No inventory lots found to generate mock data. Please create a receiving order first.");
+        }
+
+        List<QcInspectionEntity> createdMockData = new java.util.ArrayList<>();
+        for (InventoryLotEntity lot : lots) {
+            // Check if exist
+            boolean exist = qcRepo.findAll().stream().anyMatch(q -> q.getLotId().equals(lot.getLotId()));
+            if (!exist) {
+                // Determine warehouse based on Receiving (simplified fallback to 1)
+                Long warehouseId = 1L;
+
+                QcInspectionEntity mockQc = QcInspectionEntity.builder()
+                        .warehouseId(warehouseId)
+                        .lotId(lot.getLotId())
+                        .inspectionCode("QC-MOCK-" + System.currentTimeMillis() + "-" + lot.getLotId())
+                        .status("PENDING")
+                        .build();
+
+                createdMockData.add(qcRepo.save(mockQc));
+
+                // Also put the lot in quarantine hold to simulate realistic flow
+                QuarantineHoldEntity mockHold = QuarantineHoldEntity.builder()
+                        .warehouseId(warehouseId)
+                        .lotId(lot.getLotId())
+                        .holdReason("Mock Data Auto Generate - Scan Event Failure Simulated")
+                        .holdNote("This is a mock quarantine hold generated by system.")
+                        .holdAt(LocalDateTime.now())
+                        .build();
+                quarantineRepo.save(mockHold);
+
+                log.info("Mock QC data generated for lot {} (ID: {})", lot.getLotNumber(), lot.getLotId());
+            }
+        }
+
+        if (createdMockData.isEmpty()) {
+            return ApiResponse.success("Lots already have corresponding QC inspections. No new mock data created.",
+                    java.util.Collections.emptyList());
+        }
+
+        List<QcInspectionResponse> responses = createdMockData.stream().map(this::toResponse)
+                .collect(Collectors.toList());
+        return ApiResponse.success("Successfully generated mock QC data for " + createdMockData.size() + " records.",
+                responses);
     }
 
     // ─── Helper: Convert to Response ────────────────────────────────────────

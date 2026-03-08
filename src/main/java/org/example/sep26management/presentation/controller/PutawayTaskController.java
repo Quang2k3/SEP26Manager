@@ -6,10 +6,13 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.PutawayConfirmRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
 import org.example.sep26management.application.service.PutawayTaskService;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,15 +34,18 @@ public class PutawayTaskController {
      * Keeper fetches their task list.
      */
     @GetMapping
-    @Operation(summary = "Danh sách putaway tasks", description = "Lấy danh sách các nhiệm vụ cất hàng lên trước (Putaway tasks) đang giao cho các nhân viên.\n\n"
+    @Operation(summary = "Danh sách putaway tasks", description = "Lấy danh sách putaway tasks. Lọc theo assignedTo (userId) và/hoặc status (OPEN, IN_PROGRESS, DONE).\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `Query.assignedTo` (Tùy chọn): Mã ID của nhân viên (userId).\n"
-            + "- `Query.status` (Tùy chọn): Lọc theo trạng thái (`OPEN`, `IN_PROGRESS`, `DONE`).\n\n"
-            + "👉 **Kết quả:** Trả về list các luồng việc. Mỗi luồng chứa 1 thuộc tính `id` (gọi là **Putaway Task ID**). FE sẽ cần giữ lấy mã này cho 3 API tiếp theo.")
-    public ApiResponse<List<PutawayTaskResponse>> list(
+            + "- `Query.assignedTo` (Tùy chọn): Lọc theo ID nhân viên thực hiện.\n"
+            + "- `Query.status` (Tùy chọn): Lọc theo trạng thái.\n"
+            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
+    public ApiResponse<PageResponse<PutawayTaskResponse>> list(
             @RequestParam(required = false) Long assignedTo,
-            @RequestParam(required = false) String status) {
-        return putawayTaskService.listTasks(assignedTo, status);
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return putawayTaskService.listTasks(assignedTo, status, page, size);
     }
 
     /** GET /v1/putaway-tasks/{id} — detail with items */
