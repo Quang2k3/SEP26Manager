@@ -50,10 +50,10 @@ public class PutawayTaskController {
 
     /** GET /v1/putaway-tasks/{id} — detail with items */
     @GetMapping("/{id}")
-    @Operation(summary = "Chi tiết putaway task", description = "Lấy chi tiết 1 putaway task. Response bao gồm danh sách items với: "
-            + "suggestedLocationCode (bin gợi ý), suggestedZoneCode, suggestedAisle, suggestedRack, "
-            + "binCurrentQty, binMaxCapacity, binAvailableCapacity. "
-            + "Nếu suggestedLocationId = staging → chưa có gợi ý (zone/bin không tìm thấy).")
+    @Operation(summary = "Chi tiết putaway task", description = "Bóc tách xem bên trong Task này yêu cầu bốc những món hàng nào đi cất.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã **Putaway Task ID**, lấy từ API danh sách `/v1/putaway-tasks` phía trên.\n\n"
+            + "*(Ghi chú: Response có sẵn luôn `suggestedLocationCode` để FE biết luôn món hàng này hệ thống AI khuyên cất vào kệ nào)*.")
     public ApiResponse<PutawayTaskResponse> get(@PathVariable Long id) {
         return putawayTaskService.getTask(id);
     }
@@ -63,10 +63,10 @@ public class PutawayTaskController {
      * Get putaway suggestions for all items in a task (zone-category matching).
      */
     @GetMapping("/{id}/suggestions")
-    @Operation(summary = "Gợi ý vị trí putaway cho task", description = "Tính toán và trả về gợi ý vị trí putaway cho tất cả items trong task. "
-            + "Logic: SKU → Category (categoryCode) → Zone (Z-{categoryCode}) → BIN có dung lượng trống nhất. "
-            + "Ví dụ: SKU thuộc category 'HC' → gợi ý BIN trong zone 'Z-HC'. "
-            + "Response gồm: matchedZoneCode, suggestedLocationCode, aisleName, rackName, currentQty, maxCapacity, availableCapacity.")
+    @Operation(summary = "Xem Gợi ý Vị trí Cất Hàng", description = "Nếu FE muốn xem màn hình chi tiết gợi ý AI của riêng lô hàng này, thì gọi API này.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Vẫn là **Putaway Task ID**. \n\n"
+            + "**Kết quả:** Tách riêng danh sách AI Suggestions: `matchedZoneCode`, `suggestedLocationCode`, sức chứa tối đa, chỗ trống còn lại trên kệ để thủ kho quyết định có nghe theo gợi ý hay không.")
     public ApiResponse<List<PutawaySuggestion>> getSuggestions(@PathVariable Long id) {
         return putawayTaskService.getSuggestions(id);
     }
@@ -76,9 +76,13 @@ public class PutawayTaskController {
      * Keeper scans shelf and assigns actual location + qty for each item.
      */
     @PostMapping("/{id}/confirm")
-    @Operation(summary = "Xác nhận putaway (Keeper)", description = "Keeper quét kệ và xác nhận vị trí + số lượng thực tế cho mỗi item. "
-            + "Hệ thống: giảm inventory tại staging, tăng inventory tại location đích, ghi transaction PUTAWAY. "
-            + "Nếu tất cả items đã putaway đủ qty → task chuyển sang DONE.")
+    @Operation(summary = "Xác nhận cất hàng lên Kệ (Keeper)", description = "Sau khi khuân đồ ra kệ, keeper lấy súng quét mã vạch trên kệ để chốt lại việc dọn đồ.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã **Putaway Task ID**.\n"
+            + "- `Body.items`: Là một mảng (List) do FE ghép truyền lên. Mỗi item chứa:\n"
+            + "  - `skuId`: Lấy từ response xem ID sản phẩm đã hướng dẫn ở trên.\n"
+            + "  - `putawayQty`: Số lượng thực tế đã ném lên kệ (thường thủ kho nhập số trên điện thoại).\n"
+            + "  - `locationId`: Ở đâu ra? Do nhân viên kho **cầm máy quét bắn vào cái tem mã vạch dán trên tủ kệ thép**. Sau đó FE truyền mã số của kệ tủ đó vào đây.")
     public ApiResponse<PutawayTaskResponse> confirm(
             @PathVariable Long id,
             @Valid @RequestBody PutawayConfirmRequest request,

@@ -20,7 +20,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.example.sep26management.application.dto.response.CategoryTreeResponse;
 import org.example.sep26management.application.dto.response.MapCategoryToZoneResponse;
-import org.example.sep26management.application.dto.request.MapCategoryToZoneRequest;
 import org.example.sep26management.infrastructure.persistence.entity.ZoneEntity;
 import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
 
@@ -368,12 +367,12 @@ public class CategoryService {
     @Transactional(readOnly = true)
     public ApiResponse<MapCategoryToZoneResponse> mapCategoryToZone(
             Long categoryId,
-            MapCategoryToZoneRequest request,
+            Long warehouseId,
             Long mappedBy,
             String ipAddress,
             String userAgent) {
 
-        log.info(LogMessages.CZM_MAPPING, categoryId, request.getWarehouseId());
+        log.info(LogMessages.CZM_MAPPING, categoryId, warehouseId);
 
         // 1. Validate category
         CategoryEntity category = categoryRepository.findById(categoryId)
@@ -390,10 +389,10 @@ public class CategoryService {
 
         // 3. Find zone in warehouse
         ZoneEntity zone = zoneRepository
-                .findByWarehouseIdAndZoneCode(request.getWarehouseId(), expectedZoneCode)
+                .findByWarehouseIdAndZoneCode(warehouseId, expectedZoneCode)
                 .orElseThrow(() -> new BusinessException(
                         String.format(MessageConstants.CZM_ZONE_NOT_FOUND_CONVENTION,
-                                expectedZoneCode, request.getWarehouseId())));
+                                expectedZoneCode, warehouseId)));
 
         // BR-CAT-08: zone must be active
         if (!zone.getActive()) {
@@ -407,7 +406,7 @@ public class CategoryService {
         auditLogService.logAction(
                 mappedBy, "CATEGORY_ZONE_MAPPED", "CATEGORY", categoryId,
                 "Category " + category.getCategoryCode() + " mapped to zone " + expectedZoneCode
-                        + " in warehouse " + request.getWarehouseId(),
+                        + " in warehouse " + warehouseId,
                 ipAddress, userAgent);
 
         // 4. Build response

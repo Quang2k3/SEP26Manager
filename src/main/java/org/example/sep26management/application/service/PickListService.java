@@ -110,10 +110,8 @@ public class PickListService {
         PickingTaskEntity savedTask = pickingTaskRepository.save(task);
 
         // Build pick items from reservations
-        // Batch fetch locations, zones, skus, lots
-        Map<Long, LocationEntity> locationMap = locationRepository
-                .findAllById(reservations.stream().map(r -> r.getLotId()).collect(Collectors.toSet()))
-                .stream().collect(Collectors.toMap(LocationEntity::getLocationId, l -> l));
+        // The locationMap is not used directly here since each item resolves its location via resolveLocationForReservation
+        // Remove the broken locationMap that incorrectly used lotId as locationId
 
         List<PickingTaskItemEntity> taskItems = new ArrayList<>();
         List<PickListResponse.PickListItem> pickItems = new ArrayList<>();

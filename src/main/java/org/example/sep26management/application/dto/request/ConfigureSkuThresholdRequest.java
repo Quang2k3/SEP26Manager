@@ -17,9 +17,6 @@ import java.math.BigDecimal;
 @Builder
 public class ConfigureSkuThresholdRequest {
 
-    @NotNull(message = "Warehouse ID is required")
-    private Long warehouseId;
-
     /**
      * Min stock threshold — positive integer [BR-SKU-07]
      */

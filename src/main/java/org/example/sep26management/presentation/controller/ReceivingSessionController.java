@@ -30,7 +30,11 @@ public class ReceivingSessionController {
 
     /** POST /v1/receiving-sessions — Laptop creates a session */
     @PostMapping
-    @Operation(summary = "Tạo phiên scan mới", description = "Laptop tạo phiên scan. Trả về sessionId và QR code URL để iPhone quét.")
+    @Operation(summary = "Tạo phiên scan mới (Laptop/Web)", description = "Laptop tạo phiên scan. \n\n"
+            + "**Data yêu cầu:** Không cần data truyền vào.\n"
+            + "**Lưu ý:** API sẽ tự động lấy `warehouseId` từ profile của user đang đăng nhập (thông qua token). "
+            + "Backend trả về `sessionId` (ví dụ: chuỗi UUID) và link tạo QR code (`qrCodeUrl`). \n"
+            + "👉 **FE cần LƯU LẠI `sessionId` này** để dùng làm tham số cho tất cả các API phía sau thuộc phiên làm việc này.")
     public ApiResponse<ScanSessionResponse> createSession(Authentication auth) {
         Long userId = extractUserId(auth);
         Long warehouseId = extractWarehouseId(auth);
@@ -39,7 +43,10 @@ public class ReceivingSessionController {
 
     /** POST /v1/receiving-sessions/{id}/scan-token — Generate iPhone scan JWT */
     @PostMapping("/{sessionId}/scan-token")
-    @Operation(summary = "Sinh scan token cho iPhone", description = "Sinh JWT scan token cho iPhone. Token này được dùng làm Bearer token khi gọi POST /v1/scan-events.")
+    @Operation(summary = "Sinh scan token cho iPhone", description = "Sinh JWT scan token cho thiết bị cầm tay. \n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable sessionId`: Chuỗi UUID, **LẤY TỪ** response của API `POST /v1/receiving-sessions` ở bước trước.\n\n"
+            + "**Kết quả:** Trả về một JWT Token (`scanToken`). Token này được nhúng vào mã QR để iPhone quét và dùng làm Bearer token khi iPhone gọi lấy API `POST /v1/scan-events`.")
     public ApiResponse<Map<String, String>> generateScanToken(
             @PathVariable String sessionId,
             Authentication auth) {
@@ -49,38 +56,44 @@ public class ReceivingSessionController {
 
     /** GET /v1/receiving-sessions/{id} — Snapshot of current lines */
     @GetMapping("/{sessionId}")
-    @Operation(summary = "Xem snapshot session", description = "Lấy thông tin session hiện tại: danh sách items đã scan, số lượng, trạng thái.")
+    @Operation(summary = "Xem snapshot session", description = "Lấy thông tin session hiện tại: danh sách items đã scan, số lượng, trạng thái. \n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable sessionId`: Chuỗi UUID, **LẤY TỪ** response của việc tạo Session ban đầu.")
     public ApiResponse<ScanSessionResponse> getSession(@PathVariable String sessionId) {
         return receivingSessionService.getSession(sessionId);
     }
 
     /** DELETE /v1/receiving-sessions/{id} — Close session */
     @DeleteMapping("/{sessionId}")
-    @Operation(summary = "Đóng session", description = "Xóa phiên scan. iPhone sẽ không gửi được scan event nữa.")
+    @Operation(summary = "Đóng/Xóa session", description = "Xóa phiên scan. Chặn đứng không cho iPhone gửi event được nữa. \n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable sessionId`: Chuỗi UUID Session cần xóa.")
     public ApiResponse<Void> deleteSession(@PathVariable String sessionId) {
         return receivingSessionService.deleteSession(sessionId);
     }
 
     /**
      * GET /v1/receiving-sessions/{id}/stream — SSE stream for laptop.
-     * Produces text/event-stream; laptop subscribes and receives snapshot after
-     * each scan.
      */
     @GetMapping(value = "/{sessionId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @Operation(summary = "SSE stream real-time", description = "Laptop subscribe SSE stream. Mỗi lần iPhone scan thành công → server push snapshot mới về laptop qua stream này.")
+    @Operation(summary = "SSE stream real-time", description = "Laptop subscribe SSE stream. Mỗi lần iPhone scan thành công, server tự động đẩy data snapshot mới về Web. \n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable sessionId`: Chuỗi UUID, lấy từ bước Khởi tạo phiên.\n"
+            + "👉 Web truyền vào URL EventSource để kết nối stream liên tục.")
     public SseEmitter stream(@PathVariable String sessionId) {
         return receivingSessionService.stream(sessionId);
     }
 
     /**
      * POST /v1/receiving-sessions/{id}/create-grn
-     * Turn scan session into a DRAFT GRN (receiving_orders + receiving_items).
-     * warehouseId is taken from the scan session (set when session was created from
-     * JWT).
      */
     @PostMapping("/{sessionId}/create-grn")
-    @Operation(summary = "Tạo GRN từ session", description = "Chuyển scan session thành phiếu nhập kho (GRN) trạng thái DRAFT. "
-            + "Cần chọn supplierId và receivingCode. warehouseId lấy từ session.")
+    @Operation(summary = "Tạo GRN từ session", description = "Chốt danh sách các mặt hàng đã quét, đóng session và chuyển hóa thành Phiếu Nhập Kho (GRN) trạng thái DRAFT. \n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable sessionId`: UUID của session đang quét.\n"
+            + "- `Body.supplierCode`: Mã Nhà Cung Cấp — **LẤY TỪ** API `GET /v1/suppliers` (field `supplierCode`). FE hiển thị `supplierName` để người dùng chọn, sau đó gửi `supplierCode` lên đây. BE tự resolve ra `supplierId` nội bộ.\n"
+            + "- `Body.sourceReferenceCode`: Mã kiện/Bill (Ví dụ: PO-001, người dùng tự nhập tay).\n\n"
+            + "👉 **Kết quả trả về:** Dữ liệu chứa thuộc tính `receivingId` (Đây là mã **ORDER ID / GRN ID**). **FE lưu LẠI `receivingId` này** để submit và duyệt đơn ở màn hình tiếp theo.")
     public ApiResponse<Map<String, Object>> createGrn(
             @PathVariable String sessionId,
             @Valid @RequestBody CreateGrnRequest request,

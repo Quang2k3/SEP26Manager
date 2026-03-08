@@ -21,8 +21,6 @@ import java.math.BigDecimal;
 @Builder
 public class CreateLocationRequest {
 
-    @NotNull(message = "Warehouse ID is required")
-    private Long warehouseId;
 
     @NotNull(message = "Zone ID is required")
     private Long zoneId;

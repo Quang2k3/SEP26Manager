@@ -21,14 +21,19 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 
 /**
  * SkuController — SKU master data APIs
- * <p>
- * UC-B04 View SKU List (All roles)
- * UC-B05 View SKU Detail (All roles)
- * UC-B06 Search SKU by barcode (All roles — used by barcode scan flow)
+ *
+ * UC-B04 View SKU List      (All roles)
+ * UC-B05 View SKU Detail    (All roles)
+ * UC-B06 Search SKU         (All roles — used by barcode scan flow)
+ * UC-B07 Configure Threshold (MANAGER)
+ * UC-B08 Import from Excel  (MANAGER)
+ *
+ * warehouseId không cần truyền vào param — lấy tự động từ JWT token
  */
 @RestController
 @RequestMapping("/v1/skus")
@@ -50,8 +55,7 @@ public class SkuController {
     public ResponseEntity<ApiResponse<SkuResponse>> getSkuDetail(
             @PathVariable Long skuId) {
         log.info("GET /v1/skus/{} — view SKU detail", skuId);
-        ApiResponse<SkuResponse> response = skuService.getSkuDetail(skuId);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(skuService.getSkuDetail(skuId));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -84,25 +88,40 @@ public class SkuController {
 
     @PutMapping("/{skuId}/threshold")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Cấu hình ngưỡng tồn kho (Manager)", description = "Set minQty và maxQty cho SKU trong warehouse. Dùng để cảnh báo khi tồn kho vượt ngưỡng.")
+    @Operation(summary = "Cấu hình ngưỡng tồn kho (Manager)",
+            description = "Set minQty và maxQty cho SKU. "
+    )
     public ResponseEntity<ApiResponse<SkuThresholdResponse>> configureThreshold(
             @PathVariable Long skuId,
             @Valid @RequestBody ConfigureSkuThresholdRequest request,
             HttpServletRequest httpRequest) {
 
-        Long userId = getCurrentUserId();
+        Long userId      = getCurrentUserId();
+        Long warehouseId = getCurrentWarehouseId();   // ← thêm dòng này
+
         return ResponseEntity.ok(skuService.configureThreshold(
-                skuId, request, userId,
+                skuId,
+                request,
+                warehouseId,                          // ← truyền vào đây
+                userId,
                 getClientIpAddress(httpRequest),
                 httpRequest.getHeader("User-Agent")));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // UC-B07: Get SKU Threshold
+    // GET /api/v1/skus/{skuId}/threshold
+    // warehouseId lấy từ JWT token
+    // ─────────────────────────────────────────────────────────────
+
     @GetMapping("/{skuId}/threshold")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Xem ngưỡng tồn kho", description = "Lấy cấu hình ngưỡng tồn kho (minQty, maxQty) của SKU trong warehouse.")
+    @Operation(summary = "Xem ngưỡng tồn kho", description = "Lấy cấu hình ngưỡng tồn kho (minQty, maxQty) của SKU. warehouseId lấy tự động từ JWT token.")
     public ResponseEntity<ApiResponse<SkuThresholdResponse>> getThreshold(
-            @PathVariable Long skuId,
-            @RequestParam Long warehouseId) {
+            Authentication authentication,
+            @PathVariable Long skuId) {
+
+        Long warehouseId = extractWarehouseId(authentication);
         return ResponseEntity.ok(skuService.getThreshold(skuId, warehouseId));
     }
 
@@ -132,20 +151,43 @@ public class SkuController {
      * PATCH /v1/skus/{skuId}/assign-category
      */
     @PatchMapping("/{skuId}/assign-category")
-    @Operation(summary = "Gán category cho SKU", description = "Gán/thay đổi category của SKU. Việc thay đổi category sẽ ảnh hưởng đến zone gợi ý khi putaway.")
+    @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
+    @Operation(summary = "Gán category cho SKU",
+            description = "Gán/thay đổi category của SKU.\n\n"
+                    + "**Data yêu cầu:**\n"
+                    + "- `@PathVariable skuId`: ID của SKU — lấy từ kết quả tìm kiếm SKU (`GET /v1/skus/search`).\n"
+                    + "- `Body.categoryCode`: Mã category — **LẤY TỪ** API `GET /v1/categories` (field `categoryCode`). "
+                    + "FE hiển thị `categoryName` cho người dùng chọn, sau đó gửi `categoryCode` lên đây. BE tự resolve ra `categoryId` nội bộ.\n\n"
+                    + "👉 Việc thay đổi category sẽ ảnh hưởng đến zone gợi ý khi putaway.")
     public ResponseEntity<ApiResponse<SkuResponse>> assignCategoryToSku(
             @PathVariable Long skuId,
             @Valid @RequestBody AssignCategoryToSkuRequest request,
             HttpServletRequest httpRequest) {
 
         Long updatedBy = getCurrentUserId();
-        String ipAddress = getClientIpAddress(httpRequest);
-        String userAgent = httpRequest.getHeader("User-Agent");
+        return ResponseEntity.ok(skuService.assignCategoryToSku(
+                skuId, request, updatedBy,
+                getClientIpAddress(httpRequest),
+                httpRequest.getHeader("User-Agent")));
+    }
 
-        ApiResponse<SkuResponse> response = skuService.assignCategoryToSku(
-                skuId, request, updatedBy, ipAddress, userAgent);
+    // ─────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────
 
-        return ResponseEntity.ok(response);
+    private Long extractWarehouseId(Authentication auth) {
+        if (auth != null && auth.getDetails() instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) auth.getDetails();
+            Object raw = map.get("warehouseIds");
+            if (raw instanceof List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long) return (Long) first;
+                if (first instanceof Integer) return ((Integer) first).longValue();
+                if (first instanceof Number) return ((Number) first).longValue();
+            }
+        }
+        throw new RuntimeException("Cannot extract warehouseId from token");
     }
 
     private Long getCurrentUserId() {
@@ -157,14 +199,31 @@ public class SkuController {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) details;
             Object uid = map.get("userId");
-            if (uid instanceof Long)
-                return (Long) uid;
-            else if (uid instanceof Integer)
-                return ((Integer) uid).longValue();
-            else if (uid != null)
-                return Long.parseLong(uid.toString());
+            if (uid instanceof Long) return (Long) uid;
+            if (uid instanceof Integer) return ((Integer) uid).longValue();
+            if (uid != null) return Long.parseLong(uid.toString());
         }
         throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
+    }
+
+    private Long getCurrentWarehouseId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        Object details = auth.getDetails();
+        if (details instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) details;
+            Object raw = map.get("warehouseIds");
+            if (raw instanceof List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long l)    return l;
+                if (first instanceof Integer i) return i.longValue();
+                if (first instanceof Number n)  return n.longValue();
+                if (first != null)              return Long.parseLong(first.toString());
+            }
+        }
+        throw new RuntimeException(
+                "Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
     }
 
     private String getClientIpAddress(HttpServletRequest request) {

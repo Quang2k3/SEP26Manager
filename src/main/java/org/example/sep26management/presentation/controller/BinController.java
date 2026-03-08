@@ -51,22 +51,24 @@ public class BinController {
     @GetMapping("/occupancy")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
     @Operation(summary = "Xem chiếm dụng các bin", description = "Lấy danh sách bin với thông tin occupancy (EMPTY/PARTIAL/FULL). "
-            + "Lọc theo warehouseId, zoneId, occupancyStatus. Phân trang.")
+            + "Lọc theo zoneId, occupancyStatus. warehouseId lấy tự động từ JWT token. Phân trang.")
     public ResponseEntity<ApiResponse<PageResponse<BinOccupancyResponse>>> viewBinOccupancy(
-            @RequestParam Long warehouseId,
+            Authentication authentication,
             @RequestParam(required = false) Long zoneId,
             @RequestParam(required = false) OccupancyStatus occupancyStatus,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
+        Long warehouseId = extractWarehouseId(authentication);
         return ResponseEntity.ok(binService.viewBinOccupancy(
                 warehouseId, zoneId, occupancyStatus, page, size));
     }
 
-    /**
-     * UC-LOC-06 3c: View detailed inventory in a specific bin
-     * GET /api/v1/bins/{locationId}/occupancy
-     */
+    // ─────────────────────────────────────────────────────────────
+    // UC-LOC-06 3c: View detailed inventory in a specific bin
+    // GET /api/v1/bins/{locationId}/occupancy
+    // ─────────────────────────────────────────────────────────────
+
     @GetMapping("/{locationId}/occupancy")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
     @Operation(summary = "Chi tiết occupancy 1 bin", description = "Xem chi tiết inventory trong 1 bin cụ thể: danh sách SKU, số lượng, lot, tỉ lệ chiếm dụng.")
@@ -78,8 +80,8 @@ public class BinController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-278: Search Empty Bin (UC-LOC-07)
-    // GET
-    // /api/v1/bins/search-empty?warehouseId=1&zoneId=2&requiredWeightKg=50&requiredVolumeM3=0.5
+    // GET /api/v1/bins/search-empty?zoneId=2&requiredWeightKg=50&requiredVolumeM3=0.5
+    // warehouseId lấy từ JWT token
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping("/search-empty")
@@ -99,6 +101,7 @@ public class BinController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
+        Long warehouseId = extractWarehouseId(authentication);
         return ResponseEntity.ok(binService.searchEmptyBin(
                 warehouseId, zoneId, requiredWeightKg, requiredVolumeM3, page, size));
     }
@@ -126,6 +129,21 @@ public class BinController {
     // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
+
+    private Long extractWarehouseId(Authentication auth) {
+        if (auth != null && auth.getDetails() instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) auth.getDetails();
+            Object raw = map.get("warehouseIds");
+            if (raw instanceof List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long) return (Long) first;
+                if (first instanceof Integer) return ((Integer) first).longValue();
+                if (first instanceof Number) return ((Number) first).longValue();
+            }
+        }
+        throw new RuntimeException("Cannot extract warehouseId from token");
+    }
 
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();

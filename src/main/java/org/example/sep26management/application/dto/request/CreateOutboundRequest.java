@@ -13,27 +13,41 @@ import java.util.List;
 /**
  * UC-OUT-01: Create Outbound Order
  * BR-OUT-01: order type determines required fields
+ *
+ * warehouseId được lấy tự động từ JWT token của người dùng đang đăng nhập.
+ * FE không cần truyền warehouseId vào body.
  */
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class CreateOutboundRequest {
 
-    @NotNull(message = "Warehouse ID is required")
+    // warehouseId is NOT exposed to FE — resolved from JWT token in controller
+    // Field này được set nội bộ bởi controller sau khi extract từ JWT
     private Long warehouseId;
 
     @NotNull(message = "Order type is required")
     private OutboundType orderType;
 
     // ─── Sales Order fields ───
-    private Long customerId;          // required if SALES_ORDER
-    private LocalDate deliveryDate;   // BR-OUT-02: >= today
+    /**
+     * Mã khách hàng (customerCode) — FE lấy từ dropdown danh sách customer.
+     * BE tự resolve customerId nội bộ từ mã này.
+     * Ví dụ: "CUS-001"
+     */
+    private String customerCode;       // required if SALES_ORDER
+    private LocalDate deliveryDate;    // BR-OUT-02: >= today
     private String referenceOrderCode;
 
     // ─── Internal Transfer fields ───
-    private Long destinationWarehouseId;  // required if INTERNAL_TRANSFER
-    private String transferReason;        // STOCK_BALANCING | BRANCH_REQUEST | OTHER
+    /**
+     * Mã kho đích (warehouseCode) — FE lấy từ dropdown danh sách kho.
+     * BE tự resolve destinationWarehouseId nội bộ từ mã này.
+     * Ví dụ: "WH-HN-02"
+     */
+    private String destinationWarehouseCode;  // required if INTERNAL_TRANSFER
+    private String transferReason;             // STOCK_BALANCING | BRANCH_REQUEST | OTHER
     private String receiverName;
     private String receiverPhone;
-    private LocalDate transferDate;       // BR-OUT-02: >= today
+    private LocalDate transferDate;            // BR-OUT-02: >= today
 
     @NotEmpty(message = "At least one item is required")
     @Valid

@@ -47,9 +47,9 @@ public class QcInspectionController {
 
     /** GET /v1/qc-inspections/{id} */
     @GetMapping("/{id}")
-    @Operation(summary = "Chi tiết một phiếu kiểm định QC", description = "Lấy chi tiết 1 phiếu QC. "
-            + "Tham số `id` ở đây chính là mã ID (qcInspectionId) - thứ mà bạn lấy được từ dữ liệu trả về của API Danh sách kiểm định (GET /v1/qc-inspections) phía trên. "
-            + "Đúng vậy, luồng thực tế là: Gọi API list -> lấy các ID -> QC chọn 1 dòng -> APP gọi API này truyền ID đó vào để lấy chi tiết.")
+    @Operation(summary = "Xem chi tiết phiếu kiểm định", description = "Đọc chi tiết sản phẩm lỗi và hình ảnh đính kèm để QC ra quyết định. \n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable id`: Mã ID phiếu kiểm định (Hay gọi là **QC Inspection ID**), **LẤY TỪ** response của API danh sách lô hàng lỗi `GET /v1/qc-inspections` bên trên.")
     public ApiResponse<QcInspectionResponse> get(@PathVariable Long id) {
         return qcService.getInspection(id);
     }
@@ -57,8 +57,10 @@ public class QcInspectionController {
     /** PUT /v1/qc-inspections/{id} — QC submits report */
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('QC')")
-    @Operation(summary = "Lưu Báo cáo QC (QC role)", description = "QC nộp kết quả kiểm tra: ghi chú chi tiết, ảnh chụp hư hỏng. "
-            + "Chuyển status từ PENDING → INSPECTED.")
+    @Operation(summary = "QC nộp báo cáo kiểm định", description = "QC nhập thông tin chi tiết về lỗi, đính kèm hình ảnh. Sau khi nộp, trạng thái phiếu QC chuyển từ `PENDING` sang `INSPECTED`.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable id`: Mã ID phiếu kiểm định (QC Inspection ID), **LẤY TỪ** response của API danh sách lô hàng lỗi `GET /v1/qc-inspections`.\n"
+            + "- `@RequestBody UpdateQcInspectionRequest`: Dữ liệu báo cáo QC, bao gồm `note` (ghi chú) và `imageUrls` (danh sách URL ảnh).")
     public ApiResponse<QcInspectionResponse> submitReport(
             @PathVariable Long id,
             @RequestBody UpdateQcInspectionRequest request,
