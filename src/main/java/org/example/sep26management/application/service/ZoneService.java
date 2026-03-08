@@ -37,27 +37,28 @@ public class ZoneService {
         @Transactional
         public ApiResponse<ZoneResponse> createZone(
                         CreateZoneRequest request,
+                        Long warehouseId,
                         Long createdBy,
                         String ipAddress,
                         String userAgent) {
 
-                log.info("Creating zone: code={}, warehouse={}", request.getZoneCode(), request.getWarehouseId());
+                log.info("Creating zone: code={}, warehouse={}", request.getZoneCode(), warehouseId);
 
                 // Validate warehouse exists
-                warehouseRepository.findById(request.getWarehouseId())
+                warehouseRepository.findById(warehouseId)
                                 .orElseThrow(() -> new ResourceNotFoundException(
                                                 String.format(MessageConstants.WAREHOUSE_NOT_FOUND,
-                                                                request.getWarehouseId())));
+                                                                warehouseId)));
 
                 // BR-LOC-01: Duplicate zone code check within warehouse
                 String zoneCode = request.getZoneCode().toUpperCase().trim();
-                if (zoneRepository.existsByWarehouseIdAndZoneCode(request.getWarehouseId(), zoneCode)) {
+                if (zoneRepository.existsByWarehouseIdAndZoneCode(warehouseId, zoneCode)) {
                         throw new BusinessException(
                                         String.format(MessageConstants.ZONE_CODE_DUPLICATE, zoneCode));
                 }
 
                 ZoneEntity zone = ZoneEntity.builder()
-                                .warehouseId(request.getWarehouseId())
+                                .warehouseId(warehouseId)
                                 .zoneCode(zoneCode)
                                 .zoneName(request.getZoneName() != null ? request.getZoneName().trim() : null)
                                 .active(true)
@@ -70,7 +71,7 @@ public class ZoneService {
                 auditLogService.logAction(
                                 createdBy, "ZONE_CREATED", "ZONE", saved.getZoneId(),
                                 String.format("Zone %s created in warehouse %d", saved.getZoneCode(),
-                                                saved.getWarehouseId()),
+                                                warehouseId),
                                 ipAddress, userAgent);
 
                 return ApiResponse.success(MessageConstants.ZONE_CREATED_SUCCESS, toResponse(saved));
