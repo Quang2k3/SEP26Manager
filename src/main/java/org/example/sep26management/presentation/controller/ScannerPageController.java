@@ -214,7 +214,7 @@ public class ScannerPageController {
                 "     var isFail = l.condition === 'FAIL'; \n" +
                 "     var condHtml = isFail ? '<span style=\"color:#ef4444;font-size:10px;display:block\">Lỗi: '+(l.reasonCode||'N/A')+'</span>' : '';\n"
                 +
-                "     rows+='<tr><td class=\"sc\">'+l.skuCode+condHtml+'</td><td>'+(l.skuName||'')+'</td><td class=\"qc\" style=\"'+(isFail?'color:#ef4444':'')+'\">'+l.qty+'</td><td><button onclick=\"removeL(\\''+l.skuId+'\\',\\''+l.condition+'\\')\" style=\"background:transparent;border:none;color:#ef4444;font-size:16px;padding:5px\">✕</button></td></tr>';\n"
+                "     rows+='<tr><td class=\"sc\">'+l.skuCode+condHtml+'</td><td>'+(l.skuName||'')+'</td><td class=\"qc\" style=\"'+(isFail?'color:#ef4444':'')+'\">'+l.qty+'</td><td><button onclick=\"removeL(\\''+l.skuId+'\\',\\''+l.condition+'\\')\" style=\"background:transparent;border:1px solid #ef4444;border-radius:4px;color:#ef4444;font-size:12px;padding:3px 6px;font-weight:bold\">-1</button></td></tr>';\n"
                 +
                 "  }\n" +
                 "  document.getElementById('lines').innerHTML=rows;\n" +
@@ -223,14 +223,14 @@ public class ScannerPageController {
                 "function renderSession(s){\n" +
                 "  if(s && s.lines) updateTable(s.lines);\n" +
                 "}\n" +
+                "}\n" +
                 "function removeL(skuId, cond){\n" +
-                "  if(!confirm('Xoá dòng hàng này khỏi phiên quét?')) return;\n" +
-                "  fetch(API+'?sessionId='+SESSION_ID+'&skuId='+skuId+'&condition='+cond,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}})\n"
+                "  fetch(API+'?sessionId='+SESSION_ID+'&skuId='+skuId+'&condition='+cond+'&qty=1',{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}})\n"
                 +
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
-                "    if(d&&d.success){ toast('Đã xóa sản phẩm'); fetchSession(); }\n" +
-                "    else{ toast(d.message||'Lỗi xóa',true); }\n" +
+                "    if(d&&d.success){ fetchSession(); }\n" +
+                "    else{ toast(d.message||'Lỗi giảm số lượng',true); }\n" +
                 "  }).catch(function(e){ toast('Lỗi mạng: '+e,true); });\n" +
                 "}\n" +
                 "function fetchSession(){\n" +
@@ -271,15 +271,20 @@ public class ScannerPageController {
                 "  sendBarcode(b,q);\n" +
                 "} \n" +
 
-                "function closeScan(){\n" +
-                "  if(!SESSION_ID){toast('Không tìm thấy session',true);return;}\n" +
-                "  if(!confirm('Tạm dừng quét mã? (Dữ liệu vẫn được giữ nguyên)')) return;\n"
-                +
-                "  toast('Đã tạm dừng Camera Scan');\n" +
-                "  stopQr();\n" +
-                "  var btn=document.getElementById('closeBtn');btn.disabled=true;btn.textContent='Đã tạm dừng';\n"
-                +
-                "  setStatus('Camera đã đóng.');\n" +
+                "function toggleCamera(){\n" +
+                "  var btn=document.getElementById('closeBtn');\n" +
+                "  if(qrRunning) {\n" +
+                "    stopQr();\n" +
+                "    btn.textContent='▶ Tiếp tục quét';\n" +
+                "    btn.style.background='#3b82f6';\n" +
+                "    btn.style.borderColor='#3b82f6';\n" +
+                "    setStatus('Camera đã tạm dừng');\n" +
+                "  } else {\n" +
+                "    startQr();\n" +
+                "    btn.textContent='⏸ Tạm dừng / Đóng Camera';\n" +
+                "    btn.style.background='';\n" +
+                "    btn.style.borderColor='';\n" +
+                "  }\n" +
                 "} \n" +
                 "function createGrn(){\n" +
                 "  if(!SESSION_ID){toast('Không tìm thấy session',true);return;}\n" +
@@ -406,7 +411,7 @@ public class ScannerPageController {
 
                 "document.addEventListener('DOMContentLoaded',function(){\n" +
                 "  document.getElementById('manualBtn').addEventListener('click', submitManual);\n" +
-                "  document.getElementById('closeBtn').addEventListener('click', closeScan);\n" +
+                "  document.getElementById('closeBtn').addEventListener('click', toggleCamera);\n" +
                 "  document.getElementById('createGrnBtn').addEventListener('click', createGrn);\n" +
                 "  document.getElementById('bc').addEventListener('keydown', function(e){ if(e.key==='Enter') submitManual(); });\n"
                 +

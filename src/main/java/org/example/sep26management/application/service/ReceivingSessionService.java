@@ -177,6 +177,9 @@ public class ReceivingSessionService {
                                                         "Supplier not found with code: " + request.getSupplierCode()));
                 }
 
+                // If called from scanner page, userId will be null. Use the session creator.
+                Long effectiveUserId = (userId != null) ? userId : session.getCreatedBy();
+
                 ReceivingOrderEntity order = ReceivingOrderEntity.builder()
                                 .warehouseId(session.getWarehouseId()) // taken from session (set from JWT at creation)
                                 .receivingCode(receivingCode)
@@ -185,7 +188,7 @@ public class ReceivingSessionService {
                                 .supplierId(supplierId)
                                 .sourceReferenceCode(request.getSourceReferenceCode())
                                 .note(request.getNote())
-                                .createdBy(userId)
+                                .createdBy(effectiveUserId)
                                 .build();
 
                 ReceivingOrderEntity saved = receivingOrderRepo.save(order);

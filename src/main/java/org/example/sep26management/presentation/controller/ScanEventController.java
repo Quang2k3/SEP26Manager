@@ -54,9 +54,10 @@ public class ScanEventController {
     public ApiResponse<Map<String, Object>> removeScanItem(
             @RequestParam String sessionId,
             @RequestParam Long skuId,
-            @RequestParam(defaultValue = "PASS") String condition) {
+            @RequestParam(defaultValue = "PASS") String condition,
+            @RequestParam(required = false) java.math.BigDecimal qty) {
 
-        return scanEventService.removeScanItem(sessionId, skuId, condition);
+        return scanEventService.removeScanItem(sessionId, skuId, condition, qty);
     }
 
     private String extractToken(HttpServletRequest request) {

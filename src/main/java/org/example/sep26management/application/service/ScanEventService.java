@@ -116,27 +116,46 @@ public class ScanEventService {
      * @param skuId     SKU to remove
      * @param condition PASS or FAIL — must match exactly
      */
-    public ApiResponse<Map<String, Object>> removeScanItem(String sessionId, Long skuId, String condition) {
+    public ApiResponse<Map<String, Object>> removeScanItem(String sessionId, Long skuId, String condition,
+            BigDecimal qtyToRemove) {
         ScanSessionData session = sessionRedis.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("Scan session expired or not found: " + sessionId));
 
         String normalizedCondition = condition != null ? condition.toUpperCase() : "PASS";
         List<ScanLineItem> lines = session.getLines();
 
-        boolean removed = lines.removeIf(
-                l -> l.getSkuId().equals(skuId) && normalizedCondition.equals(l.getCondition()));
+        Optional<ScanLineItem> targetLine = lines.stream()
+                .filter(l -> l.getSkuId().equals(skuId) && normalizedCondition.equals(l.getCondition()))
+                .findFirst();
 
-        if (!removed) {
+        if (targetLine.isEmpty()) {
             return ApiResponse
                     .error("Item not found in session: skuId=" + skuId + ", condition=" + normalizedCondition);
+        }
+
+        ScanLineItem line = targetLine.get();
+
+        if (qtyToRemove != null && qtyToRemove.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal remainingQty = line.getQty().subtract(qtyToRemove);
+            if (remainingQty.compareTo(BigDecimal.ZERO) <= 0) {
+                lines.remove(line);
+                log.info("Scan item fully removed (qty <= 0): sessionId={} skuId={} condition={}", sessionId, skuId,
+                        normalizedCondition);
+            } else {
+                line.setQty(remainingQty);
+                log.info("Scan item partially removed: sessionId={} skuId={} condition={}, removed={}, remaining={}",
+                        sessionId, skuId, normalizedCondition, qtyToRemove, remainingQty);
+            }
+        } else {
+            lines.remove(line);
+            log.info("Scan item fully removed (no qty specified): sessionId={} skuId={} condition={}", sessionId, skuId,
+                    normalizedCondition);
         }
 
         sessionRedis.save(sessionId, session);
         sseRegistry.send(sessionId, session);
 
-        log.info("Scan item removed: sessionId={} skuId={} condition={}", sessionId, skuId, normalizedCondition);
-
-        return ApiResponse.success("Item removed from scan session", Map.of(
+        return ApiResponse.success("Item updated/removed from scan session", Map.of(
                 "skuId", skuId,
                 "condition", normalizedCondition,
                 "remainingLines", lines.size()));
