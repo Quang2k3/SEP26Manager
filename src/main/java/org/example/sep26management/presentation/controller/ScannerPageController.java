@@ -45,7 +45,7 @@ public class ScannerPageController {
                 "<title>Warehouse Scanner (QR)</title>" +
 
                 // html5-qrcode - load local (must include context-path /api)
-                "<script src='/api/js/html5-qrcode.min.js'></script>" +
+                "<script src='/js/html5-qrcode.min.js'></script>" +
 
                 "<style>" +
                 "*{box-sizing:border-box;margin:0;padding:0}" +
@@ -132,7 +132,7 @@ public class ScannerPageController {
 
                 "<script>\n" +
                 "var TOKEN='" + token + "';\n" +
-                "var API=window.location.origin+'/api/v1/scan-events';\n" +
+                "var API=window.location.origin+'/v1/scan-events';\n" +
                 "var lineData={};\n" +
                 "var inflight=false;\n" +
                 "var lastCode=null;\n" +
@@ -200,7 +200,7 @@ public class ScannerPageController {
                 "function closeScan(){\n" +
                 "  if(!SESSION_ID){toast('Không tìm thấy session',true);return;}\n" +
                 "  if(!confirm('Kết thúc phiên scan?')) return;\n" +
-                "  fetch(window.location.origin+'/api/v1/receiving-sessions/'+SESSION_ID,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}})\n"
+                "  fetch(window.location.origin+'/v1/receiving-sessions/'+SESSION_ID,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}})\n"
                 +
                 "   .then(function(r){return r.text().then(function(t){try{return JSON.parse(t);}catch(e){return {success:false,message:t};}});})\n"
                 +
