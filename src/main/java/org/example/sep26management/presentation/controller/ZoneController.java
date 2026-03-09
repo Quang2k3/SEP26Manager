@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -49,15 +50,13 @@ public class ZoneController {
 
     @PostMapping
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Tạo zone mới (Manager)",
-            description = "Tạo zone trong warehouse. zoneCode phải unique trong warehouse. "
-                    + "Convention: zoneCode = 'Z-' + categoryCode (ví dụ: Z-HC cho category HC). "
-                    )
+    @Operation(summary = "Tạo zone mới (Manager)", description = "Tạo zone trong warehouse. zoneCode phải unique trong warehouse. "
+            + "Convention: zoneCode = 'Z-' + categoryCode (ví dụ: Z-HC cho category HC). ")
     public ResponseEntity<ApiResponse<ZoneResponse>> createZone(
             @Valid @RequestBody CreateZoneRequest request,
             HttpServletRequest httpRequest) {
 
-        Long userId      = getCurrentUserId();
+        Long userId = getCurrentUserId();
         Long warehouseId = getCurrentWarehouseId();
 
         ApiResponse<ZoneResponse> response = zoneService.createZone(
@@ -103,9 +102,12 @@ public class ZoneController {
             Object raw = map.get("warehouseIds");
             if (raw instanceof java.util.List<?> list && !list.isEmpty()) {
                 Object first = list.get(0);
-                if (first instanceof Long) return (Long) first;
-                if (first instanceof Integer) return ((Integer) first).longValue();
-                if (first instanceof Number) return ((Number) first).longValue();
+                if (first instanceof Long)
+                    return (Long) first;
+                if (first instanceof Integer)
+                    return ((Integer) first).longValue();
+                if (first instanceof Number)
+                    return ((Number) first).longValue();
             }
         }
         throw new RuntimeException("Cannot extract warehouseId from token");
@@ -113,7 +115,8 @@ public class ZoneController {
 
     private Long getCurrentWarehouseId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        if (auth == null)
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
         Object details = auth.getDetails();
         if (details instanceof Map) {
             @SuppressWarnings("unchecked")
@@ -121,15 +124,20 @@ public class ZoneController {
             Object raw = map.get("warehouseIds");
             if (raw instanceof List<?> list && !list.isEmpty()) {
                 Object first = list.get(0);
-                if (first instanceof Long l)    return l;
-                if (first instanceof Integer i) return i.longValue();
-                if (first instanceof Number n)  return n.longValue();
-                if (first != null)              return Long.parseLong(first.toString());
+                if (first instanceof Long l)
+                    return l;
+                if (first instanceof Integer i)
+                    return i.longValue();
+                if (first instanceof Number n)
+                    return n.longValue();
+                if (first != null)
+                    return Long.parseLong(first.toString());
             }
         }
         throw new RuntimeException(
                 "Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
     }
+
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null)

@@ -80,7 +80,8 @@ public class BinController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-278: Search Empty Bin (UC-LOC-07)
-    // GET /api/v1/bins/search-empty?zoneId=2&requiredWeightKg=50&requiredVolumeM3=0.5
+    // GET
+    // /api/v1/bins/search-empty?zoneId=2&requiredWeightKg=50&requiredVolumeM3=0.5
     // warehouseId lấy từ JWT token
     // ─────────────────────────────────────────────────────────────
 
@@ -94,7 +95,7 @@ public class BinController {
             + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
             + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
     public ResponseEntity<ApiResponse<PageResponse<EmptyBinResponse>>> searchEmptyBin(
-            @RequestParam Long warehouseId,
+            Authentication authentication,
             @RequestParam(required = false) Long zoneId,
             @RequestParam(required = false) BigDecimal requiredWeightKg,
             @RequestParam(required = false) BigDecimal requiredVolumeM3,
@@ -137,9 +138,12 @@ public class BinController {
             Object raw = map.get("warehouseIds");
             if (raw instanceof List<?> list && !list.isEmpty()) {
                 Object first = list.get(0);
-                if (first instanceof Long) return (Long) first;
-                if (first instanceof Integer) return ((Integer) first).longValue();
-                if (first instanceof Number) return ((Number) first).longValue();
+                if (first instanceof Long)
+                    return (Long) first;
+                if (first instanceof Integer)
+                    return ((Integer) first).longValue();
+                if (first instanceof Number)
+                    return ((Number) first).longValue();
             }
         }
         throw new RuntimeException("Cannot extract warehouseId from token");
