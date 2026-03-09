@@ -71,7 +71,7 @@ public class ZoneService {
                 auditLogService.logAction(
                                 createdBy, "ZONE_CREATED", "ZONE", saved.getZoneId(),
                                 String.format("Zone %s created in warehouse %d", saved.getZoneCode(),
-                                                saved.getWarehouseId()),
+                                                warehouseId),
                                 ipAddress, userAgent);
 
                 return ApiResponse.success(MessageConstants.ZONE_CREATED_SUCCESS, toResponse(saved));
