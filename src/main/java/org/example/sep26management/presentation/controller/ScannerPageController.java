@@ -143,7 +143,32 @@ public class ScannerPageController {
                 "<tbody id='lines'></tbody></table>" +
                 "</div>" +
 
-                "<div class='card'><button class='btn danger' id='closeBtn'>🛑 Kết thúc Scan</button></div>" +
+                "<div class='card'>" +
+                "<div class='card-title'>Chốt & Tạo Phiếu Kho</div>" +
+                "<div class='row' style='margin-bottom:8px'>" +
+                "<select id='sourceType' style='flex:1;padding:11px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#e2e8f0;font-size:15px'>"
+                +
+                "<option value='SUPPLIER'>Nhập từ NCC (SUPPLIER)</option>" +
+                "<option value='TRANSFER'>Chuyển Kho (TRANSFER)</option>" +
+                "<option value='RETURN'>Khách Hàng Trả (RETURN)</option>" +
+                "</select>" +
+                "</div>" +
+                "<div class='row' style='margin-bottom:8px'>" +
+                "<input type='text' id='supplierCode' placeholder='Mã NCC (vd: SUP-001)' autocapitalize='characters' autocomplete='off'/>"
+                +
+                "</div>" +
+                "<div class='row' style='margin-bottom:8px'>" +
+                "<input type='text' id='sourceRef' placeholder='Mã chứng từ / PO' autocapitalize='characters' autocomplete='off'/>"
+                +
+                "</div>" +
+                "<div class='row' style='margin-bottom:8px'>" +
+                "<input type='text' id='note' placeholder='Ghi chú' autocomplete='off'/>" +
+                "</div>" +
+                "<button class='btn full' id='createGrnBtn' style='background:#10b981;margin-top:5px'>✅ Tạo Phiếu GRN</button>"
+                +
+                "</div>" +
+
+                "<div class='card'><button class='btn danger' id='closeBtn'>⏸ Tạm dừng / Đóng Camera</button></div>" +
                 "</div>" +
 
                 "<div class='toast' id='toast'></div>" +
@@ -248,14 +273,46 @@ public class ScannerPageController {
 
                 "function closeScan(){\n" +
                 "  if(!SESSION_ID){toast('Không tìm thấy session',true);return;}\n" +
-                "  if(!confirm('Kết thúc quét mã và về lại màn hình chính? (Dữ liệu vẫn được giữ nguyên để tạo phiếu)')) return;\n"
+                "  if(!confirm('Tạm dừng quét mã? (Dữ liệu vẫn được giữ nguyên)')) return;\n"
                 +
-                "  toast('Đã đóng Camera Scan');\n" +
+                "  toast('Đã tạm dừng Camera Scan');\n" +
                 "  stopQr();\n" +
-                "  var btn=document.getElementById('closeBtn');btn.disabled=true;btn.textContent='Đã đóng để tạo phiếu';\n"
+                "  var btn=document.getElementById('closeBtn');btn.disabled=true;btn.textContent='Đã tạm dừng';\n"
                 +
-                "  setStatus('Vui lòng quay lại màn hình Web để tạo Phiếu nhập (GRN)');\n" +
+                "  setStatus('Camera đã đóng.');\n" +
                 "} \n" +
+                "function createGrn(){\n" +
+                "  if(!SESSION_ID){toast('Không tìm thấy session',true);return;}\n" +
+                "  if(Object.keys(lineData||{}).length===0){toast('Chưa quét sản phẩm nào!',true);return;}\n" +
+                "  if(!confirm('Chốt số lượng và tạo Phiếu Nhập Kho?')) return;\n" +
+                "  var body = {\n" +
+                "    sourceType: document.getElementById('sourceType').value,\n" +
+                "    supplierCode: document.getElementById('supplierCode').value.trim() || null,\n" +
+                "    sourceReferenceCode: document.getElementById('sourceRef').value.trim() || null,\n" +
+                "    note: document.getElementById('note').value.trim() || null \n" +
+                "  };\n" +
+                "  var btn = document.getElementById('createGrnBtn');\n" +
+                "  btn.disabled=true; btn.textContent='Đang tạo...';\n" +
+                "  fetch(window.location.origin+'/v1/receiving-sessions/'+SESSION_ID+'/create-grn',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify(body)})\n"
+                +
+                "  .then(function(r){return r.json();})\n" +
+                "  .then(function(d){\n" +
+                "    if(d&&d.success){\n" +
+                "      toast('✅ Đã tạo GRN: '+ (d.data.receivingId||'Thành công'), false);\n" +
+                "      stopQr();\n" +
+                "      document.getElementById('cam-status').textContent='Đã hoàn tất phiên quét.';\n" +
+                "      btn.textContent='✅ Đã tạo Phiếu';\n" +
+                "      document.getElementById('manualBtn').disabled=true;\n" +
+                "      document.getElementById('closeBtn').disabled=true;\n" +
+                "    } else {\n" +
+                "      toast(d.message||'Lỗi tạo phiếu',true);\n" +
+                "      btn.disabled=false; btn.textContent='✅ Tạo Phiếu GRN';\n" +
+                "    }\n" +
+                "  }).catch(function(e){\n" +
+                "    toast('Lỗi mạng: '+e,true);\n" +
+                "    btn.disabled=false; btn.textContent='✅ Tạo Phiếu GRN';\n" +
+                "  });\n" +
+                "}\n" +
 
                 // QR start/stop (html5-qrcode)
                 "var qr=null;\n" +
@@ -350,6 +407,7 @@ public class ScannerPageController {
                 "document.addEventListener('DOMContentLoaded',function(){\n" +
                 "  document.getElementById('manualBtn').addEventListener('click', submitManual);\n" +
                 "  document.getElementById('closeBtn').addEventListener('click', closeScan);\n" +
+                "  document.getElementById('createGrnBtn').addEventListener('click', createGrn);\n" +
                 "  document.getElementById('bc').addEventListener('keydown', function(e){ if(e.key==='Enter') submitManual(); });\n"
                 +
                 "});\n" +
