@@ -98,7 +98,17 @@ public class ReceivingSessionController {
             @PathVariable String sessionId,
             @Valid @RequestBody CreateGrnRequest request,
             Authentication auth) {
-        Long userId = extractUserId(auth);
+        Long userId = null;
+        try {
+            userId = extractUserId(auth);
+        } catch (Exception e) {
+            // If request comes from a scanner token, it won't have a userId.
+            if (auth != null && auth.getName() != null && auth.getName().startsWith("scanner:")) {
+                userId = null;
+            } else {
+                throw e;
+            }
+        }
         return receivingSessionService.createGrn(sessionId, request, userId);
     }
 
