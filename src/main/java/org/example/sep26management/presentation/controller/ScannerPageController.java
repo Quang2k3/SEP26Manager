@@ -338,85 +338,42 @@ public class ScannerPageController {
                 "} \n" +
                 "function startQr(){\n" +
                 "  setStatus('Đang khởi động camera...');\n" +
-                "  \n" +
-                "  // Check HTTPS - camera requires secure context\n" +
-                "  if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {\n"
-                +
-                "    toast('Cần HTTPS để quét QR!', true);\n" +
-                "    setStatus('Lỗi: Cần HTTPS để truy cập camera');\n" +
-                "    return;\n" +
-                "  }\n" +
-                "  \n" +
-                "  // Debug: log library availability\n" +
-                "  console.log('Html5Qrcode available:', typeof Html5Qrcode !== 'undefined');\n" +
-                "  \n" +
-                "  if (typeof Html5Qrcode === 'undefined') {\n" +
+                "  if(typeof Html5Qrcode === 'undefined'){\n" +
                 "    toast('Thư viện QR chưa tải! Thử refresh trang.', true);\n" +
                 "    setStatus('Lỗi: Thư viện chưa tải');\n" +
                 "    return;\n" +
                 "  }\n" +
-                "  \n" +
                 "  try{\n" +
-                "    Html5Qrcode.getCameras().then(function(cameras){\n" +
-                "      console.log('Cameras found:', cameras);\n" +
-                "      \n" +
-                "      if(cameras && cameras.length){\n" +
-                "        var cameraId = null;\n" +
-                "        \n" +
-                "        // First: try to find back camera (prefer environment/back/rear)\n" +
-                "        for(var i=0; i<cameras.length; i++){\n" +
-                "          var label = cameras[i].label.toLowerCase();\n" +
-                "          if(label.includes('back') || label.includes('rear') || label.includes('environment')){\n" +
-                "            cameraId = cameras[i].id;\n" +
-                "            break;\n" +
-                "          }\n" +
-                "        }\n" +
-                "        \n" +
-                "        // If no back camera found, use last camera (usually front on iOS)\n" +
-                "        if(!cameraId && cameras.length > 0){\n" +
-                "          cameraId = cameras[cameras.length - 1].id;\n" +
-                "        }\n" +
-                "        \n" +
-                "        console.log('Using camera:', cameraId);\n" +
-                "        \n" +
-                "        qr = new Html5Qrcode('reader');\n" +
-                "        \n" +
-                "        // Use facingMode environment to prefer back camera\n" +
-                "        var config = { fps: 10, qrbox: { width: 250, height: 250 }, videoConstraints: { facingMode: 'environment' } };\n"
-                +
-                "        \n" +
-                "        qr.start(cameraId, config, function(decodedText){\n" +
-                "          var code=(decodedText||'').trim().toUpperCase();\n" +
-                "          if(code.length<2) return;\n" +
-                "          var now=Date.now();\n" +
-                "          if(code===lastCode && (now-lastAt)<1500) return;\n" +
-                "          lastCode=code; lastAt=now;\n" +
-                "          document.getElementById('last').textContent=code;\n" +
-                "          sendBarcode(code,1);\n" +
-                "        }, function(errorMessage){ \n" +
-                "          // Ignore scan errors (no QR found)\n" +
-                "        }).then(function(){\n" +
-                "          qrRunning=true;\n" +
-                "          setStatus('Camera sẵn sàng — đưa QR vào khung');\n" +
-                "        }).catch(function(e){\n" +
-                "          console.log('Camera error:', e);\n" +
-                "          toast('Không mở được camera: ' + e, true);\n" +
-                "          setStatus('Camera lỗi: '+e);\n" +
-                "        });\n" +
-                "      }else{\n" +
-                "        toast('Không tìm thấy camera!', true);\n" +
-                "        setStatus('Lỗi: Không tìm thấy camera');\n" +
-                "      }\n" +
+                "    if(qr && qrRunning){ qr.stop().catch(function(){}); }\n" +
+                "    qr = new Html5Qrcode('reader');\n" +
+                "    // Use facingMode directly — skips getCameras() which fails on iOS before permission\n" +
+                "    var config = { fps: 10, qrbox: { width: 250, height: 250 } };\n" +
+                "    qr.start(\n" +
+                "      { facingMode: 'environment' },\n" +
+                "      config,\n" +
+                "      function(decodedText){\n" +
+                "        var code=(decodedText||'').trim().toUpperCase();\n" +
+                "        if(code.length<2) return;\n" +
+                "        var now=Date.now();\n" +
+                "        if(code===lastCode && (now-lastAt)<1500) return;\n" +
+                "        lastCode=code; lastAt=now;\n" +
+                "        document.getElementById('last').textContent=code;\n" +
+                "        sendBarcode(code,1);\n" +
+                "      },\n" +
+                "      function(err){ /* ignore per-frame scan errors */ }\n" +
+                "    ).then(function(){\n" +
+                "      qrRunning=true;\n" +
+                "      setStatus('Camera sẵn sàng — đưa QR/Barcode vào khung');\n" +
                 "    }).catch(function(e){\n" +
-                "      console.log('getCameras error:', e);\n" +
-                "      toast('Lỗi truy cập camera: ' + e, true);\n" +
-                "      setStatus('Lỗi: ' + e);\n" +
+                "      console.error('Camera start error:', e);\n" +
+                "      toast('Không mở được camera. Kiểm tra quyền hoặc dùng iPhone 6s+', true);\n" +
+                "      setStatus('Lỗi camera: '+e);\n" +
                 "    });\n" +
                 "  }catch(e){\n" +
-                "    console.log('Start QR error:', e);\n" +
+                "    console.error('startQr exception:', e);\n" +
                 "    toast('Không khởi tạo được QR: '+e, true);\n" +
-                "    setStatus('Lỗi: '+e); \n" +
-                "  } \n" +
+                "    setStatus('Lỗi: '+e);\n" +
+                "  }\n" +
                 "} \n" +
 
                 "document.addEventListener('DOMContentLoaded',function(){\n" +
