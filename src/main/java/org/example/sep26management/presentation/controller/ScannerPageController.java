@@ -58,7 +58,7 @@ public class ScannerPageController {
                 +
                 ".container{padding:12px;max-width:520px;margin:0 auto}" +
 
-                "#cam-wrap{position:relative;border-radius:14px;overflow:hidden;border:2px solid #3b82f6;background:#111;margin-bottom:8px}"
+                "#cam-wrap{position:relative;border-radius:14px;overflow:hidden;border:2px solid #3b82f6;background:#111;margin-bottom:8px;min-height:220px}"
                 +
                 "#reader{width:100%}" + /* html5-qrcode render vào div này */
                 "#scan-line{position:absolute;left:8%;right:8%;height:2px;background:linear-gradient(90deg,transparent,#34d399,transparent);top:50%;animation:scan 1.8s ease-in-out infinite;pointer-events:none;z-index:10}"
