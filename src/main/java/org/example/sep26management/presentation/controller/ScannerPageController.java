@@ -98,8 +98,18 @@ public class ScannerPageController {
                 +
 
                 "<div class='container'>" +
-                "<div id='cam-wrap'><div id='reader'></div><div id='scan-line'></div></div>" +
-                "<div id='cam-status'>Đang khởi động camera QR…</div>" +
+                "<div id='cam-wrap'>" +
+                "<div id='reader'></div><div id='scan-line'></div>" +
+                "<div id='cam-start-overlay' style='position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(15,23,42,0.95);z-index:20;border-radius:14px'>"
+                +
+                "<div style='font-size:52px;margin-bottom:14px'>📷</div>" +
+                "<button id='startCamBtn' style='background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;border:none;border-radius:14px;padding:16px 42px;font-size:19px;font-weight:800;cursor:pointer;box-shadow:0 4px 20px rgba(59,130,246,.5)'>▶ Bắt đầu quét</button>"
+                +
+                "<div style='color:#64748b;font-size:12px;margin-top:14px;text-align:center'>Nhấn vào đây để bật Camera &amp; iOS sẽ hỏi xin quyền</div>"
+                +
+                "</div>" +
+                "</div>" +
+                "<div id='cam-status'>Chưa bật camera — Nhấn nút bên trên</div>" +
 
                 "<div class='card'>" +
                 "<div class='card-title'>Quét QR</div>" +
@@ -415,10 +425,13 @@ public class ScannerPageController {
                 "  document.getElementById('createGrnBtn').addEventListener('click', createGrn);\n" +
                 "  document.getElementById('bc').addEventListener('keydown', function(e){ if(e.key==='Enter') submitManual(); });\n"
                 +
+                "  document.getElementById('startCamBtn').addEventListener('click', function(){\n" +
+                "    document.getElementById('cam-start-overlay').style.display='none';\n" +
+                "    waitForHtml5Qrcode(startQr, 25);\n" +
+                "  });\n" +
                 "});\n" +
                 "window.addEventListener('load', function(){\n" +
                 "  fetchSession();\n" +
-                "  waitForHtml5Qrcode(startQr, 25);\n" +
                 "});\n" +
 
                 "</script></body></html>";
