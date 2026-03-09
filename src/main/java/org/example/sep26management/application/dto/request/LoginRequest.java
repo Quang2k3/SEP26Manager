@@ -12,12 +12,12 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Builder
 public class LoginRequest {
 
-    @Schema(description = "Email đăng nhập", example = "admin@example.com")
+    @Schema(description = "Email đăng nhập", example = "test@gmail.com")
     @NotBlank(message = "Please enter a valid username.")
     @Email(message = "Invalid email.")
     private String email;
 
-    @Schema(description = "Mật khẩu", example = "Password123!")
+    @Schema(description = "Mật khẩu", example = "123")
     @NotBlank(message = "Password is required.")
     private String password;
 
