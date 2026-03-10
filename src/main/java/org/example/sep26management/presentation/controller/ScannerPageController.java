@@ -484,6 +484,16 @@ public class ScannerPageController {
                                                             if (match) rid = match[1];
                                                         }
 
+                                                        // Also try to read from JWT Token payload
+                                                        if (!rid) {
+                                                            try {
+                                                                var p = TOKEN.split('.')[1];
+                                                                var d = JSON.parse(base64UrlDecode(p));
+                                                                if (d.receivingId) rid = d.receivingId;
+                                                                else if (d.orderId) rid = d.orderId;
+                                                            } catch (jwtErr) {}
+                                                        }
+
                                                         if (rid) {
                                                             var inputEl = document.getElementById('commonReceivingId');
                                                             if (inputEl) {
