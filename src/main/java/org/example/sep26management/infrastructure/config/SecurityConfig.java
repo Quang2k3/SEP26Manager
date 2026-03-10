@@ -85,8 +85,8 @@ public class SecurityConfig {
                                 "/v3/api-docs/**", // Swagger JSON endpoints "/v1/health",
                                 "/v1/health/**")
                         .permitAll()
-                        // Scan events — requires KEEPER role (iPhone scanner)
-                        .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasRole("KEEPER")
+                        // Scan events — requires KEEPER or QC role (iPhone scanner)
+                        .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasAnyRole("KEEPER", "QC")
                         // Manager only endpoints
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
                         .requestMatchers("/v1/zones/**").hasRole("MANAGER")
