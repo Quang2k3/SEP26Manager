@@ -22,7 +22,7 @@ public class ReceivingOrderRequest {
     @Schema(description = "Mã chứng từ xuất/tham chiếu", example = "PO-20231015-01")
     private String sourceReferenceCode;
 
-    @Schema(description = "Mã nhà cung cấp (Lấy từ API danh sách supplier)", example = "SUP-001")
+    @Schema(description = "Mã nhà cung cấp (Lấy từ API danh sách supplier)", example = "SUP001")
     private String supplierCode;
 
     @Schema(description = "ID kho chuyển tới (Nếu là Transfer)", example = "2")
@@ -40,8 +40,9 @@ public class ReceivingOrderRequest {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ItemRequest {
-        @Schema(description = "ID của SKU", example = "1")
-        private Long skuId;
+        @Schema(description = "Mã SKU (SKU Code)", example = "SKU001")
+        @NotBlank(message = "skuCode is required")
+        private String skuCode;
 
         @Schema(description = "Số lượng mong đợi trên giấy tờ", example = "100")
         private BigDecimal expectedQty;

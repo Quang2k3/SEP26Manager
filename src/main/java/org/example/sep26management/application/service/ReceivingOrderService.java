@@ -102,9 +102,9 @@ public class ReceivingOrderService {
 
                 if (request.getItems() != null && !request.getItems().isEmpty()) {
                         for (var itemReq : request.getItems()) {
-                                SkuEntity sku = skuRepo.findById(itemReq.getSkuId())
+                                SkuEntity sku = skuRepo.findBySkuCode(itemReq.getSkuCode())
                                                 .orElseThrow(() -> new RuntimeException(
-                                                                "SKU not found: " + itemReq.getSkuId()));
+                                                                "SKU not found for code: " + itemReq.getSkuCode()));
 
                                 ReceivingItemEntity item = ReceivingItemEntity.builder()
                                                 .receivingOrder(savedOrder)
