@@ -241,6 +241,13 @@ public class ScannerPageController {
                                             </header>
 
                                             <div class='container'>
+                                                <div class='card' id='orderCard'>
+                                                    <div class='card-title'>Phiếu Nhận Hàng</div>
+                                                    <div class='row' style='margin-bottom:8px'>
+                                                        <input type='number' id='commonReceivingId' placeholder='Nhập ID Phiếu Nhận ...' style='flex:1;font-size:16px;'/>
+                                                        <button id='loadOrderBtn' style='background:#3b82f6;color:white;border:none;border-radius:8px;padding:0 15px;margin-left:8px;font-weight:bold'>Tải Phiếu</button>
+                                                    </div>
+                                                </div>
                                                 <div id='cam-wrap'>
                                                     <div id='reader'></div>
                                                     <div id='scan-line'></div>
@@ -313,19 +320,11 @@ public class ScannerPageController {
                                                 <div class='card' id='keeperSection'>
                                                     <div class='card-title'>Xác nhận kiểm đếm</div>
 
-                                                    <div class='row' style='margin-bottom:8px'>
-                                                        <input type='number' id='keeperReceivingId' placeholder='Mã Phiếu Nhận (receivingId)' style='flex:1'/>
-                                                    </div>
-
                                                     <button class='btn full' id='createGrnBtn' style='background:#10b981;margin-top:5px'>✅ Xác nhận kiểm đếm</button>
                                                 </div>
 
                                                 <div class='card' id='qcSection' style='display:none'>
                                                     <div class='card-title'>QC — Xác nhận chất lượng</div>
-
-                                                    <div class='row' style='margin-bottom:8px'>
-                                                        <input type='number' id='receivingIdInput' placeholder='Mã Phiếu Nhận (receivingId)' style='flex:1'/>
-                                                    </div>
 
                                                     <button class='btn full' id='qcApproveBtn' style='background:#10b981;margin-top:5px'>✅ Xác nhận chất lượng OK</button>
 
@@ -417,29 +416,110 @@ public class ScannerPageController {
                                                     }, 200);
                                                 }
 
+                                                var expectedItemsMap = {}; // { skuId: { expectedQty, skuCode, skuName, receivingItemId } }
+
+                                                function loadReceivingOrder() {
+                                                    var recvId = document.getElementById('commonReceivingId').value.trim();
+                                                    if (!recvId) {
+                                                        toast('Vui lòng nhập ID Phiếu Nhận', true);
+                                                        return;
+                                                    }
+
+                                                    var btn = document.getElementById('loadOrderBtn');
+                                                    btn.disabled = true;
+                                                    btn.textContent = '...';
+
+                                                    fetch(API_BASE + '/v1/receiving-orders/' + recvId, {
+                                                        headers: { 'Authorization': 'Bearer ' + TOKEN }
+                                                    })
+                                                    .then(function(r) { return r.json(); })
+                                                    .then(function(d) {
+                                                        btn.disabled = false;
+                                                        btn.textContent = 'Tải Phiếu';
+                                                        if (d && d.success && d.data) {
+                                                            toast('Đã tải phiếu #' + recvId, false);
+                                                            var items = d.data.items || [];
+                                                            expectedItemsMap = {};
+                                                            items.forEach(function(item) {
+                                                                expectedItemsMap[item.skuId] = {
+                                                                    skuCode: item.skuCode,
+                                                                    skuName: item.skuName,
+                                                                    expectedQty: item.expectedQty,
+                                                                    receivingItemId: item.receivingItemId
+                                                                };
+                                                            });
+                                                            updateTable(lineData);
+                                                        } else {
+                                                            toast((d && d.message) || 'Lỗi tải phiếu', true);
+                                                            expectedItemsMap = {};
+                                                            updateTable(lineData);
+                                                        }
+                                                    })
+                                                    .catch(function(e) {
+                                                        toast('Lỗi mạng: ' + e, true);
+                                                        btn.disabled = false;
+                                                        btn.textContent = 'Tải Phiếu';
+                                                    });
+                                                }
+
+                                                document.addEventListener('DOMContentLoaded', function() {
+                                                    var loadBtn = document.getElementById('loadOrderBtn');
+                                                    if (loadBtn) loadBtn.addEventListener('click', loadReceivingOrder);
+                                                });
+
                                                 function updateTable(lines) {
                                                     lineData = Array.isArray(lines) ? lines : [];
+
+                                                    var scannedMap = {};
+                                                    lineData.forEach(function(l) {
+                                                        if (!scannedMap[l.skuId]) {
+                                                            scannedMap[l.skuId] = { qty: 0, conditions: [] };
+                                                        }
+                                                        scannedMap[l.skuId].qty += l.qty;
+                                                        scannedMap[l.skuId].conditions.push(l);
+                                                    });
+
+                                                    var allSkuIds = Object.keys(expectedItemsMap);
+                                                    Object.keys(scannedMap).forEach(function(skuId) {
+                                                        if (allSkuIds.indexOf(skuId) === -1) allSkuIds.push(skuId);
+                                                    });
 
                                                     var rows = '';
                                                     var count = 0;
 
-                                                    for (var i = 0; i < lineData.length; i++) {
-                                                        var l = lineData[i];
+                                                    allSkuIds.forEach(function(skuId) {
+                                                        var expected = expectedItemsMap[skuId] || { skuCode: 'UNKNOWN', skuName: 'Không có trong phiếu', expectedQty: 0 };
+                                                        var scanned = scannedMap[skuId] || { qty: 0, conditions: [] };
+
+                                                        var totalScanned = scanned.qty;
+                                                        var expQty = expected.expectedQty;
+
+                                                        var rowColor = '';
+                                                        if (totalScanned > expQty) rowColor = 'background: rgba(239, 68, 68, 0.1);';
+                                                        else if (totalScanned === expQty && expQty > 0) rowColor = 'background: rgba(16, 185, 129, 0.1);';
+
                                                         count++;
 
-                                                        var isFail = l.condition === 'FAIL';
-                                                        var condHtml = isFail
-                                                            ? '<span style="color:#ef4444;font-size:10px;display:block">Lỗi: ' + (l.reasonCode || 'N/A') + '</span>'
-                                                            : '';
+                                                        var condHtml = '';
+                                                        if (scanned.conditions.length > 0) {
+                                                            scanned.conditions.forEach(function(l) {
+                                                                var isFail = l.condition === 'FAIL';
+                                                                var color = isFail ? '#ef4444' : '#10b981';
+                                                                condHtml += '<div style="font-size:11px; margin-top:3px; color:' + color + ';">'
+                                                                    + l.condition + ': <b>' + l.qty + '</b>' + (isFail && l.reasonCode ? ' (' + l.reasonCode + ')' : '')
+                                                                    + ' <button onclick="removeL(\\'' + skuId + '\\',\\'' + l.condition + '\\')" style="background:transparent;border:1px solid ' + color + ';border-radius:4px;color:' + color + ';font-size:10px;padding:2px 4px;margin-left:5px">[-1]</button>'
+                                                                    + '</div>';
+                                                            });
+                                                        } else {
+                                                            condHtml = '<div style="font-size:11px; margin-top:3px; color:#94a3b8">Chưa scan</div>';
+                                                        }
 
-                                                        rows += '<tr>'
-                                                            + '<td class="sc">' + (l.skuCode || '') + condHtml + '</td>'
-                                                            + '<td>' + (l.skuName || '') + '</td>'
-                                                            + '<td class="qc" style="' + (isFail ? 'color:#ef4444' : '') + '">' + (l.qty || 0) + '</td>'
-                                                            + '<td><button onclick="removeL(\\'' + l.skuId + '\\',\\'' + l.condition + '\\')" '
-                                                            + 'style="background:transparent;border:1px solid #ef4444;border-radius:4px;color:#ef4444;font-size:12px;padding:3px 6px;font-weight:bold">-1</button></td>'
+                                                        rows += '<tr style="' + rowColor + '">'
+                                                            + '<td class="sc"><b>' + expected.skuCode + '</b></td>'
+                                                            + '<td>' + expected.skuName + condHtml + '</td>'
+                                                            + '<td class="qc" style="white-space:nowrap">' + totalScanned + ' <span style="font-size:12px;color:#64748b">/ ' + expQty + '</span></td>'
                                                             + '</tr>';
-                                                    }
+                                                    });
 
                                                     document.getElementById('lines').innerHTML = rows;
                                                     document.getElementById('cnt').textContent = count + ' dòng';
@@ -501,7 +581,7 @@ public class ScannerPageController {
                                                     var reason = (IS_QC && cond === 'FAIL') ? document.getElementById('reason').value : null;
                                                     var receivingId = null;
                                                     try {
-                                                        var recvEl = IS_QC ? document.getElementById('receivingIdInput') : document.getElementById('keeperReceivingId');
+                                                        var recvEl = document.getElementById('commonReceivingId');
                                                         if (recvEl && recvEl.value) {
                                                             var v = (recvEl.value || '').trim();
                                                             if (v) receivingId = parseInt(v, 10);
@@ -713,7 +793,7 @@ public class ScannerPageController {
                                                 }
 
                                                 function createGrn() {
-                                                    var recvId = document.getElementById('keeperReceivingId').value.trim();
+                                                    var recvId = document.getElementById('commonReceivingId').value.trim();
                                                     if (!recvId) {
                                                         toast('Vui lòng nhập Mã Phiếu Nhận (receivingId)', true);
                                                         return;
@@ -800,7 +880,7 @@ public class ScannerPageController {
 
                                                 // ── QC: Xác nhận chất lượng OK ──
                                                 function qcApprove() {
-                                                    var recvId = document.getElementById('receivingIdInput').value.trim();
+                                                    var recvId = document.getElementById('commonReceivingId').value.trim();
                                                     if (!recvId) {
                                                         toast('Vui lòng nhập Mã Phiếu Nhận (receivingId)', true);
                                                         return;
@@ -836,7 +916,7 @@ public class ScannerPageController {
 
                                                 // ── QC: Báo cáo sự cố (hàng FAIL) ──
                                                 function reportIncident() {
-                                                    var recvId = document.getElementById('receivingIdInput').value.trim();
+                                                    var recvId = document.getElementById('commonReceivingId').value.trim();
                                                     if (!recvId) {
                                                         toast('Vui lòng nhập Mã Phiếu Nhận (receivingId)', true);
                                                         return;
