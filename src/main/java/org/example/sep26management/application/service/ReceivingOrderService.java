@@ -49,6 +49,8 @@ public class ReceivingOrderService {
         private final PutawaySuggestionService putawaySuggestionService;
         private final ScanSessionRedisRepository sessionRedis;
         private final SseEmitterRegistry sseRegistry;
+        @org.springframework.context.annotation.Lazy
+        private final GrnService grnService;
 
         // ─── List ──────────────────────────────────────────────────────────────────
 
@@ -439,8 +441,14 @@ public class ReceivingOrderService {
                                 .receivingId(id)
                                 .grnCode(grnCode)
                                 .warehouseId(order.getWarehouseId())
-                                .status("PENDING_APPROVAL")
+                                .sourceType(order.getSourceType())
+                                .sourceWarehouseId(order.getSourceWarehouseId())
+                                .supplierId(order.getSupplierId())
+                                .sourceReferenceCode(order.getSourceReferenceCode())
+                                .status("APPROVED") // Auto Approve
                                 .createdBy(userId)
+                                .approvedBy(userId) // Keeper automatically approves
+                                .approvedAt(LocalDateTime.now())
                                 .build();
                 GrnEntity savedGrn = grnRepo.save(grn);
 
@@ -498,6 +506,10 @@ public class ReceivingOrderService {
                                 .grnCode(savedGrn.getGrnCode())
                                 .receivingId(savedGrn.getReceivingId())
                                 .warehouseId(savedGrn.getWarehouseId())
+                                .sourceType(savedGrn.getSourceType())
+                                .sourceWarehouseId(savedGrn.getSourceWarehouseId())
+                                .supplierId(savedGrn.getSupplierId())
+                                .sourceReferenceCode(savedGrn.getSourceReferenceCode())
                                 .status(savedGrn.getStatus())
                                 .createdBy(savedGrn.getCreatedBy())
                                 .createdAt(savedGrn.getCreatedAt())
@@ -505,7 +517,11 @@ public class ReceivingOrderService {
                                 .items(itemResponses)
                                 .build();
 
-                return ApiResponse.success("GRN created successfully", grnResponse);
+                // Auto post GRN to create inventory transactions and Putaway Tasks
+                grnService.post(savedGrn.getGrnId(), userId);
+
+                return ApiResponse.success("GRN created and auto-posted successfully. Putaway Tasks generated.",
+                                grnResponse);
         }
 
         // ─── Post ──────────────────────────────────────────────────────────────────
