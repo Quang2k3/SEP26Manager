@@ -59,6 +59,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                     Map<String, Object> details = new HashMap<>();
                     details.put("sessionId", sessionId);
+                    // Extract userId from scan token if present (for submit API etc.)
+                    try {
+                        Long scanUserId = jwtTokenProvider.getUserIdFromToken(jwt);
+                        if (scanUserId != null) {
+                            details.put("userId", scanUserId);
+                        }
+                    } catch (Exception ignored) {
+                    }
                     authentication.setDetails(details);
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
