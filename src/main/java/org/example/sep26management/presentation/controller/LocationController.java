@@ -50,20 +50,18 @@ public class LocationController {
 
     @PostMapping
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Tạo location mới (Manager)",
-            description = "Tạo location (AISLE/RACK/BIN/STAGING) trong zone. "
-                    + "BIN cần parentLocationId là RACK, RACK cần parent là AISLE. "
-                    )
+    @Operation(summary = "Tạo location mới (Manager)", description = "Tạo location (AISLE/RACK/BIN/STAGING) trong zone. "
+            + "BIN cần parentLocationId là RACK, RACK cần parent là AISLE. ")
     public ResponseEntity<ApiResponse<LocationResponse>> createLocation(
             @Valid @RequestBody CreateLocationRequest request,
             HttpServletRequest httpRequest) {
 
-        Long userId      = getCurrentUserId();
-        Long warehouseId = getCurrentWarehouseId();   // ← thêm dòng này
+        Long userId = getCurrentUserId();
+        Long warehouseId = getCurrentWarehouseId(); // ← thêm dòng này
 
         ApiResponse<LocationResponse> response = locationService.createLocation(
                 request,
-                warehouseId,                          // ← truyền vào đây
+                warehouseId, // ← truyền vào đây
                 userId,
                 getClientIp(httpRequest),
                 httpRequest.getHeader("User-Agent"));
@@ -77,7 +75,9 @@ public class LocationController {
 
     @PutMapping("/{locationId}")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Cập nhật location (Manager)", description = "Cập nhật thông tin location: locationCode, zoneId, capacity,...")
+    @Operation(summary = "Cập nhật location (Manager)", description = "Cập nhật thông tin location: locationCode, zoneId, capacity,...\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable locationId`: Mã Vị trí (Location ID). LẤY TỪ: attribute `id` của API danh sách Location.")
     public ResponseEntity<ApiResponse<LocationResponse>> updateLocation(
             @PathVariable Long locationId,
             @Valid @RequestBody UpdateLocationRequest request,
@@ -96,7 +96,9 @@ public class LocationController {
 
     @PatchMapping("/{locationId}/deactivate")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Vô hiệu hóa location (Manager)", description = "Vô hiệu hóa location. Không thể deactivate nếu location còn inventory.")
+    @Operation(summary = "Vô hiệu hóa location (Manager)", description = "Vô hiệu hóa location. Không thể deactivate nếu location còn inventory.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable locationId`: Mã Vị trí (Location ID). LẤY TỪ: attribute `id` của API danh sách Location.")
     public ResponseEntity<ApiResponse<Void>> deactivateLocation(
             @PathVariable Long locationId,
             HttpServletRequest httpRequest) {
@@ -116,18 +118,16 @@ public class LocationController {
 
     @GetMapping
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Danh sách locations",
-            description = "Lấy danh sách locations với filter: zoneId, locationType (AISLE/RACK/BIN/STAGING), active, keyword. Phân trang. "
-                    )
+    @Operation(summary = "Danh sách locations", description = "Lấy danh sách locations với filter: zoneId, locationType (AISLE/RACK/BIN/STAGING), active, keyword. Phân trang. ")
     public ResponseEntity<ApiResponse<PageResponse<LocationResponse>>> listLocations(
-            @RequestParam(required = false) Long zoneId,              // ← bỏ @RequestParam Long warehouseId
+            @RequestParam(required = false) Long zoneId, // ← bỏ @RequestParam Long warehouseId
             @RequestParam(required = false) LocationType locationType,
             @RequestParam(required = false) Boolean active,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        Long warehouseId = getCurrentWarehouseId();   // ← tự lấy từ JWT
+        Long warehouseId = getCurrentWarehouseId(); // ← tự lấy từ JWT
 
         return ResponseEntity.ok(locationService.listLocations(
                 warehouseId, zoneId, locationType, active, keyword, page, size));
@@ -139,7 +139,9 @@ public class LocationController {
 
     @GetMapping("/{locationId}")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Chi tiết location", description = "Xem chi tiết 1 location: code, type, zone, parent, capacity, active status.")
+    @Operation(summary = "Chi tiết location", description = "Xem chi tiết 1 location: code, type, zone, parent, capacity, active status.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable locationId`: Mã Vị trí (Location ID). LẤY TỪ: attribute `id` của API danh sách Location.")
     public ResponseEntity<ApiResponse<LocationResponse>> getLocationDetail(
             @PathVariable Long locationId) {
         return ResponseEntity.ok(locationService.getLocationDetail(locationId));
@@ -151,7 +153,8 @@ public class LocationController {
 
     private Long getCurrentWarehouseId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        if (auth == null)
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
         Object details = auth.getDetails();
         if (details instanceof Map) {
             @SuppressWarnings("unchecked")
@@ -159,16 +162,19 @@ public class LocationController {
             Object raw = map.get("warehouseIds");
             if (raw instanceof List<?> list && !list.isEmpty()) {
                 Object first = list.get(0);
-                if (first instanceof Long l)    return l;
-                if (first instanceof Integer i) return i.longValue();
-                if (first instanceof Number n)  return n.longValue();
-                if (first != null)              return Long.parseLong(first.toString());
+                if (first instanceof Long l)
+                    return l;
+                if (first instanceof Integer i)
+                    return i.longValue();
+                if (first instanceof Number n)
+                    return n.longValue();
+                if (first != null)
+                    return Long.parseLong(first.toString());
             }
         }
         throw new RuntimeException(
                 "Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
     }
-
 
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();

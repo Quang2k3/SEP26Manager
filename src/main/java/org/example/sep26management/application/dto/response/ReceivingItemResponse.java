@@ -43,6 +43,9 @@ public class ReceivingItemResponse {
     @Schema(description = "Ghi chú thêm", example = "Hàng đợt 1")
     private String note;
 
+    @Schema(description = "Số lượng mong đợi", example = "10.0")
+    private BigDecimal expectedQty;
+
     @Schema(description = "Tình trạng quét (PASS = Hàng tốt, FAIL = Hàng lỗi)", example = "PASS", allowableValues = {
             "PASS", "FAIL" })
     private String condition;

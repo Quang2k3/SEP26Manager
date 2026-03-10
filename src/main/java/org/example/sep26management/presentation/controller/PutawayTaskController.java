@@ -52,10 +52,19 @@ public class PutawayTaskController {
     @GetMapping("/{id}")
     @Operation(summary = "Chi tiết putaway task", description = "Bóc tách xem bên trong Task này yêu cầu bốc những món hàng nào đi cất.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã **Putaway Task ID**, lấy từ API danh sách `/v1/putaway-tasks` phía trên.\n\n"
+            + "- `@PathVariable id`: Mã **Putaway Task ID**. LẤY TỪ: attribute `id` của API danh sách `/v1/putaway-tasks` phía trên hoặc kết quả API tự động sinh.\n\n"
             + "*(Ghi chú: Response có sẵn luôn `suggestedLocationCode` để FE biết luôn món hàng này hệ thống AI khuyên cất vào kệ nào)*.")
     public ApiResponse<PutawayTaskResponse> get(@PathVariable Long id) {
         return putawayTaskService.getTask(id);
+    }
+
+    /** GET /v1/putaway-tasks/receiving/{receivingId} — get by receiving GRN */
+    @GetMapping("/receiving/{receivingId}")
+    @Operation(summary = "Lấy putaway task theo phiếu nhập", description = "Lấy Putaway Task được sinh ra tự động từ phiếu nhập dự kiến (Receiving Order).\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable receivingId`: Mã phiếu nhập Receiving Order ID. LẤY TỪ: attribute `receivingId` của API GET danh sách Receiving Orders.")
+    public ApiResponse<PutawayTaskResponse> getByReceivingId(@PathVariable Long receivingId) {
+        return putawayTaskService.getTaskByReceivingId(receivingId);
     }
 
     /**
@@ -65,7 +74,7 @@ public class PutawayTaskController {
     @GetMapping("/{id}/suggestions")
     @Operation(summary = "Xem Gợi ý Vị trí Cất Hàng", description = "Nếu FE muốn xem màn hình chi tiết gợi ý AI của riêng lô hàng này, thì gọi API này.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Vẫn là **Putaway Task ID**. \n\n"
+            + "- `@PathVariable id`: Mã **Putaway Task ID**. LẤY TỪ: attribute `id` của API danh sách Putaway tasks. \n\n"
             + "**Kết quả:** Tách riêng danh sách AI Suggestions: `matchedZoneCode`, `suggestedLocationCode`, sức chứa tối đa, chỗ trống còn lại trên kệ để thủ kho quyết định có nghe theo gợi ý hay không.")
     public ApiResponse<List<PutawaySuggestion>> getSuggestions(@PathVariable Long id) {
         return putawayTaskService.getSuggestions(id);
@@ -78,11 +87,11 @@ public class PutawayTaskController {
     @PostMapping("/{id}/confirm")
     @Operation(summary = "Xác nhận cất hàng lên Kệ (Keeper)", description = "Sau khi khuân đồ ra kệ, keeper lấy súng quét mã vạch trên kệ để chốt lại việc dọn đồ.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã **Putaway Task ID**.\n"
+            + "- `@PathVariable id`: Mã **Putaway Task ID**. LẤY TỪ: attribute `id` của API danh sách Putaway tasks.\n"
             + "- `Body.items`: Là một mảng (List) do FE ghép truyền lên. Mỗi item chứa:\n"
-            + "  - `skuId`: Lấy từ response xem ID sản phẩm đã hướng dẫn ở trên.\n"
+            + "  - `skuId`: Mã **SKU ID** hệ thống. LẤY TỪ: attribute `items[].skuId` của API trả về chi tiết Putaway task.\n"
             + "  - `putawayQty`: Số lượng thực tế đã ném lên kệ (thường thủ kho nhập số trên điện thoại).\n"
-            + "  - `locationId`: Ở đâu ra? Do nhân viên kho **cầm máy quét bắn vào cái tem mã vạch dán trên tủ kệ thép**. Sau đó FE truyền mã số của kệ tủ đó vào đây.")
+            + "  - `locationId`: ID của vị trí kệ hàng. LẤY TỪ: attribute `id` của bảng `Location` (hoặc FE có chức năng quét mã vạch kệ -> gọi API lấy locationId đắp vào).")
     public ApiResponse<PutawayTaskResponse> confirm(
             @PathVariable Long id,
             @Valid @RequestBody PutawayConfirmRequest request,

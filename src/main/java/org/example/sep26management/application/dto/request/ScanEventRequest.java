@@ -33,4 +33,8 @@ public class ScanEventRequest {
 
     @Schema(description = "Mã phiên quét (Session ID). Lấy từ API tạo phiên: `POST /v1/receiving-sessions`.", example = "sess_123456789")
     private String sessionId;
+
+    @Schema(description = "ID Phiếu nhận hàng (Receiving Order) để map scan trực tiếp vào phiếu (tăng receivedQty theo thùng).",
+            example = "123")
+    private Long receivingId;
 }

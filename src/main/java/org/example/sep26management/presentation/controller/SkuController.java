@@ -27,11 +27,11 @@ import java.util.Map;
 /**
  * SkuController — SKU master data APIs
  *
- * UC-B04 View SKU List      (All roles)
- * UC-B05 View SKU Detail    (All roles)
- * UC-B06 Search SKU         (All roles — used by barcode scan flow)
+ * UC-B04 View SKU List (All roles)
+ * UC-B05 View SKU Detail (All roles)
+ * UC-B06 Search SKU (All roles — used by barcode scan flow)
  * UC-B07 Configure Threshold (MANAGER)
- * UC-B08 Import from Excel  (MANAGER)
+ * UC-B08 Import from Excel (MANAGER)
  *
  * warehouseId không cần truyền vào param — lấy tự động từ JWT token
  */
@@ -51,7 +51,9 @@ public class SkuController {
      */
     @GetMapping("/{skuId}")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Chi tiết SKU", description = "Xem thông tin chi tiết SKU: skuCode, skuName, barcode, weight, volume, category, image,...")
+    @Operation(summary = "Chi tiết SKU", description = "Xem thông tin chi tiết SKU: skuCode, skuName, barcode, weight, volume, category, image,...\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable skuId`: Mã SKU ID. LẤY TỪ: attribute `skuId` của API danh sách SKU (`GET /v1/skus/search`) hoặc từ Barcode/SKU Code lookup.")
     public ResponseEntity<ApiResponse<SkuResponse>> getSkuDetail(
             @PathVariable Long skuId) {
         log.info("GET /v1/skus/{} — view SKU detail", skuId);
@@ -88,21 +90,21 @@ public class SkuController {
 
     @PutMapping("/{skuId}/threshold")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Cấu hình ngưỡng tồn kho (Manager)",
-            description = "Set minQty và maxQty cho SKU. "
-    )
+    @Operation(summary = "Cấu hình ngưỡng tồn kho (Manager)", description = "Set minQty và maxQty cho SKU.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable skuId`: Mã SKU ID. LẤY TỪ: attribute `skuId` của API danh sách SKU.")
     public ResponseEntity<ApiResponse<SkuThresholdResponse>> configureThreshold(
             @PathVariable Long skuId,
             @Valid @RequestBody ConfigureSkuThresholdRequest request,
             HttpServletRequest httpRequest) {
 
-        Long userId      = getCurrentUserId();
-        Long warehouseId = getCurrentWarehouseId();   // ← thêm dòng này
+        Long userId = getCurrentUserId();
+        Long warehouseId = getCurrentWarehouseId(); // ← thêm dòng này
 
         return ResponseEntity.ok(skuService.configureThreshold(
                 skuId,
                 request,
-                warehouseId,                          // ← truyền vào đây
+                warehouseId, // ← truyền vào đây
                 userId,
                 getClientIpAddress(httpRequest),
                 httpRequest.getHeader("User-Agent")));
@@ -116,7 +118,9 @@ public class SkuController {
 
     @GetMapping("/{skuId}/threshold")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Xem ngưỡng tồn kho", description = "Lấy cấu hình ngưỡng tồn kho (minQty, maxQty) của SKU. warehouseId lấy tự động từ JWT token.")
+    @Operation(summary = "Xem ngưỡng tồn kho", description = "Lấy cấu hình ngưỡng tồn kho (minQty, maxQty) của SKU. warehouseId lấy tự động từ JWT token.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable skuId`: Mã SKU ID. LẤY TỪ: attribute `skuId` của API danh sách SKU.")
     public ResponseEntity<ApiResponse<SkuThresholdResponse>> getThreshold(
             Authentication authentication,
             @PathVariable Long skuId) {
@@ -152,13 +156,12 @@ public class SkuController {
      */
     @PatchMapping("/{skuId}/assign-category")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
-    @Operation(summary = "Gán category cho SKU",
-            description = "Gán/thay đổi category của SKU.\n\n"
-                    + "**Data yêu cầu:**\n"
-                    + "- `@PathVariable skuId`: ID của SKU — lấy từ kết quả tìm kiếm SKU (`GET /v1/skus/search`).\n"
-                    + "- `Body.categoryCode`: Mã category — **LẤY TỪ** API `GET /v1/categories` (field `categoryCode`). "
-                    + "FE hiển thị `categoryName` cho người dùng chọn, sau đó gửi `categoryCode` lên đây. BE tự resolve ra `categoryId` nội bộ.\n\n"
-                    + "👉 Việc thay đổi category sẽ ảnh hưởng đến zone gợi ý khi putaway.")
+    @Operation(summary = "Gán category cho SKU", description = "Gán/thay đổi category của SKU.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable skuId`: ID của SKU — lấy từ kết quả tìm kiếm SKU (`GET /v1/skus/search`).\n"
+            + "- `Body.categoryCode`: Mã category — **LẤY TỪ** API `GET /v1/categories` (field `categoryCode`). "
+            + "FE hiển thị `categoryName` cho người dùng chọn, sau đó gửi `categoryCode` lên đây. BE tự resolve ra `categoryId` nội bộ.\n\n"
+            + "👉 Việc thay đổi category sẽ ảnh hưởng đến zone gợi ý khi putaway.")
     public ResponseEntity<ApiResponse<SkuResponse>> assignCategoryToSku(
             @PathVariable Long skuId,
             @Valid @RequestBody AssignCategoryToSkuRequest request,
@@ -182,9 +185,12 @@ public class SkuController {
             Object raw = map.get("warehouseIds");
             if (raw instanceof List<?> list && !list.isEmpty()) {
                 Object first = list.get(0);
-                if (first instanceof Long) return (Long) first;
-                if (first instanceof Integer) return ((Integer) first).longValue();
-                if (first instanceof Number) return ((Number) first).longValue();
+                if (first instanceof Long)
+                    return (Long) first;
+                if (first instanceof Integer)
+                    return ((Integer) first).longValue();
+                if (first instanceof Number)
+                    return ((Number) first).longValue();
             }
         }
         throw new RuntimeException("Cannot extract warehouseId from token");
@@ -199,16 +205,20 @@ public class SkuController {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) details;
             Object uid = map.get("userId");
-            if (uid instanceof Long) return (Long) uid;
-            if (uid instanceof Integer) return ((Integer) uid).longValue();
-            if (uid != null) return Long.parseLong(uid.toString());
+            if (uid instanceof Long)
+                return (Long) uid;
+            if (uid instanceof Integer)
+                return ((Integer) uid).longValue();
+            if (uid != null)
+                return Long.parseLong(uid.toString());
         }
         throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
     }
 
     private Long getCurrentWarehouseId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+        if (auth == null)
+            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
         Object details = auth.getDetails();
         if (details instanceof Map) {
             @SuppressWarnings("unchecked")
@@ -216,10 +226,14 @@ public class SkuController {
             Object raw = map.get("warehouseIds");
             if (raw instanceof List<?> list && !list.isEmpty()) {
                 Object first = list.get(0);
-                if (first instanceof Long l)    return l;
-                if (first instanceof Integer i) return i.longValue();
-                if (first instanceof Number n)  return n.longValue();
-                if (first != null)              return Long.parseLong(first.toString());
+                if (first instanceof Long l)
+                    return l;
+                if (first instanceof Integer i)
+                    return i.longValue();
+                if (first instanceof Number n)
+                    return n.longValue();
+                if (first != null)
+                    return Long.parseLong(first.toString());
             }
         }
         throw new RuntimeException(

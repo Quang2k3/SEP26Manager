@@ -116,7 +116,9 @@ public class UserManagementController {
      * @return ApiResponse with updated user details
      */
     @PutMapping("/{userId}/assign-role")
-    @Operation(summary = "Phân quyền cho user", description = "Gán role mới cho user (KEEPER/MANAGER/QC). Role cũ bị thay thế.")
+    @Operation(summary = "Phân quyền cho user", description = "Gán role mới cho user (KEEPER/MANAGER/QC). Role cũ bị thay thế.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable userId`: Mã ID của User. LẤY TỪ: attribute `id` của API danh sách User (`GET /v1/users/list-users`).")
     public ResponseEntity<ApiResponse<UserResponse>> assignRole(
             @PathVariable Long userId,
             @Valid @RequestBody AssignRoleRequest request,
@@ -156,7 +158,9 @@ public class UserManagementController {
      * @return ResponseEntity with updated user details
      */
     @PutMapping("/{userId}/change-status")
-    @Operation(summary = "Thay đổi trạng thái tài khoản", description = "Chuyển status user: ACTIVE ↔ INACTIVE. Có thể set suspendDate và reason.")
+    @Operation(summary = "Thay đổi trạng thái tài khoản", description = "Chuyển status user: ACTIVE ↔ INACTIVE. Có thể set suspendDate và reason.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable userId`: Mã ID của User. LẤY TỪ: attribute `id` của API danh sách User (`GET /v1/users/list-users`).")
     public ResponseEntity<ApiResponse<UserResponse>> changeStatus(
             @PathVariable Long userId,
             @Valid @RequestBody ChangeStatusRequest request,

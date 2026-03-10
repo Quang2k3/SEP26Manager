@@ -3,21 +3,22 @@ package org.example.sep26management.presentation.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.example.sep26management.application.dto.request.RejectRequest;
+import org.example.sep26management.application.dto.request.ReceivingOrderRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
+import org.example.sep26management.application.dto.response.GrnResponse;
 import org.example.sep26management.application.service.ReceivingOrderService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.*;
-
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 @RestController
 @RequestMapping("/v1/receiving-orders")
+
 @RequiredArgsConstructor
 @Tag(name = "Receiving Orders (GRN)", description = "Quản lý phiếu nhập kho (Goods Receipt Note). "
         + "Quy trình: Tạo GRN từ scan session → SUBMITTED → APPROVED (Manager) → POSTED (QC, tự động tạo Putaway Task). "
@@ -41,62 +42,75 @@ public class ReceivingOrderController {
         return receivingOrderService.listOrders(status, page, size);
     }
 
-    /** GET /v1/receiving-orders/{id} */
     @GetMapping("/{id}")
-    @Operation(summary = "Chi tiết phiếu nhập kho", description = "Xem chi tiết một GRN bao gồm list các sản phẩm (SKU) bên trong. \n\n"
+    @Operation(summary = "Chi tiết phiếu nhập kho", description = "Xem chi tiết một phiếu nhập dự kiến bao gồm list các sản phẩm (SKU) bên trong. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID, **LẤY TỪ** api danh sách `GET /v1/receiving-orders` hoặc api tạo GRN trước đó.")
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách `GET /v1/receiving-orders` hoặc kết quả API POST tạo bảng nháp).")
     public ApiResponse<ReceivingOrderResponse> get(@PathVariable Long id) {
         return receivingOrderService.getOrder(id);
     }
 
+    /** POST /v1/receiving-orders — Keeper creates DRAFT */
+    @PostMapping
+    @Operation(summary = "Tạo phiếu nhập kho nháp (Keeper)", description = "Keeper tạo phiếu nhập kho DRAFT dựa trên chứng từ với các mặt hàng và số lượng dự kiến. \n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `ReceivingOrderRequest`: Gồm type, supplier, list của `skuCode` và `expectedQty`.\n"
+            + "👉 **Kết quả:** Trả về Phiếu với trạng thái DRAFT. FE lưu lại mã `receivingId` (hoặc `receivingCode`) để gọi tiếp các API cập nhật số lượng.")
+    public ApiResponse<ReceivingOrderResponse> createDraftOrder(
+            @Valid @RequestBody ReceivingOrderRequest request,
+            Authentication auth) {
+        Long userId = extractUserId(auth);
+        Long warehouseId = extractWarehouseId(auth);
+        return receivingOrderService.createDraftOrder(request, warehouseId, userId);
+    }
+
+    /** PUT /v1/receiving-orders/{id}/lines — Keeper Update Numbers */
+    @PutMapping("/{id}/lines")
+    @Operation(summary = "Cập nhật số liệu kiểm đếm (Keeper)", description = "Lưu thông tin số lượng thực nhận (nhập kho mộc) do Keeper đếm được.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách hoặc kết quả API POST tạo bảng).\n"
+            + "- `UpdateReceivingLinesRequest`: Danh sách các items với số liệu `receivedQty`, `note`.")
+    public ApiResponse<ReceivingOrderResponse> updateLines(
+            @PathVariable Long id,
+            @Valid @RequestBody org.example.sep26management.application.dto.request.UpdateReceivingLinesRequest request,
+            Authentication auth) {
+        return receivingOrderService.updateLines(id, request, extractUserId(auth));
+    }
+
     /** POST /v1/receiving-orders/{id}/submit — Keeper */
     @PostMapping("/{id}/submit")
-    @Operation(summary = "Trình duyệt phiếu nhập kho (Keeper)", description = "Keeper gửi GRN yêu cầu Manager duyệt. Chuyển phiếu từ DRAFT thành SUBMITTED. \n\n"
+    @Operation(summary = "Trình duyệt phiếu nhập kho (Keeper)", description = "Keeper gửi phiếu yêu cầu Manager duyệt. Chuyển phiếu từ DRAFT thành SUBMITTED. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID cần duyệt (Lấy từ URL hoặc Table row ID).")
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách hoặc kết quả API POST tạo bảng).")
     public ApiResponse<ReceivingOrderResponse> submit(
             @PathVariable Long id,
             Authentication auth) {
         return receivingOrderService.submit(id, extractUserId(auth));
     }
 
-    /** POST /v1/receiving-orders/{id}/approve — Manager only */
-    @PostMapping("/{id}/approve")
-    @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Duyệt phiếu nhập kho (Manager)", description = "Điểm danh và xác nhận phiếu hợp lệ. Chuyển từ SUBMITTED thành APPROVED. \n\n"
+    /** POST /v1/receiving-orders/{id}/qc-approve — QC */
+    @PostMapping("/{id}/qc-approve")
+    @PreAuthorize("hasRole('QC')")
+    @Operation(summary = "QC xác nhận chất lượng OK", description = "QC xác nhận lô hàng đạt chất lượng (100% pass hoặc đã báo cáo sự cố xong). Chuyển phiếu từ SUBMITTED thành QC_APPROVED. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID (Lấy từ URL hoặc Table row ID).\n"
-            + "👉 **Note:** Yêu cầu quyền bộ đàm tài khoản có ROLE_MANAGER.")
-    public ApiResponse<ReceivingOrderResponse> approve(
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách `GET /v1/receiving-orders?status=SUBMITTED`).\n\n"
+            + "👉 **Sau bước này:** Keeper mới được phép tạo GRN (`POST /v1/receiving-orders/{id}/generate-grn`).")
+    public ApiResponse<ReceivingOrderResponse> qcApprove(
             @PathVariable Long id,
             Authentication auth) {
-        return receivingOrderService.approve(id, extractUserId(auth));
+        return receivingOrderService.qcApprove(id, extractUserId(auth));
     }
 
-    /** POST /v1/receiving-orders/{id}/reject — Manager/Keeper */
-    @PostMapping("/{id}/reject")
-    @Operation(summary = "Từ chối phiếu nhập kho", description = "Hủy bỏ hoặc trả lại phiếu sai. Chuyển trạng thái sang REJECTED. \n\n"
+    /** POST /v1/receiving-orders/{id}/generate-grn — Keeper */
+    @PostMapping("/{id}/generate-grn")
+    @Operation(summary = "Tạo phiếu nhập kho GRN (Keeper)", description = "Keeper tạo GRN sau khi QC đã xác nhận chất lượng (status = QC_APPROVED). Chuyển từ QC_APPROVED thành GRN_CREATED. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID.\n"
-            + "- `Body.reason`: **BẮT BUỘC**, Chuỗi string diễn giải lý do tại sao Keeper/Manager từ chối phiếu này.")
-    public ApiResponse<ReceivingOrderResponse> reject(
-            @PathVariable Long id,
-            @RequestBody RejectRequest request,
-            Authentication auth) {
-        return receivingOrderService.reject(id, request.getReason(), extractUserId(auth));
-    }
-
-    /** POST /v1/receiving-orders/{id}/post — QC */
-    @PostMapping("/{id}/post")
-    @Operation(summary = "Cất hàng vào Trạm Chờ (Staging) & Tự động tạo Task Xếp Kệ", description = "Hành động kết thúc quy trình nhận hàng. Trạng thái chuyển thành POSTED. \n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID của phiếu đã APPROVED.\n\n"
-            + "👉 **Phép thuật:** API này sẽ TỰ ĐỘNG sinh ra 1 công việc dọn kho gọi là **Putaway Task**. Giao diện tiếp theo FE cần dẫn người dùng sang màn hình Putaway để xem các task vừa đc sinh ra này.")
-    public ApiResponse<ReceivingOrderResponse> post(
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách `GET /v1/receiving-orders?status=QC_APPROVED`).\n\n"
+            + "👉 **Điều kiện:** Status phải là `QC_APPROVED`. Các Incident (nếu có) phải được Manager resolve xong.")
+    public ApiResponse<GrnResponse> generateGrn(
             @PathVariable Long id,
             Authentication auth) {
-        return receivingOrderService.post(id, extractUserId(auth));
+        return receivingOrderService.generateGrn(id, extractUserId(auth));
     }
 
     @SuppressWarnings("unchecked")
@@ -109,5 +123,21 @@ public class ReceivingOrderController {
                 return ((Integer) uid).longValue();
         }
         throw new RuntimeException("Cannot extract userId from authentication");
+    }
+
+    private Long extractWarehouseId(Authentication auth) {
+        if (auth != null && auth.getDetails() instanceof Map) {
+            Object raw = ((Map<?, ?>) auth.getDetails()).get("warehouseIds");
+            if (raw instanceof java.util.List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long)
+                    return (Long) first;
+                if (first instanceof Integer)
+                    return ((Integer) first).longValue();
+                if (first instanceof Number)
+                    return ((Number) first).longValue();
+            }
+        }
+        throw new RuntimeException("Cannot extract warehouseId from authentication");
     }
 }

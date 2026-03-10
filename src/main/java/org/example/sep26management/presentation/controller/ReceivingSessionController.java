@@ -20,7 +20,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/v1/receiving-sessions")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('KEEPER') or hasRole('MANAGER')")
+@PreAuthorize("hasRole('KEEPER') or hasRole('MANAGER') or hasRole('QC')")
 @Tag(name = "Receiving Sessions (Scan)", description = "Quản lý phiên scan nhận hàng. "
         + "Quy trình: Laptop tạo session → sinh QR/scan token cho iPhone → iPhone quét barcode gửi scan event "
         + "→ Laptop nhận SSE real-time → Tạo GRN (phiếu nhập kho) từ session.")
@@ -51,7 +51,8 @@ public class ReceivingSessionController {
             @PathVariable String sessionId,
             Authentication auth) {
         Long userId = extractUserId(auth);
-        return receivingSessionService.generateScanToken(sessionId, userId);
+        String role = extractRole(auth);
+        return receivingSessionService.generateScanToken(sessionId, userId, role);
     }
 
     /** GET /v1/receiving-sessions/{id} — Snapshot of current lines */
@@ -104,7 +105,17 @@ public class ReceivingSessionController {
             @PathVariable String sessionId,
             @Valid @RequestBody CreateGrnRequest request,
             Authentication auth) {
-        Long userId = extractUserId(auth);
+        Long userId = null;
+        try {
+            userId = extractUserId(auth);
+        } catch (Exception e) {
+            // If request comes from a scanner token, it won't have a userId.
+            if (auth != null && auth.getName() != null && auth.getName().startsWith("scanner:")) {
+                userId = null;
+            } else {
+                throw e;
+            }
+        }
         return receivingSessionService.createGrn(sessionId, request, userId);
     }
 
@@ -138,5 +149,14 @@ public class ReceivingSessionController {
         }
         throw new RuntimeException(
                 "Cannot extract warehouseId from authentication — ensure the role is assigned to a warehouse");
+    }
+
+    private String extractRole(Authentication auth) {
+        if (auth != null && auth.getAuthorities() != null) {
+            return auth.getAuthorities().stream()
+                    .map(a -> a.getAuthority().replace("ROLE_", ""))
+                    .findFirst().orElse("KEEPER");
+        }
+        return "KEEPER";
     }
 }

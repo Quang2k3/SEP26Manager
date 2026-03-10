@@ -16,6 +16,7 @@ import java.util.Optional;
 public class ScanSessionRedisRepository {
 
     private static final String KEY_PREFIX = "scan:session:";
+    private static final String ACTIVE_SESSION_PREFIX = "scan:active_session:";
     private static final Duration TTL = Duration.ofMinutes(10);
 
     private final StringRedisTemplate redisTemplate;
@@ -29,6 +30,21 @@ public class ScanSessionRedisRepository {
             log.error("Failed to save scan session {} to Redis", sessionId, e);
             throw new RuntimeException("Failed to save scan session", e);
         }
+    }
+
+    public void saveActiveSession(Long warehouseId, Long userId, String sessionId) {
+        String key = ACTIVE_SESSION_PREFIX + warehouseId + ":" + userId;
+        redisTemplate.opsForValue().set(key, sessionId, TTL);
+    }
+
+    public Optional<String> findActiveSession(Long warehouseId, Long userId) {
+        String key = ACTIVE_SESSION_PREFIX + warehouseId + ":" + userId;
+        return Optional.ofNullable(redisTemplate.opsForValue().get(key));
+    }
+
+    public void deleteActiveSession(Long warehouseId, Long userId) {
+        String key = ACTIVE_SESSION_PREFIX + warehouseId + ":" + userId;
+        redisTemplate.delete(key);
     }
 
     public Optional<ScanSessionData> findById(String sessionId) {
