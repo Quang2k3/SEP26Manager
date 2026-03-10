@@ -5038,6 +5038,10 @@ CREATE TABLE public.grns (
     receiving_id bigint NOT NULL,
     warehouse_id bigint NOT NULL,
     grn_code character varying(100) NOT NULL,
+    source_type character varying(50),
+    source_warehouse_id bigint,
+    supplier_id bigint,
+    source_reference_code character varying(100),
     status character varying(50) DEFAULT 'DRAFT'::character varying NOT NULL,
     created_by bigint NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
@@ -5082,6 +5086,61 @@ ALTER SEQUENCE public.grn_items_grn_item_id_seq OWNED BY public.grn_items.grn_it
 ALTER TABLE ONLY public.grn_items ALTER COLUMN grn_item_id SET DEFAULT nextval('public.grn_items_grn_item_id_seq'::regclass);
 ALTER TABLE ONLY public.grn_items ADD CONSTRAINT grn_items_pkey PRIMARY KEY (grn_item_id);
 ALTER TABLE ONLY public.grn_items ADD CONSTRAINT fk_grn_items_grn FOREIGN KEY (grn_id) REFERENCES public.grns(grn_id);
+
+--
+-- Name: returns; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.returns (
+    return_id bigint NOT NULL,
+    warehouse_id bigint NOT NULL,
+    return_code character varying(100) NOT NULL,
+    return_type character varying(50) NOT NULL,
+    status character varying(50) DEFAULT 'DRAFT'::character varying NOT NULL,
+    reference_table character varying(100),
+    reference_id bigint,
+    created_by bigint,
+    approved_by bigint,
+    approved_at timestamp without time zone,
+    note text,
+    created_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+CREATE SEQUENCE public.returns_return_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.returns_return_id_seq OWNED BY public.returns.return_id;
+ALTER TABLE ONLY public.returns ALTER COLUMN return_id SET DEFAULT nextval('public.returns_return_id_seq'::regclass);
+ALTER TABLE ONLY public.returns ADD CONSTRAINT returns_pkey PRIMARY KEY (return_id);
+
+--
+-- Name: return_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.return_items (
+    return_item_id bigint NOT NULL,
+    return_id bigint NOT NULL,
+    sku_id bigint NOT NULL,
+    lot_id bigint,
+    quantity numeric(12,2) NOT NULL,
+    note text
+);
+
+CREATE SEQUENCE public.return_items_return_item_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.return_items_return_item_id_seq OWNED BY public.return_items.return_item_id;
+ALTER TABLE ONLY public.return_items ALTER COLUMN return_item_id SET DEFAULT nextval('public.return_items_return_item_id_seq'::regclass);
+ALTER TABLE ONLY public.return_items ADD CONSTRAINT return_items_pkey PRIMARY KEY (return_item_id);
+ALTER TABLE ONLY public.return_items ADD CONSTRAINT fk_return_items_return FOREIGN KEY (return_id) REFERENCES public.returns(return_id);
 
 \unrestrict DLupeTyv82GatHcqDa9Y0xv7EThKlj8dW3GV5VR8D1pL1Er27LeeSJScibf1s6o
 
