@@ -236,6 +236,7 @@ public class ScannerPageController {
                                             <header>
                                                 <span style='font-size:20px'>📦</span>
                                                 <h1>Warehouse Scanner</h1>
+                                                <span class='badge' id='roleBadge' style='background:#fbbf24;color:#92400e;margin-right:4px'>KEEPER</span>
                                                 <span class='badge' id='cnt'>0 dòng</span>
                                             </header>
 
@@ -265,7 +266,7 @@ public class ScannerPageController {
                                                     <div class='hint' style='margin-top:8px'>Mã vừa quét: <b id='last'>-</b></div>
                                                 </div>
 
-                                                <div class='card'>
+                                                <div class='card' id='classifyCard'>
                                                     <div class='card-title'>Phân loại & Nhập thủ công</div>
 
                                                     <div class='row' style='margin-bottom:8px'>
@@ -359,6 +360,18 @@ public class ScannerPageController {
                                                 var lastAt = 0;
                                                 var qr = null;
                                                 var qrRunning = false;
+
+                                                function getUserRole() {
+                                                    try {
+                                                        var p = TOKEN.split('.')[1];
+                                                        var d = JSON.parse(base64UrlDecode(p));
+                                                        return (d.roles || 'KEEPER').toUpperCase();
+                                                    } catch (e) {
+                                                        return 'KEEPER';
+                                                    }
+                                                }
+                                                var USER_ROLE = getUserRole();
+                                                var IS_QC = (USER_ROLE === 'QC');
 
                                                 function toast(msg, err) {
                                                     var t = document.getElementById('toast');
@@ -488,10 +501,10 @@ public class ScannerPageController {
                                                     inflight = true;
                                                     setStatus('Đang gửi: ' + barcode);
 
-                                                    var cond = document.getElementById('cond').value;
-                                                    var reason = cond === 'FAIL' ? document.getElementById('reason').value : null;
+                                                    var cond = IS_QC ? document.getElementById('cond').value : 'PASS';
+                                                    var reason = (IS_QC && cond === 'FAIL') ? document.getElementById('reason').value : null;
 
-                                                    if (cond === 'FAIL' && !reason) {
+                                                    if (IS_QC && cond === 'FAIL' && !reason) {
                                                         toast('Vui lòng chọn Lý do lỗi', true);
                                                         inflight = false;
                                                         setStatus('Chưa nhập lý do lỗi');
@@ -755,6 +768,29 @@ public class ScannerPageController {
                                                         document.getElementById('reasonWrap').style.display =
                                                             this.value === 'FAIL' ? 'flex' : 'none';
                                                     });
+
+                                                    // ── Role-based UI ──
+                                                    var roleBadge = document.getElementById('roleBadge');
+                                                    roleBadge.textContent = USER_ROLE;
+                                                    if (IS_QC) {
+                                                        roleBadge.style.background = '#a78bfa';
+                                                        roleBadge.style.color = '#4c1d95';
+                                                    } else {
+                                                        roleBadge.style.background = '#34d399';
+                                                        roleBadge.style.color = '#064e3b';
+                                                    }
+
+                                                    // Hide classification section for KEEPER
+                                                    if (!IS_QC) {
+                                                        var condRow = document.getElementById('cond').parentElement;
+                                                        if (condRow) condRow.style.display = 'none';
+                                                        document.getElementById('reasonWrap').style.display = 'none';
+                                                        // Update card title for Keeper
+                                                        var classifyCard = document.getElementById('classifyCard');
+                                                        if (classifyCard) {
+                                                            classifyCard.querySelector('.card-title').textContent = 'Nhập thủ công';
+                                                        }
+                                                    }
 
                                                     document.getElementById('manualBtn').addEventListener('click', submitManual);
                                                     document.getElementById('closeBtn').addEventListener('click', toggleCamera);
