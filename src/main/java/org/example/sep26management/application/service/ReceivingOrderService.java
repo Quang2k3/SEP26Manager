@@ -23,6 +23,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.example.sep26management.application.dto.scan.ScanLineItem;
+import org.example.sep26management.application.dto.scan.ScanSessionData;
+import org.example.sep26management.infrastructure.persistence.redis.ScanSessionRedisRepository;
+import org.example.sep26management.infrastructure.SseEmitterRegistry;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -42,6 +47,8 @@ public class ReceivingOrderService {
         private final GrnItemJpaRepository grnItemRepo;
         private final JdbcTemplate jdbcTemplate; // Chỉ dùng cho các native INSERT/UPDATE phức tạp (inventory)
         private final PutawaySuggestionService putawaySuggestionService;
+        private final ScanSessionRedisRepository sessionRedis;
+        private final SseEmitterRegistry sseRegistry;
 
         // ─── List ──────────────────────────────────────────────────────────────────
 
@@ -255,6 +262,114 @@ public class ReceivingOrderService {
 
                 log.info("Receiving Order {} QC approved by userId={}", order.getReceivingCode(), qcUserId);
                 return ApiResponse.success("QC approved successfully", getOrder(id).getData());
+        }
+
+        // ─── QC Submit Session ───────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<Map<String, Object>> qcSubmitSession(Long id, String sessionId, Long qcUserId) {
+                ReceivingOrderEntity order = findOrder(id);
+                validateStatus(order, "SUBMITTED", "qc-submit-session");
+
+                ScanSessionData session = sessionRedis.findById(sessionId)
+                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+
+                List<ScanLineItem> lines = session.getLines();
+                if (lines == null || lines.isEmpty()) {
+                        return ApiResponse.error("No items scanned in this session");
+                }
+
+                // Map để gộp số lượng scan theo (skuId, condition)
+                Map<Long, Map<String, BigDecimal>> scannedData = lines.stream()
+                                .collect(Collectors.groupingBy(ScanLineItem::getSkuId,
+                                                Collectors.groupingBy(
+                                                                item -> item.getCondition() != null
+                                                                                ? item.getCondition()
+                                                                                : "PASS",
+                                                                Collectors.reducing(BigDecimal.ZERO,
+                                                                                item -> item.getQty() != null
+                                                                                                ? item.getQty()
+                                                                                                : BigDecimal.ZERO,
+                                                                                BigDecimal::add))));
+
+                List<ReceivingItemEntity> dbItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
+
+                boolean hasFailItems = false;
+                List<IncidentItemEntity> incidentItems = new ArrayList<>();
+
+                for (ReceivingItemEntity dbItem : dbItems) {
+                        Long skuId = dbItem.getSkuId();
+                        Map<String, BigDecimal> skuScanData = scannedData.getOrDefault(skuId, Map.of());
+
+                        BigDecimal passQty = skuScanData.getOrDefault("PASS", BigDecimal.ZERO);
+                        BigDecimal failQty = skuScanData.getOrDefault("FAIL", BigDecimal.ZERO);
+
+                        // Cập nhật lại dbItem. receivedQty = Tổng QC quét
+                        BigDecimal totalScanned = passQty.add(failQty);
+                        dbItem.setReceivedQty(totalScanned);
+
+                        if (failQty.compareTo(BigDecimal.ZERO) > 0) {
+                                hasFailItems = true;
+                                IncidentItemEntity incidentItem = IncidentItemEntity.builder()
+                                                // incident reference will be set later
+                                                .skuId(skuId)
+                                                .damagedQty(failQty)
+                                                .note("Báo cáo từ QC Scanner")
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                incidentItems.add(incidentItem);
+
+                                dbItem.setCondition("FAIL");
+                                dbItem.setQcRequired(true);
+                        } else {
+                                dbItem.setCondition("PASS");
+                        }
+                        receivingItemRepo.save(dbItem);
+                }
+
+                if (hasFailItems) {
+                        // Tạo Quality Incident
+                        IncidentEntity incident = IncidentEntity.builder()
+                                        .warehouseId(order.getWarehouseId())
+                                        .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
+                                        .description("Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)")
+                                        .receivingId(id)
+                                        .status("OPEN")
+                                        .reportedBy(qcUserId)
+                                        .build();
+
+                        IncidentEntity savedIncident = incidentRepo.save(incident);
+
+                        for (IncidentItemEntity incItem : incidentItems) {
+                                incItem.setIncident(savedIncident);
+                                incidentItemRepo.save(incItem);
+                        }
+
+                        order.setStatus("PENDING_INCIDENT");
+                        order.setUpdatedAt(LocalDateTime.now());
+                        receivingOrderRepo.save(order);
+
+                        log.info("QC scan completed with errors for GRN {}. Created Incident {}.",
+                                        order.getReceivingCode(), savedIncident.getIncidentId());
+                } else {
+                        // Toàn bộ PASS
+                        order.setStatus("QC_APPROVED");
+                        order.setUpdatedAt(LocalDateTime.now());
+                        receivingOrderRepo.save(order);
+                        log.info("QC scan completed 100% PASS for GRN {}.", order.getReceivingCode());
+                }
+
+                // Clean up session
+                sessionRedis.deleteActiveSession(session.getWarehouseId(), session.getCreatedBy());
+                sessionRedis.delete(sessionId);
+                sseRegistry.remove(sessionId);
+
+                return ApiResponse.success("QC scan session submitted successfully", Map.of(
+                                "receivingId", order.getReceivingId(),
+                                "status", order.getStatus(),
+                                "hasFailItems", hasFailItems));
         }
 
         // ─── Approve ───────────────────────────────────────────────────────────────

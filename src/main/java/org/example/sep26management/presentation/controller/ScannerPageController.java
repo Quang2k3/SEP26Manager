@@ -133,6 +133,13 @@ public class ScannerPageController {
                 ".toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;padding:11px 24px;border-radius:28px;font-weight:800;font-size:14px;display:none;white-space:nowrap;box-shadow:0 4px 24px rgba(0,0,0,.5)}"
                 +
                 ".toast.err{background:#ef4444}" +
+                ".qc-toggle-group { display:flex; gap:8px; margin-bottom:12px; }\n" +
+                ".qc-toggle-btn { flex:1; padding:8px 12px; border-radius:6px; border:2px solid #334155; background:transparent; color:#94a3b8; font-weight:700; font-size:12px; cursor:pointer; transition:all 0.2s auto; opacity:0.6; }\n"
+                +
+                ".qc-toggle-btn.active.pass { border-color:#10b981; background:rgba(16,185,129,0.1); color:#10b981; opacity:1; }\n"
+                +
+                ".qc-toggle-btn.active.fail { border-color:#ef4444; background:rgba(239,68,68,0.1); color:#ef4444; opacity:1; }\n"
+                +
                 "</style></head><body>" +
 
                 "<header><span style='font-size:20px'>📦</span><h1>Warehouse Scanner</h1><span class='badge badge-role' id='role-badge'></span><span class='badge badge-cnt' id='cnt'>0 dòng</span></header>"
@@ -193,7 +200,14 @@ public class ScannerPageController {
                 "</div>" +
 
                 "<div class='card'>" +
-                "<div class='card-title'>Quét QR</div>" +
+                "<div class='card-title'>Quét QR <span id='qc-mode-indicator' style='display:none;font-weight:700;color:#f59e0b;'>(CHẾ ĐỘ QC - RESCAN)</span></div>"
+                +
+                "<div id='qc-toggle-panel' class='qc-toggle-group' style='display:none'>" +
+                "  <button id='btn-qc-pass' class='qc-toggle-btn active pass' onclick='setQcCondition(\"PASS\")'>✓ Hàng Tốt (PASS)</button>"
+                +
+                "  <button id='btn-qc-fail' class='qc-toggle-btn fail' onclick='setQcCondition(\"FAIL\")'>✗ Hàng Lỗi (FAIL)</button>"
+                +
+                "</div>" +
                 "<div class='hint'>Đưa mã QR vào khung. Nếu không quét được, kéo xuống nhập mã SKU bằng tay.</div>" +
                 "<div class='hint' style='margin-top:8px'>Mã vừa quét: <b id='last'>-</b></div>" +
                 "</div>" +
@@ -219,6 +233,8 @@ public class ScannerPageController {
                 // ── NÚT XÁC NHẬN KIỂM ĐẾM (chỉ hiện khi có receivingId) ──
                 "<div class='card' id='confirm-card' style='display:none'>" +
                 "<button class='btn success' id='confirmBtn'>✅ Xác nhận kiểm đếm — Gửi QC</button>" +
+                "<button class='btn warning' id='qcSubmitBtn' style='display:none; color:#fff;'>✅ QC HOÀN TẤT CHECK</button>"
+                +
                 "</div>" +
 
                 "<div class='card'><button class='btn danger' id='closeBtn'>🛑 Kết thúc Scan</button></div>" +
@@ -237,6 +253,7 @@ public class ScannerPageController {
                 "var inflight=false;\n" +
                 "var lastCode=null;\n" +
                 "var lastAt=0;\n" +
+                "var currentCondition='PASS';\n" +
                 "var html5QrcodeLoaded = typeof Html5Qrcode !== 'undefined';\n" +
 
                 "function waitForHtml5Qrcode(callback, retries) {\n" +
@@ -354,11 +371,47 @@ public class ScannerPageController {
                 +
                 "} \n" +
 
+                // ── QC Submit Session ──
+                "function qcSubmit(){\n" +
+                "  if(!RECEIVING_ID){toast('Không có ID phiếu!',true);return;}\n" +
+                "  if(!confirm('Hoàn tất quét duyệt QC?\\n(Sẽ đối chiếu với kết quả của Keeper)')) return;\n" +
+                "  var btn=document.getElementById('qcSubmitBtn');\n" +
+                "  btn.disabled=true;btn.textContent='Đang xử lý...';\n" +
+                "  var url = ORDER_API+'/'+RECEIVING_ID+'/qc-submit-session?sessionId='+SESSION_ID;\n" +
+                "  fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "  .then(function(r){return r.json();})\n" +
+                "  .then(function(d){\n" +
+                "    if(d && d.success){\n" +
+                "      var msg = d.data.hasFailItems ? '⚠️ QC Hoàn Tấn: Đã phát hiện hàng Lỗi. Đã chuyển tạo Incident.' : '✅ QC Hoàn Tất: 100% Pass!';\n"
+                +
+                "      toast(msg);\n" +
+                "      btn.textContent='Đã Đóng Session';\n" +
+                "      btn.style.background='#475569';\n" +
+                "      if(document.getElementById('oi-status')){document.getElementById('oi-status').textContent=d.data.status;}\n"
+                +
+                "      setTimeout(function(){window.location.reload();}, 2000);\n" +
+                "    } else {\n" +
+                "      toast((d&&d.message)?d.message:'Lỗi QC Submit',true);\n" +
+                "      btn.disabled=false;btn.textContent='✅ QC HOÀN TẤT CHECK';\n" +
+                "    }\n" +
+                "  })\n" +
+                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent='✅ QC HOÀN TẤT CHECK';});\n"
+                +
+                "} \n" +
+
+                "function setQcCondition(cond){\n" +
+                "  currentCondition = cond;\n" +
+                "  document.getElementById('btn-qc-pass').classList.remove('active');\n" +
+                "  document.getElementById('btn-qc-fail').classList.remove('active');\n" +
+                "  if(cond==='PASS'){ document.getElementById('btn-qc-pass').classList.add('active'); }\n" +
+                "  else { document.getElementById('btn-qc-fail').classList.add('active'); }\n" +
+                "}\n" +
+
                 "function sendBarcode(barcode,qty){\n" +
                 "  if(inflight) return;\n" +
                 "  inflight=true;\n" +
                 "  setStatus('Đang gửi: '+barcode);\n" +
-                "  fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify({barcode:barcode,qty:qty})})\n"
+                "  fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify({barcode:barcode,qty:qty,condition:currentCondition})})\n"
                 +
                 "  .then(function(r){return r.text().then(function(txt){try{return JSON.parse(txt);}catch(e){return {success:false,message:'HTTP '+r.status+': '+txt.substring(0,140)};}});})\n"
                 +
@@ -487,14 +540,22 @@ public class ScannerPageController {
                 "document.addEventListener('DOMContentLoaded',function(){\n" +
                 "  // Display role badge\n" +
                 "  var roleBadge=document.getElementById('role-badge');\n" +
-                "  if(roleBadge && USER_ROLE){roleBadge.textContent=USER_ROLE;roleBadge.classList.add('role-'+USER_ROLE.toLowerCase());}\n"
-                +
+                "  if(roleBadge && USER_ROLE){\n" +
+                "      roleBadge.textContent=USER_ROLE;roleBadge.classList.add('role-'+USER_ROLE.toLowerCase());\n" +
+                "      if(USER_ROLE.toUpperCase() === 'QC') {\n" +
+                "          document.getElementById('qc-toggle-panel').style.display = 'flex';\n" +
+                "          document.getElementById('qc-mode-indicator').style.display = 'inline';\n" +
+                "          document.getElementById('confirmBtn').style.display = 'none';\n" +
+                "          document.getElementById('qcSubmitBtn').style.display = 'block';\n" +
+                "      }\n" +
+                "  }\n" +
                 "  // Auto-populate receiving ID từ URL param (truyền qua khi FE tạo scan URL)\n" +
                 "  if(RECEIVING_ID !== null && RECEIVING_ID !== undefined){\n" +
                 "    document.getElementById('recv-id-label').textContent='#'+RECEIVING_ID;\n" +
                 "    document.getElementById('recv-display').style.display='block';\n" +
                 "    document.getElementById('recv-manual').style.display='none';\n" +
                 "    loadOrderDetails();\n" +
+                "    document.getElementById('confirm-card').style.display='block';\n" +
                 "  } else {\n" +
                 "    document.getElementById('recv-display').style.display='none';\n" +
                 "    document.getElementById('recv-manual').style.display='block';\n" +
@@ -502,6 +563,7 @@ public class ScannerPageController {
                 "  document.getElementById('manualBtn').addEventListener('click', submitManual);\n" +
                 "  document.getElementById('closeBtn').addEventListener('click', closeScan);\n" +
                 "  document.getElementById('confirmBtn').addEventListener('click', confirmAndSubmit);\n" +
+                "  document.getElementById('qcSubmitBtn').addEventListener('click', qcSubmit);\n" +
                 "  document.getElementById('bc').addEventListener('keydown', function(e){ if(e.key==='Enter') submitManual(); });\n"
                 +
                 "});\n" +

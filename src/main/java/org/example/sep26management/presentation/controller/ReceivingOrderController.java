@@ -101,6 +101,21 @@ public class ReceivingOrderController {
         return receivingOrderService.qcApprove(id, extractUserId(auth));
     }
 
+    /** POST /v1/receiving-orders/{id}/qc-submit-session — QC Scanner */
+    @PostMapping("/{id}/qc-submit-session")
+    @PreAuthorize("hasRole('QC')")
+    @Operation(summary = "QC Scanner hoàn tất quá trình quét (QC)", description = "Sau khi QC hoàn tất việc quét mã, gửi yêu cầu kết thúc chốt số lượng dựa trên session quét. Tự động đối chiếu với số Keeper nhận trước đó.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách).\n"
+            + "- `@RequestParam sessionId`: ID session quét từ Redis.\n\n"
+            + "👉 **Note:** Hệ thống tự sinh `Incident` nếu có hàng `FAIL`. Nếu 100% `PASS`, đơn sẽ lên `QC_APPROVED`.")
+    public ApiResponse<Map<String, Object>> qcSubmitSession(
+            @PathVariable Long id,
+            @RequestParam String sessionId,
+            Authentication auth) {
+        return receivingOrderService.qcSubmitSession(id, sessionId, extractUserId(auth));
+    }
+
     /** POST /v1/receiving-orders/{id}/generate-grn — Keeper */
     @PostMapping("/{id}/generate-grn")
     @Operation(summary = "Tạo phiếu nhập kho GRN (Keeper)", description = "Keeper tạo GRN sau khi QC đã xác nhận chất lượng (status = QC_APPROVED). Chuyển từ QC_APPROVED thành GRN_CREATED. \n\n"
