@@ -46,18 +46,6 @@ public class ReceivingItemResponse {
     @Schema(description = "Số lượng mong đợi", example = "10.0")
     private BigDecimal expectedQty;
 
-    @Schema(description = "Số lượng hàng PASS", example = "8.0")
-    private BigDecimal acceptedQty;
-
-    @Schema(description = "Số lượng hàng FAIL", example = "2.0")
-    private BigDecimal damagedQty;
-
-    @Schema(description = "Số lượng hàng không nhận", example = "0.0")
-    private BigDecimal rejectedQty;
-
-    @Schema(description = "Lý do sai lệch", example = "Giao thiếu 2 cái")
-    private String discrepancyReason;
-
     @Schema(description = "Tình trạng quét (PASS = Hàng tốt, FAIL = Hàng lỗi)", example = "PASS", allowableValues = {
             "PASS", "FAIL" })
     private String condition;

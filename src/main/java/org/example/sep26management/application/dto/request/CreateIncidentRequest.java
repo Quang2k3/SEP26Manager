@@ -6,6 +6,9 @@ import lombok.*;
 import org.example.sep26management.application.enums.IncidentType;
 import io.swagger.v3.oas.annotations.media.Schema;
 
+import java.math.BigDecimal;
+import java.util.List;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -32,4 +35,27 @@ public class CreateIncidentRequest {
 
     @Schema(description = "ID ảnh đính kèm (sau khi upload lên /attachments) (Có thể null)", example = "1001")
     private Long attachmentId;
+
+    @Schema(description = "Danh sách sản phẩm bị lỗi (nếu có)")
+    private List<IncidentItemDto> items;
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class IncidentItemDto {
+        @Schema(description = "ID Sản phẩm bị lỗi", example = "150")
+        @NotNull(message = "skuId is required")
+        private Long skuId;
+
+        @Schema(description = "Số lượng bị lỗi", example = "5.0")
+        @NotNull(message = "damagedQty is required")
+        private BigDecimal damagedQty;
+
+        @Schema(description = "Mã lỗi chi tiết cho mặt hàng này", example = "TORN_PACKAGING")
+        private String reasonCode;
+
+        @Schema(description = "Ghi chú thêm cho mặt hàng này", example = "Thùng móp hỏng hoàn toàn")
+        private String note;
+    }
 }

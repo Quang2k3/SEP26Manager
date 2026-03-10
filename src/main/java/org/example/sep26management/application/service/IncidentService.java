@@ -7,11 +7,16 @@ import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.IncidentResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.infrastructure.persistence.entity.IncidentEntity;
+import org.example.sep26management.infrastructure.persistence.entity.IncidentItemEntity;
 import org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
+import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
+import org.example.sep26management.infrastructure.persistence.repository.IncidentItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.IncidentJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
+import org.example.sep26management.application.dto.response.IncidentItemResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -28,8 +33,10 @@ import java.util.stream.Collectors;
 public class IncidentService {
 
     private final IncidentJpaRepository incidentRepo;
+    private final IncidentItemJpaRepository incidentItemRepo;
     private final ReceivingOrderJpaRepository receivingOrderRepo;
     private final UserJpaRepository userRepo;
+    private final SkuJpaRepository skuRepo;
 
     // ─── Create Incident (Keeper báo sự cố Gate Check) ──────────────────────
 
@@ -52,6 +59,19 @@ public class IncidentService {
                 .build();
 
         IncidentEntity saved = incidentRepo.save(incident);
+
+        if (request.getItems() != null && !request.getItems().isEmpty()) {
+            for (CreateIncidentRequest.IncidentItemDto itemDto : request.getItems()) {
+                IncidentItemEntity itemEntity = IncidentItemEntity.builder()
+                        .incident(saved)
+                        .skuId(itemDto.getSkuId())
+                        .damagedQty(itemDto.getDamagedQty())
+                        .reasonCode(itemDto.getReasonCode())
+                        .note(itemDto.getNote())
+                        .build();
+                incidentItemRepo.save(itemEntity);
+            }
+        }
 
         log.info("Incident created: {} type={} by userId={}", code, request.getIncidentType().name(), userId);
 
@@ -134,6 +154,62 @@ public class IncidentService {
         return ApiResponse.success("Incident rejected. Truck will not be unloaded.", toResponse(incident));
     }
 
+    // ─── Resolve Incident (Manager chốt Pass/Fail) ──────────────────────────
+
+    @Transactional
+    public ApiResponse<IncidentResponse> resolveIncident(Long id,
+            org.example.sep26management.application.dto.request.ResolveIncidentRequest request, Long managerId) {
+        IncidentEntity incident = incidentRepo.findById(id)
+                .orElseThrow(() -> new RuntimeException("Incident not found: " + id));
+
+        if (!"OPEN".equals(incident.getStatus()) && !"APPROVED".equals(incident.getStatus())) {
+            throw new RuntimeException("Incident cannot be resolved in current status: " + incident.getStatus());
+        }
+
+        // Apply item resolutions if provided
+        if (request.getResolutions() != null && !request.getResolutions().isEmpty()) {
+            for (org.example.sep26management.application.dto.request.ResolveIncidentRequest.ResolutionItemDto res : request
+                    .getResolutions()) {
+                IncidentItemEntity item = incidentItemRepo.findById(res.getIncidentItemId())
+                        .orElseThrow(() -> new RuntimeException("Incident item not found: " + res.getIncidentItemId()));
+                if (!item.getIncident().getIncidentId().equals(id)) {
+                    throw new RuntimeException("Incident item does not belong to this incident");
+                }
+
+                if ("PASS".equalsIgnoreCase(res.getAction())) {
+                    if (item.getActionPassQty() == null)
+                        item.setActionPassQty(java.math.BigDecimal.ZERO);
+                    item.setActionPassQty(item.getActionPassQty().add(res.getQuantity()));
+                } else if ("RETURN".equalsIgnoreCase(res.getAction())) {
+                    if (item.getActionReturnQty() == null)
+                        item.setActionReturnQty(java.math.BigDecimal.ZERO);
+                    item.setActionReturnQty(item.getActionReturnQty().add(res.getQuantity()));
+                } else if ("SCRAP".equalsIgnoreCase(res.getAction()) || "DOWNGRADE".equalsIgnoreCase(res.getAction())) {
+                    if (item.getActionScrapQty() == null)
+                        item.setActionScrapQty(java.math.BigDecimal.ZERO);
+                    item.setActionScrapQty(item.getActionScrapQty().add(res.getQuantity()));
+                }
+
+                // Cập nhật lại note/reason cho item dựa trên phán quyết của manager
+                item.setNote(item.getNote() != null
+                        ? item.getNote() + " | [Manager Decision]: " + res.getAction() + " (Qty: " + res.getQuantity()
+                                + ")"
+                        : "[Manager Decision]: " + res.getAction() + " (Qty: " + res.getQuantity() + ")");
+                incidentItemRepo.save(item);
+            }
+        }
+
+        incident.setStatus("RESOLVED");
+        if (request.getNote() != null && !request.getNote().isBlank()) {
+            incident.setDescription(incident.getDescription() + "\n[Manager Resolution Note] " + request.getNote());
+        }
+        incidentRepo.save(incident);
+
+        log.info("Incident {} resolved by managerId={}", incident.getIncidentCode(), managerId);
+
+        return ApiResponse.success("Incident resolved successfully.", toResponse(incident));
+    }
+
     // ─── Check if receiving order has pending incidents ──────────────────────
 
     @Transactional(readOnly = true)
@@ -157,6 +233,20 @@ public class IncidentService {
                     .map(ReceivingOrderEntity::getReceivingCode).orElse(null);
         }
 
+        List<IncidentItemEntity> items = incidentItemRepo.findByIncidentIncidentId(e.getIncidentId());
+        List<IncidentItemResponse> itemResponses = items.stream().map(item -> {
+            SkuEntity sku = skuRepo.findById(item.getSkuId()).orElse(null);
+            return IncidentItemResponse.builder()
+                    .incidentItemId(item.getIncidentItemId())
+                    .skuId(item.getSkuId())
+                    .skuName(sku != null ? sku.getSkuName() : null)
+                    .skuCode(sku != null ? sku.getSkuCode() : null)
+                    .damagedQty(item.getDamagedQty())
+                    .reasonCode(item.getReasonCode())
+                    .note(item.getNote())
+                    .build();
+        }).collect(Collectors.toList());
+
         return IncidentResponse.builder()
                 .incidentId(e.getIncidentId())
                 .warehouseId(e.getWarehouseId())
@@ -172,6 +262,7 @@ public class IncidentService {
                 .receivingId(e.getReceivingId())
                 .receivingCode(receivingCode)
                 .createdAt(e.getCreatedAt())
+                .items(itemResponses)
                 .build();
     }
 }

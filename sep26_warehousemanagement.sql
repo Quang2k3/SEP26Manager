@@ -477,10 +477,6 @@ CREATE TABLE receiving_items (
     sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
     expected_qty NUMERIC(12,2),
     received_qty NUMERIC(12,2) NOT NULL,
-    accepted_qty NUMERIC(12,2) DEFAULT 0,
-    damaged_qty NUMERIC(12,2) DEFAULT 0,
-    rejected_qty NUMERIC(12,2) DEFAULT 0,
-    discrepancy_reason TEXT,
     lot_number VARCHAR(100),
     manufacture_date DATE,
     expiry_date DATE,
@@ -495,7 +491,43 @@ CREATE INDEX idx_receiving_items_sku ON receiving_items(sku_id);
 COMMENT ON TABLE receiving_items IS 'Receiving order line items';
 
 -- ============================================================
--- 7.x) PUTAWAY TASKS
+-- 7.1) GOODS RECEIPT NOTES (GRN)
+-- ============================================================
+
+CREATE TABLE grns (
+    grn_id BIGSERIAL PRIMARY KEY,
+    grn_code VARCHAR(100) NOT NULL UNIQUE,
+    receiving_id BIGINT NOT NULL REFERENCES receiving_orders(receiving_id),
+    warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id),
+    status VARCHAR(50) NOT NULL DEFAULT 'DRAFT',
+    created_by BIGINT REFERENCES users(user_id),
+    approved_by BIGINT REFERENCES users(user_id),
+    approved_at TIMESTAMP,
+    note TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_grn_receiving ON grns(receiving_id);
+CREATE INDEX idx_grn_warehouse ON grns(warehouse_id);
+
+COMMENT ON TABLE grns IS 'Goods Receipt Notes (Official Stock-In)';
+
+CREATE TABLE grn_items (
+    grn_item_id BIGSERIAL PRIMARY KEY,
+    grn_id BIGINT NOT NULL REFERENCES grns(grn_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    quantity NUMERIC(12,2) NOT NULL,
+    note TEXT
+);
+
+CREATE INDEX idx_grn_item_grn ON grn_items(grn_id);
+CREATE INDEX idx_grn_item_sku ON grn_items(sku_id);
+
+COMMENT ON TABLE grn_items IS 'GRN line items (Passed items to be stocked)';
+
+-- ============================================================
+-- 7.2) PUTAWAY TASKS
 -- ============================================================
 
 CREATE TABLE putaway_tasks (
@@ -1001,6 +1033,23 @@ CREATE INDEX idx_incident_type ON incidents(incident_type);
 
 COMMENT ON TABLE incidents IS 'Safety incidents';
 
+CREATE TABLE incident_items (
+    incident_item_id BIGSERIAL PRIMARY KEY,
+    incident_id BIGINT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    damaged_qty NUMERIC(12,2),
+    action_pass_qty NUMERIC(12,2) DEFAULT 0,
+    action_return_qty NUMERIC(12,2) DEFAULT 0,
+    action_scrap_qty NUMERIC(12,2) DEFAULT 0,
+    note TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_incident_items_incident ON incident_items(incident_id);
+CREATE INDEX idx_incident_items_sku ON incident_items(sku_id);
+
+COMMENT ON TABLE incident_items IS 'Line items for an incident (e.g., specific SKUs damaged)';
+
 -- ============================================================
 -- 15) AUDIT
 -- ============================================================
@@ -1319,10 +1368,7 @@ ON CONFLICT (enum_type_id, value_code) DO NOTHING;
 -- ============================================================
 
 -- Thêm các cột cho bảng receiving_items nếu chưa có (khi update file SQL lên DB cũ)
-ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS accepted_qty NUMERIC(12,2) DEFAULT 0;
-ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS damaged_qty NUMERIC(12,2) DEFAULT 0;
-ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS rejected_qty NUMERIC(12,2) DEFAULT 0;
-ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS discrepancy_reason TEXT;
+-- (Đã bị loại bỏ trong luồng GRN)
 
 -- Bổ sung thêm Enum cho INCIDENT_TYPE để phù hợp với quy trình kho
 INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code)
