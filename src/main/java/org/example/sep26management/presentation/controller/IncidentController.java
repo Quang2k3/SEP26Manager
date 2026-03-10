@@ -56,7 +56,7 @@ public class IncidentController {
     @GetMapping("/{id}")
     @Operation(summary = "Chi tiết sự cố", description = "Xem chi tiết một sự cố (bao gồm link ảnh, ID người báo cáo, vv). \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Incident ID lấy từ danh sách.")
+            + "- `@PathVariable id`: Mã Sự cố (Incident ID). LẤY TỪ: attribute `id` trong mảng kết quả của API danh sách `GET /v1/incidents` hoặc kết quả trả về khi tạo mới sự cố.")
     public ApiResponse<IncidentResponse> get(@PathVariable Long id) {
         return incidentService.getIncident(id);
     }
@@ -65,7 +65,9 @@ public class IncidentController {
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasRole('MANAGER')")
     @Operation(summary = "Duyệt sự cố - Cho phép dỡ hàng (Manager)", description = "Manager duyệt incident → cho phép Keeper bắt đầu dỡ hàng. "
-            + "Chỉ MANAGER mới được phép.")
+            + "Chỉ MANAGER mới được phép.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã Sự cố (Incident ID). LẤY TỪ: attribute `id` của API danh sách sự cố.")
     public ApiResponse<IncidentResponse> approve(
             @PathVariable Long id,
             Authentication auth) {
@@ -76,7 +78,9 @@ public class IncidentController {
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasRole('MANAGER')")
     @Operation(summary = "Từ chối dỡ hàng (Manager)", description = "Manager từ chối incident → xe tải không được phép dỡ hàng. "
-            + "Yêu cầu cung cấp lý do.")
+            + "Yêu cầu cung cấp lý do.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã Sự cố (Incident ID). LẤY TỪ: attribute `id` của API danh sách sự cố.")
     public ApiResponse<IncidentResponse> reject(
             @PathVariable Long id,
             @RequestBody RejectRequest request,
@@ -87,7 +91,10 @@ public class IncidentController {
     /** POST /v1/incidents/{id}/resolve — Manager xử lý sự cố chất lượng */
     @PostMapping("/{id}/resolve")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Xử lý sự cố chất lượng (Manager)", description = "Manager xử lý sự cố chất lượng sau khi dỡ hàng, quyết định số lượng Pass, Return, Scrap cho từng item lỗi.")
+    @Operation(summary = "Xử lý sự cố chất lượng (Manager)", description = "Manager xử lý sự cố chất lượng sau khi dỡ hàng, quyết định số lượng Pass, Return, Scrap cho từng item lỗi.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã Sự cố (Incident ID). LẤY TỪ: attribute `id` của API danh sách sự cố.\n"
+            + "- `ResolveIncidentRequest.resolutions[].incidentItemId`: LẤY TỪ: attribute `items[].incidentItemId` khi gọi chi tiết sự cố (`GET /v1/incidents/{id}`).")
     public ApiResponse<IncidentResponse> resolve(
             @PathVariable Long id,
             @Valid @RequestBody ResolveIncidentRequest request,

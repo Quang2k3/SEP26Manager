@@ -42,9 +42,9 @@ public class ReceivingOrderController {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "Chi tiết phiếu nhập kho", description = "Xem chi tiết một GRN bao gồm list các sản phẩm (SKU) bên trong. \n\n"
+    @Operation(summary = "Chi tiết phiếu nhập kho", description = "Xem chi tiết một phiếu nhập dự kiến bao gồm list các sản phẩm (SKU) bên trong. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID, **LẤY TỪ** api danh sách `GET /v1/receiving-orders` hoặc api tạo GRN trước đó.")
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách `GET /v1/receiving-orders` hoặc kết quả API POST tạo bảng nháp).")
     public ApiResponse<ReceivingOrderResponse> get(@PathVariable Long id) {
         return receivingOrderService.getOrder(id);
     }
@@ -53,8 +53,8 @@ public class ReceivingOrderController {
     @PostMapping
     @Operation(summary = "Tạo phiếu nhập kho nháp (Keeper)", description = "Keeper tạo phiếu nhập kho DRAFT dựa trên chứng từ với các mặt hàng và số lượng dự kiến. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `ReceivingOrderRequest`: Gồm type, supplier, list của `skuId` và `expectedQty`.\n"
-            + "👉 **Kết quả:** Trả về GRN với trạng thái DRAFT. FE lưu lại mã này để gọi tiếp các API cập nhật số lượng.")
+            + "- `ReceivingOrderRequest`: Gồm type, supplier, list của `skuCode` và `expectedQty`.\n"
+            + "👉 **Kết quả:** Trả về Phiếu với trạng thái DRAFT. FE lưu lại mã `receivingId` (hoặc `receivingCode`) để gọi tiếp các API cập nhật số lượng.")
     public ApiResponse<ReceivingOrderResponse> createDraftOrder(
             @Valid @RequestBody ReceivingOrderRequest request,
             Authentication auth) {
@@ -63,12 +63,12 @@ public class ReceivingOrderController {
         return receivingOrderService.createDraftOrder(request, warehouseId, userId);
     }
 
-    /** PUT /v1/receiving-orders/{id}/lines — Keeper & QC Update Numbers */
+    /** PUT /v1/receiving-orders/{id}/lines — Keeper Update Numbers */
     @PutMapping("/{id}/lines")
-    @Operation(summary = "Cập nhật số liệu kiểm đếm/QC", description = "Lưu số lượng thực nhận, số nhận PASS/FAIL và lý do cho từng mặt hàng.\n\n"
+    @Operation(summary = "Cập nhật số liệu kiểm đếm (Keeper)", description = "Lưu thông tin số lượng thực nhận (nhập kho mộc) do Keeper đếm được.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID.\n"
-            + "- `UpdateReceivingLinesRequest`: Danh sách các items với số liệu `receivedQty`, `acceptedQty`, `damagedQty`, `rejectedQty`, `discrepancyReason`.")
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách hoặc kết quả API POST tạo bảng).\n"
+            + "- `UpdateReceivingLinesRequest`: Danh sách các items với số liệu `receivedQty`, `note`.")
     public ApiResponse<ReceivingOrderResponse> updateLines(
             @PathVariable Long id,
             @Valid @RequestBody org.example.sep26management.application.dto.request.UpdateReceivingLinesRequest request,
@@ -78,20 +78,20 @@ public class ReceivingOrderController {
 
     /** POST /v1/receiving-orders/{id}/submit — Keeper */
     @PostMapping("/{id}/submit")
-    @Operation(summary = "Trình duyệt phiếu nhập kho (Keeper)", description = "Keeper gửi GRN yêu cầu Manager duyệt. Chuyển phiếu từ DRAFT thành SUBMITTED. \n\n"
+    @Operation(summary = "Trình duyệt phiếu nhập kho (Keeper)", description = "Keeper gửi phiếu yêu cầu Manager duyệt. Chuyển phiếu từ DRAFT thành SUBMITTED. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID cần duyệt (Lấy từ URL hoặc Table row ID).")
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách hoặc kết quả API POST tạo bảng).")
     public ApiResponse<ReceivingOrderResponse> submit(
             @PathVariable Long id,
             Authentication auth) {
         return receivingOrderService.submit(id, extractUserId(auth));
     }
 
-    /** POST /v1/receiving-orders/{id}/generate-grn — QC */
+    /** POST /v1/receiving-orders/{id}/generate-grn — QC/Manager */
     @PostMapping("/{id}/generate-grn")
-    @Operation(summary = "Tạo phiếu nhập kho (GRN) tự động (QC)", description = "QC xác nhận kết thúc kiểm đếm (nếu 100% pass) hoặc Hệ thống tự động gọi sau khi Manager duyệt Incident. Chuyển từ SUBMITTED thành GRN_CREATED. \n\n"
+    @Operation(summary = "Tạo phiếu nhập kho (GRN) tự động (QC/Manager)", description = "QC xác nhận kết thúc kiểm đếm (nếu 100% pass) hoặc Hệ thống tự động gọi sau khi Manager duyệt Incident. Chuyển từ SUBMITTED thành GRN_CREATED. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID (Lấy từ URL hoặc Table row ID).\n"
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách hoặc kết quả API POST tạo bảng).\n"
             + "👉 **Note:** Yêu cầu các Incident phải được giải quyết xong mới có thể tạo GRN.")
     public ApiResponse<GrnResponse> generateGrn(
             @PathVariable Long id,
