@@ -25,6 +25,18 @@ public class GrnEntity {
     @Column(name = "warehouse_id", nullable = false)
     private Long warehouseId;
 
+    @Column(name = "source_type", length = 50)
+    private String sourceType;
+
+    @Column(name = "source_warehouse_id")
+    private Long sourceWarehouseId;
+
+    @Column(name = "supplier_id")
+    private Long supplierId;
+
+    @Column(name = "source_reference_code", length = 100)
+    private String sourceReferenceCode;
+
     @Column(name = "grn_code", nullable = false, length = 100)
     private String grnCode;
 
