@@ -465,6 +465,19 @@ public class ScannerPageController {
                                                 document.addEventListener('DOMContentLoaded', function() {
                                                     var loadBtn = document.getElementById('loadOrderBtn');
                                                     if (loadBtn) loadBtn.addEventListener('click', loadReceivingOrder);
+
+                                                    // Auto-load if receivingId is in URL
+                                                    try {
+                                                        var urlParams = new URLSearchParams(window.location.search);
+                                                        var rid = urlParams.get('receivingId');
+                                                        if (rid) {
+                                                            var inputEl = document.getElementById('commonReceivingId');
+                                                            if (inputEl) {
+                                                                inputEl.value = rid;
+                                                                setTimeout(loadReceivingOrder, 500); // Give it a slight delay so token is ready
+                                                            }
+                                                        }
+                                                    } catch (e) {}
                                                 });
 
                                                 function updateTable(lines) {
@@ -623,7 +636,8 @@ public class ScannerPageController {
                                                     })
                                                     .then(function (d) {
                                                         if (d && d.success) {
-                                                            toast('✓ ' + (cond === 'FAIL' ? 'LỖI ' : '') + d.data.skuCode + ' — qty:' + d.data.newQty, false);
+                                                            var showQty = d.data.qty || d.data.totalReceivedQty || d.data.newQty || qty || 1;
+                                                            toast('✓ ' + (cond === 'FAIL' ? 'LỖI ' : '') + d.data.skuCode + ' — qty: ' + showQty, false);
                                                             fetchSession();
                                                             document.getElementById('bc').value = '';
                                                             if (navigator.vibrate) navigator.vibrate(60);
