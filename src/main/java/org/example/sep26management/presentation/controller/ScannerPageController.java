@@ -229,8 +229,8 @@ public class ScannerPageController {
                 "<script>\n" +
                 "var TOKEN='" + token + "';\n" +
                 "var RECEIVING_ID=" + receivingIdJs + ";\n" +
-                "var API=window.location.origin+'/api/v1/scan-events';\n" +
-                "var ORDER_API=window.location.origin+'/api/v1/receiving-orders';\n" +
+                "var API=window.location.origin+'/v1/scan-events';\n" +
+                "var ORDER_API=window.location.origin+'/v1/receiving-orders';\n" +
                 "var lineData={};\n" +
                 "var orderItems=[];\n" +
                 "var orderData=null;\n" +
