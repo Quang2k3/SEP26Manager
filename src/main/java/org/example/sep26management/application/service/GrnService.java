@@ -12,6 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -29,6 +30,8 @@ public class GrnService {
     private final PutawaySuggestionService putawaySuggestionService;
     private final JdbcTemplate jdbcTemplate;
     private final ReceivingItemJpaRepository receivingItemRepo;
+    private final InventoryTransactionJpaRepository inventoryTransactionRepo;
+    private final InventorySnapshotJpaRepository inventorySnapshotRepo;
 
     public ApiResponse<PageResponse<GrnResponse>> listGrns(String status, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
@@ -135,23 +138,25 @@ public class GrnService {
         task = putawayTaskRepo.save(task);
 
         for (GrnItemEntity item : items) {
-            // 1. Thêm vào inventory_transactions (nhập kho vào staging)
-            String sqlTx = "INSERT INTO inventory_transactions " +
-                    "(warehouse_id, location_id, sku_id, transaction_type, quantity, reference_type, reference_id, transaction_date) "
-                    +
-                    "VALUES (?, ?, ?, 'RECEIVING', ?, 'GRN', ?, NOW())";
-            jdbcTemplate.update(sqlTx, grn.getWarehouseId(), stagingLocationId, item.getSkuId(), item.getQuantity(),
-                    id);
+            // 1. Ghi log Transaction (Nhập kho vào staging)
+            InventoryTransactionEntity tx = InventoryTransactionEntity.builder()
+                    .warehouseId(grn.getWarehouseId())
+                    .locationId(stagingLocationId)
+                    .skuId(item.getSkuId())
+                    .txnType("RECEIVING")
+                    .quantity(item.getQuantity())
+                    .referenceTable("GRN")
+                    .referenceId(id)
+                    .createdBy(userId)
+                    .build();
+            inventoryTransactionRepo.save(tx);
 
-            // 2. Chặn UPSERT cho inventory_details (Duy nhất chỗ này dùng Native Query nếu
-            // MySQL/Postgres)
-            // Postgres UPSERT
-            String sqlUpsert = "INSERT INTO inventory_details (warehouse_id, location_id, sku_id, quantity, last_updated) "
-                    +
-                    "VALUES (?, ?, ?, ?, NOW()) " +
-                    "ON CONFLICT (warehouse_id, location_id, sku_id) " +
-                    "DO UPDATE SET quantity = inventory_details.quantity + EXCLUDED.quantity, last_updated = NOW()";
-            jdbcTemplate.update(sqlUpsert, grn.getWarehouseId(), stagingLocationId, item.getSkuId(),
+            // 2. Cập nhật Snapshot (Sử dụng Native Upsert đã sửa)
+            inventorySnapshotRepo.upsertInventory(
+                    grn.getWarehouseId(),
+                    item.getSkuId(),
+                    null, // lotId = null cho luồng cơ bản
+                    stagingLocationId,
                     item.getQuantity());
 
             // 3. Gợi ý Putaway (Suggest destination location)
@@ -212,13 +217,21 @@ public class GrnService {
 
     private Long getFirstStagingLocation(Long warehouseId) {
         try {
-            return jdbcTemplate.queryForObject(
+            List<Long> ids = jdbcTemplate.queryForList(
                     "SELECT location_id FROM locations WHERE warehouse_id = ? AND is_staging = TRUE AND active = TRUE LIMIT 1",
                     Long.class, warehouseId);
-        } catch (Exception e) {
-            return jdbcTemplate.queryForObject(
+            if (!ids.isEmpty())
+                return ids.get(0);
+
+            ids = jdbcTemplate.queryForList(
                     "SELECT location_id FROM locations WHERE warehouse_id = ? AND active = TRUE LIMIT 1",
                     Long.class, warehouseId);
+            if (!ids.isEmpty())
+                return ids.get(0);
+
+            return null;
+        } catch (Exception e) {
+            return null;
         }
     }
 }
