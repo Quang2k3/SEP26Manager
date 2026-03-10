@@ -242,6 +242,21 @@ public class ReceivingOrderService {
                 return ApiResponse.success("GRN submitted successfully", getOrder(id).getData());
         }
 
+        // ─── QC Approve ──────────────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<ReceivingOrderResponse> qcApprove(Long id, Long qcUserId) {
+                ReceivingOrderEntity order = findOrder(id);
+                validateStatus(order, "SUBMITTED", "qc-approve");
+
+                order.setStatus("QC_APPROVED");
+                order.setUpdatedAt(LocalDateTime.now());
+                receivingOrderRepo.save(order);
+
+                log.info("Receiving Order {} QC approved by userId={}", order.getReceivingCode(), qcUserId);
+                return ApiResponse.success("QC approved successfully", getOrder(id).getData());
+        }
+
         // ─── Approve ───────────────────────────────────────────────────────────────
 
         @Transactional
@@ -263,9 +278,9 @@ public class ReceivingOrderService {
                         Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
 
-                if (!"SUBMITTED".equals(order.getStatus())) {
+                if (!"QC_APPROVED".equals(order.getStatus())) {
                         throw new RuntimeException(
-                                        "Can only generate GRN from SUBMITTED Receiving Order. Current status: "
+                                        "Can only generate GRN from QC_APPROVED Receiving Order. Current status: "
                                                         + order.getStatus());
                 }
 
