@@ -12,7 +12,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -91,7 +90,11 @@ public class GrnService {
         grn.setApprovedBy(managerId);
         grn.setApprovedAt(LocalDateTime.now());
         grnRepo.save(grn);
-        return ApiResponse.success("GRN approved successfully", toSummaryResponse(grn));
+
+        // Automated post upon manual approval by Manager
+        this.post(id, managerId);
+
+        return ApiResponse.success("GRN approved and posted successfully.", toSummaryResponse(grn));
     }
 
     @Transactional

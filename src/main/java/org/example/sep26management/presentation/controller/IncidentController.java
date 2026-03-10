@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.example.sep26management.application.enums.IncidentCategory;
 import org.example.sep26management.application.dto.request.CreateIncidentRequest;
 import org.example.sep26management.application.dto.request.RejectRequest;
 import org.example.sep26management.application.dto.request.ResolveIncidentRequest;
@@ -15,41 +16,44 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import org.springframework.web.bind.annotation.*;
-
 import java.util.Map;
 
 @RestController
 @RequestMapping("/v1/incidents")
 @RequiredArgsConstructor
-@Tag(name = "Incidents (Gate Check)", description = "Quản lý sự cố Gate Check. "
-        + "Keeper tạo Incident khi Seal đứt/sai → Manager duyệt 'Cho phép dỡ hàng' hoặc 'Từ chối'.")
+@Tag(name = "Incidents (Reports)", description = "Quản lý các loại báo cáo sự cố. Bao gồm: Gate Check (Seal/Container) và Báo cáo chất lượng sản phẩm (Quality/Quantity).")
 public class IncidentController {
 
     private final IncidentService incidentService;
 
     /** POST /v1/incidents — Keeper tạo sự cố */
     @PostMapping
-    @Operation(summary = "Tạo sự cố Gate Check (Keeper)", description = "Keeper sử dụng khi phát hiện vấn đề về Seal xe tải. "
-            + "Có thể đính kèm ảnh (attachmentId) và liên kết với Lệnh nhập hàng (receivingId).")
+    @Operation(summary = "Tạo báo cáo sự cố (Keeper)", description = "Keeper tạo báo cáo sự cố. \n"
+            + "- Nếu `category=GATE`: Báo cáo các vấn đề về Seal, thùng container (trước khi dỡ hàng).\n"
+            + "- Nếu `category=QUALITY`: Báo cáo thừa thiếu, hư hỏng sản phẩm (trong/sau khi dỡ hàng).")
     public ApiResponse<IncidentResponse> create(
             @Valid @RequestBody CreateIncidentRequest request,
             Authentication auth) {
         return incidentService.createIncident(request, extractUserId(auth));
     }
 
-    /** GET /v1/incidents?status=OPEN */
+    /** GET /v1/incidents?status=OPEN&category=GATE */
     @GetMapping
-    @Operation(summary = "Danh sách sự cố", description = "Lấy danh sách sự cố.\n\n"
+    @Operation(summary = "Danh sách báo cáo sự cố", description = "Lấy danh sách các báo cáo sự cố.\n\n"
+            + "**Hiển thị theo loại phiếu:** \n"
+            + "- Truyền `category=GATE` để lấy danh sách 'Phiếu báo cáo Gate Check' (Seal/Container).\n"
+            + "- Truyền `category=QUALITY` để lấy danh sách 'Phiếu báo cáo chất lượng' (Thừa thiếu/Hư hỏng SKU).\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `Query.status` (Tùy chọn): Lọc theo trạng thái, ví dụ: OPEN, APPROVED, REJECTED.\n"
-            + "- `Query.page` (Tùy chọn): Trang kết quả, mặc định 0.\n"
-            + "- `Query.size` (Tùy chọn): Kích thước trang, mặc định 10.")
+            + "- `Query.status` (Tùy chọn): OPEN, APPROVED, REJECTED, RESOLVED.\n"
+            + "- `Query.category` (Tùy chọn): GATE, QUALITY.\n"
+            + "- `Query.page` (Tùy chọn): Trang mặc định 0.\n"
+            + "- `Query.size` (Tùy chọn): Kích thước mặc định 10.")
     public ApiResponse<PageResponse<IncidentResponse>> list(
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) IncidentCategory category,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
-        return incidentService.listIncidents(status, page, size);
+        return incidentService.listIncidents(status, category, page, size);
     }
 
     /** GET /v1/incidents/{id} */
@@ -102,7 +106,6 @@ public class IncidentController {
         return incidentService.resolveIncident(id, request, extractUserId(auth));
     }
 
-    @SuppressWarnings("unchecked")
     private Long extractUserId(Authentication auth) {
         if (auth != null && auth.getDetails() instanceof Map) {
             Object uid = ((Map<?, ?>) auth.getDetails()).get("userId");

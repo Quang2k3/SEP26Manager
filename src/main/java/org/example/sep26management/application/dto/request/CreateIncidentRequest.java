@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import org.example.sep26management.application.enums.IncidentType;
+import org.example.sep26management.application.enums.IncidentCategory;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
@@ -19,6 +20,10 @@ public class CreateIncidentRequest {
     @Schema(description = "ID Kho (Bắt buộc)", example = "1")
     @NotNull(message = "warehouseId is required")
     private Long warehouseId;
+
+    @Schema(description = "Phân loại báo cáo (Bắt buộc)", example = "GATE", allowableValues = { "GATE", "QUALITY" })
+    @NotNull(message = "category is required")
+    private IncidentCategory category;
 
     @Schema(description = "Loại sự cố (Bắt buộc)", example = "DAMAGE", allowableValues = { "DAMAGE", "SHORTAGE",
             "OVERAGE",

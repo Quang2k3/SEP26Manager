@@ -49,6 +49,7 @@ public class IncidentService {
                 .warehouseId(request.getWarehouseId())
                 .incidentCode(code)
                 .incidentType(request.getIncidentType())
+                .category(request.getCategory())
                 .severity("HIGH")
                 .occurredAt(LocalDateTime.now())
                 .description(request.getDescription())
@@ -81,11 +82,20 @@ public class IncidentService {
     // ─── List Incidents ─────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public ApiResponse<PageResponse<IncidentResponse>> listIncidents(String status, int page, int size) {
+    public ApiResponse<PageResponse<IncidentResponse>> listIncidents(String status,
+            org.example.sep26management.application.enums.IncidentCategory category, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
-        Page<IncidentEntity> incidentsPage = status != null && !status.isBlank()
-                ? incidentRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
-                : incidentRepo.findAllByOrderByCreatedAtDesc(pageable);
+        Page<IncidentEntity> incidentsPage;
+
+        if (status != null && !status.isBlank() && category != null) {
+            incidentsPage = incidentRepo.findByStatusAndCategoryOrderByCreatedAtDesc(status, category, pageable);
+        } else if (status != null && !status.isBlank()) {
+            incidentsPage = incidentRepo.findByStatusOrderByCreatedAtDesc(status, pageable);
+        } else if (category != null) {
+            incidentsPage = incidentRepo.findByCategoryOrderByCreatedAtDesc(category, pageable);
+        } else {
+            incidentsPage = incidentRepo.findAllByOrderByCreatedAtDesc(pageable);
+        }
 
         List<IncidentResponse> content = incidentsPage.getContent().stream()
                 .map(this::toResponse)
@@ -252,6 +262,7 @@ public class IncidentService {
                 .warehouseId(e.getWarehouseId())
                 .incidentCode(e.getIncidentCode())
                 .incidentType(e.getIncidentType())
+                .category(e.getCategory())
                 .severity(e.getSeverity())
                 .occurredAt(e.getOccurredAt())
                 .description(e.getDescription())

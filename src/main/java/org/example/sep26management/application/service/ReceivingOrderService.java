@@ -445,10 +445,8 @@ public class ReceivingOrderService {
                                 .sourceWarehouseId(order.getSourceWarehouseId())
                                 .supplierId(order.getSupplierId())
                                 .sourceReferenceCode(order.getSourceReferenceCode())
-                                .status("APPROVED") // Auto Approve
+                                .status("PENDING_APPROVAL")
                                 .createdBy(userId)
-                                .approvedBy(userId) // Keeper automatically approves
-                                .approvedAt(LocalDateTime.now())
                                 .build();
                 GrnEntity savedGrn = grnRepo.save(grn);
 
@@ -517,10 +515,7 @@ public class ReceivingOrderService {
                                 .items(itemResponses)
                                 .build();
 
-                // Auto post GRN to create inventory transactions and Putaway Tasks
-                grnService.post(savedGrn.getGrnId(), userId);
-
-                return ApiResponse.success("GRN created and auto-posted successfully. Putaway Tasks generated.",
+                return ApiResponse.success("GRN generated successfully. Pending Manager approval.",
                                 grnResponse);
         }
 

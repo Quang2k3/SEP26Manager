@@ -1,5 +1,6 @@
 package org.example.sep26management.infrastructure.persistence.repository;
 
+import org.example.sep26management.application.enums.IncidentCategory;
 import org.example.sep26management.infrastructure.persistence.entity.IncidentEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -13,6 +14,11 @@ public interface IncidentJpaRepository extends JpaRepository<IncidentEntity, Lon
             Pageable pageable);
 
     Page<IncidentEntity> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
+
+    Page<IncidentEntity> findByCategoryOrderByCreatedAtDesc(IncidentCategory category, Pageable pageable);
+
+    Page<IncidentEntity> findByStatusAndCategoryOrderByCreatedAtDesc(String status, IncidentCategory category,
+            Pageable pageable);
 
     List<IncidentEntity> findByReceivingIdOrderByCreatedAtDesc(Long receivingId);
 
