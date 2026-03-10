@@ -58,6 +58,15 @@ public class PutawayTaskController {
         return putawayTaskService.getTask(id);
     }
 
+    /** GET /v1/putaway-tasks/receiving/{receivingId} — get by receiving GRN */
+    @GetMapping("/receiving/{receivingId}")
+    @Operation(summary = "Lấy putaway task theo phiếu nhập", description = "Lấy Putaway Task được sinh ra tự động từ phiếu nhập GRN.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable receivingId`: Mã phiếu nhập GRN ID.")
+    public ApiResponse<PutawayTaskResponse> getByReceivingId(@PathVariable Long receivingId) {
+        return putawayTaskService.getTaskByReceivingId(receivingId);
+    }
+
     /**
      * GET /v1/putaway-tasks/{id}/suggestions
      * Get putaway suggestions for all items in a task (zone-category matching).

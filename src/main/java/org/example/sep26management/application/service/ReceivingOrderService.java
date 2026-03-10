@@ -36,6 +36,7 @@ public class ReceivingOrderService {
         private final WarehouseJpaRepository warehouseRepo;
         private final SupplierJpaRepository supplierRepo;
         private final UserJpaRepository userRepo;
+        private final IncidentJpaRepository incidentRepo;
         private final JdbcTemplate jdbcTemplate; // Chỉ dùng cho các native INSERT/UPDATE phức tạp (inventory)
         private final PutawaySuggestionService putawaySuggestionService;
 
@@ -63,6 +64,111 @@ public class ReceivingOrderService {
                                 .build();
 
                 return ApiResponse.success("OK", pageResponse);
+        }
+
+        // ─── Create Draft Order ────────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<ReceivingOrderResponse> createDraftOrder(
+                        org.example.sep26management.application.dto.request.ReceivingOrderRequest request,
+                        Long warehouseId, Long userId) {
+
+                Long supplierId = null;
+                if (request.getSupplierCode() != null && !request.getSupplierCode().isBlank()) {
+                        supplierId = supplierRepo.findBySupplierCode(request.getSupplierCode())
+                                        .map(SupplierEntity::getSupplierId)
+                                        .orElseThrow(() -> new RuntimeException(
+                                                        "Supplier not found: " + request.getSupplierCode()));
+                }
+
+                String receivingCode = "GRN-" + System.currentTimeMillis();
+
+                ReceivingOrderEntity order = ReceivingOrderEntity.builder()
+                                .warehouseId(warehouseId)
+                                .sourceType(request.getSourceType())
+                                .sourceReferenceCode(request.getSourceReferenceCode())
+                                .supplierId(supplierId)
+                                .sourceWarehouseId(request.getSourceWarehouseId())
+                                .note(request.getNote())
+                                .status("DRAFT")
+                                .createdBy(userId)
+                                .receivingCode(receivingCode)
+                                .build();
+
+                ReceivingOrderEntity savedOrder = receivingOrderRepo.save(order);
+
+                if (request.getItems() != null && !request.getItems().isEmpty()) {
+                        for (var itemReq : request.getItems()) {
+                                SkuEntity sku = skuRepo.findById(itemReq.getSkuId())
+                                                .orElseThrow(() -> new RuntimeException(
+                                                                "SKU not found: " + itemReq.getSkuId()));
+
+                                ReceivingItemEntity item = ReceivingItemEntity.builder()
+                                                .receivingOrder(savedOrder)
+                                                .skuId(sku.getSkuId())
+                                                .expectedQty(itemReq.getExpectedQty() != null ? itemReq.getExpectedQty()
+                                                                : BigDecimal.ZERO)
+                                                .receivedQty(BigDecimal.ZERO)
+                                                .acceptedQty(BigDecimal.ZERO)
+                                                .damagedQty(BigDecimal.ZERO)
+                                                .rejectedQty(BigDecimal.ZERO)
+                                                .build();
+                                receivingItemRepo.save(item);
+                        }
+                }
+
+                log.info("Draft GRN {} created by userId={}", receivingCode, userId);
+                return getOrder(savedOrder.getReceivingId());
+        }
+
+        // ─── Update Lines ──────────────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<ReceivingOrderResponse> updateLines(Long id,
+                        org.example.sep26management.application.dto.request.UpdateReceivingLinesRequest request,
+                        Long userId) {
+                ReceivingOrderEntity order = findOrder(id);
+
+                if (!"DRAFT".equals(order.getStatus()) && !"RECEIVED".equals(order.getStatus())
+                                && !"VERIFIED".equals(order.getStatus())
+                                && !"PENDING_INCIDENT".equals(order.getStatus())) {
+                        throw new RuntimeException("Cannot update lines for GRN in status '" + order.getStatus() + "'");
+                }
+
+                if (request.getLines() != null) {
+                        for (var line : request.getLines()) {
+                                ReceivingItemEntity item = receivingItemRepo.findById(line.getReceivingItemId())
+                                                .orElseThrow(() -> new RuntimeException(
+                                                                "Item not found: " + line.getReceivingItemId()));
+
+                                if (!item.getReceivingOrder().getReceivingId().equals(id)) {
+                                        throw new RuntimeException(
+                                                        "Item " + line.getReceivingItemId() + " does not belong to GRN "
+                                                                        + id);
+                                }
+
+                                if (line.getReceivedQty() != null)
+                                        item.setReceivedQty(line.getReceivedQty());
+                                if (line.getAcceptedQty() != null)
+                                        item.setAcceptedQty(line.getAcceptedQty());
+                                if (line.getDamagedQty() != null)
+                                        item.setDamagedQty(line.getDamagedQty());
+                                if (line.getRejectedQty() != null)
+                                        item.setRejectedQty(line.getRejectedQty());
+                                if (line.getDiscrepancyReason() != null)
+                                        item.setDiscrepancyReason(line.getDiscrepancyReason());
+                                if (line.getNote() != null)
+                                        item.setNote(line.getNote());
+
+                                receivingItemRepo.save(item);
+                        }
+                }
+
+                order.setUpdatedAt(LocalDateTime.now());
+                receivingOrderRepo.save(order);
+
+                log.info("GRN {} lines updated by userId={}", order.getReceivingCode(), userId);
+                return getOrder(id);
         }
 
         // ─── Get (với enriched fields đầy đủ) ─────────────────────────────────────
@@ -108,16 +214,25 @@ public class ReceivingOrderService {
                                 .collect(Collectors.toList());
 
                 int totalLines = itemResponses.size();
+                BigDecimal totalExpectedQty = items.stream()
+                                .map(ReceivingItemEntity::getExpectedQty)
+                                .filter(qty -> qty != null)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
                 BigDecimal totalQty = items.stream()
                                 .map(ReceivingItemEntity::getReceivedQty)
+                                .filter(qty -> qty != null)
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
                 BigDecimal totalOkQty = items.stream()
-                                .filter(i -> "PASS".equalsIgnoreCase(i.getCondition()))
-                                .map(ReceivingItemEntity::getReceivedQty)
+                                .map(ReceivingItemEntity::getAcceptedQty)
+                                .filter(qty -> qty != null)
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
                 BigDecimal totalDamagedQty = items.stream()
-                                .filter(i -> "FAIL".equalsIgnoreCase(i.getCondition()))
-                                .map(ReceivingItemEntity::getReceivedQty)
+                                .map(ReceivingItemEntity::getDamagedQty)
+                                .filter(qty -> qty != null)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal totalRejectedQty = items.stream()
+                                .map(ReceivingItemEntity::getRejectedQty)
+                                .filter(qty -> qty != null)
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
                 ReceivingOrderResponse response = ReceivingOrderResponse.builder()
@@ -147,8 +262,10 @@ public class ReceivingOrderService {
                                 .rejectReason(order.getRejectReason())
                                 .totalLines(totalLines)
                                 .totalQty(totalQty)
+                                .totalExpectedQty(totalExpectedQty)
                                 .totalOkQty(totalOkQty)
                                 .totalDamagedQty(totalDamagedQty)
+                                .totalRejectedQty(totalRejectedQty)
                                 .items(itemResponses)
                                 .build();
 
@@ -176,6 +293,12 @@ public class ReceivingOrderService {
         public ApiResponse<ReceivingOrderResponse> approve(Long id, Long managerId) {
                 ReceivingOrderEntity order = findOrder(id);
                 validateStatus(order, "SUBMITTED", "approve");
+
+                // Check for unresolved incidents
+                List<IncidentEntity> incidents = incidentRepo.findByReceivingIdOrderByCreatedAtDesc(id);
+                if (incidents.stream().anyMatch(i -> "OPEN".equals(i.getStatus()))) {
+                        throw new RuntimeException("Cannot approve GRN. There are unresolved incidents for this GRN.");
+                }
 
                 order.setStatus("APPROVED");
                 order.setApprovedBy(managerId);
@@ -229,6 +352,13 @@ public class ReceivingOrderService {
 
                 List<Long> lotIds = new ArrayList<>();
                 for (ReceivingItemEntity item : items) {
+                        BigDecimal acceptedQty = item.getAcceptedQty() != null ? item.getAcceptedQty()
+                                        : BigDecimal.ZERO;
+                        if (acceptedQty.compareTo(BigDecimal.ZERO) <= 0) {
+                                lotIds.add(null);
+                                continue;
+                        }
+
                         Long lotId = jdbcTemplate.queryForObject(
                                         "INSERT INTO inventory_lots (sku_id, lot_number, expiry_date, manufacture_date, qc_status, quarantine_status, receiving_item_id) "
                                                         + "VALUES (?, ?, ?, ?, 'RELEASED', 'NONE', ?) "
@@ -250,13 +380,13 @@ public class ReceivingOrderService {
                                                         + "ON CONFLICT (warehouse_id, sku_id, lot_id_safe, location_id) "
                                                         + "DO UPDATE SET quantity = inventory_snapshot.quantity + EXCLUDED.quantity, last_updated = NOW()",
                                         order.getWarehouseId(), item.getSkuId(), lotId, stagingLocationId,
-                                        item.getReceivedQty());
+                                        acceptedQty);
 
                         jdbcTemplate.update(
                                         "INSERT INTO inventory_transactions (warehouse_id, sku_id, lot_id, location_id, quantity, txn_type, reference_table, reference_id, created_by) "
                                                         + "VALUES (?, ?, ?, ?, ?, 'RECEIVE', 'receiving_orders', ?, ?)",
                                         order.getWarehouseId(), item.getSkuId(), lotId, stagingLocationId,
-                                        item.getReceivedQty(), id, accountantId);
+                                        acceptedQty, id, accountantId);
                 }
 
                 order.setStatus("POSTED");
@@ -278,10 +408,15 @@ public class ReceivingOrderService {
 
                 for (int i = 0; i < items.size(); i++) {
                         ReceivingItemEntity item = items.get(i);
+                        BigDecimal acceptedQty = item.getAcceptedQty() != null ? item.getAcceptedQty()
+                                        : BigDecimal.ZERO;
+                        if (acceptedQty.compareTo(BigDecimal.ZERO) <= 0 || lotIds.get(i) == null) {
+                                continue;
+                        }
 
                         // Suggest putaway location based on zone-category matching
                         Long suggestedBinId = putawaySuggestionService
-                                        .suggestLocation(order.getWarehouseId(), item.getSkuId(), item.getReceivedQty())
+                                        .suggestLocation(order.getWarehouseId(), item.getSkuId(), acceptedQty)
                                         .map(PutawaySuggestion::getSuggestedLocationId)
                                         .orElse(stagingLocationId); // fallback to staging
 
@@ -290,7 +425,7 @@ public class ReceivingOrderService {
                                         .receivingItemId(item.getReceivingItemId())
                                         .skuId(item.getSkuId())
                                         .lotId(lotIds.get(i))
-                                        .quantity(item.getReceivedQty())
+                                        .quantity(acceptedQty)
                                         .putawayQty(BigDecimal.ZERO)
                                         .suggestedLocationId(suggestedBinId)
                                         .build();
@@ -386,7 +521,12 @@ public class ReceivingOrderService {
                                 .skuCode(sku != null ? sku.getSkuCode() : null)
                                 .skuName(sku != null ? sku.getSkuName() : null)
                                 .unit(sku != null ? sku.getUnit() : null)
+                                .expectedQty(item.getExpectedQty())
                                 .receivedQty(item.getReceivedQty())
+                                .acceptedQty(item.getAcceptedQty())
+                                .damagedQty(item.getDamagedQty())
+                                .rejectedQty(item.getRejectedQty())
+                                .discrepancyReason(item.getDiscrepancyReason())
                                 .lotNumber(item.getLotNumber())
                                 .expiryDate(item.getExpiryDate())
                                 .manufactureDate(item.getManufactureDate())

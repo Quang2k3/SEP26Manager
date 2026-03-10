@@ -74,12 +74,20 @@ public class ReceivingOrderResponse {
 
     @Schema(description = "Tổng số DÒNG sản phẩm", example = "2")
     private Integer totalLines;
-    @Schema(description = "TỔNG số lượng sản phẩm", example = "150.0")
+    @Schema(description = "TỔNG số lượng sản phẩm THỰC Nhận", example = "150.0")
     private BigDecimal totalQty;
+
+    @Schema(description = "TỔNG số lượng sản phẩm DỰ KIẾN ban đầu", example = "150.0")
+    private BigDecimal totalExpectedQty;
+
     @Schema(description = "Số lượng sản phẩm TỐT (PASS)", example = "140.0")
     private BigDecimal totalOkQty;
+
     @Schema(description = "Số lượng sản phẩm HỎNG (FAIL)", example = "10.0")
     private BigDecimal totalDamagedQty;
+
+    @Schema(description = "Số lượng sản phẩm KHÔNG NHẬN / TỪ CHỐI", example = "0.0")
+    private BigDecimal totalRejectedQty;
 
     @Schema(description = "Danh sách chi tiết từng lô hàng nhập")
     private List<ReceivingItemResponse> items;
