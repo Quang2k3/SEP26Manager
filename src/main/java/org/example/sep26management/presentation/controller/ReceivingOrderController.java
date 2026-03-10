@@ -9,6 +9,7 @@ import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
 import org.example.sep26management.application.dto.response.GrnResponse;
 import org.example.sep26management.application.service.ReceivingOrderService;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -87,12 +88,25 @@ public class ReceivingOrderController {
         return receivingOrderService.submit(id, extractUserId(auth));
     }
 
-    /** POST /v1/receiving-orders/{id}/generate-grn — QC/Manager */
-    @PostMapping("/{id}/generate-grn")
-    @Operation(summary = "Tạo phiếu nhập kho (GRN) tự động (QC/Manager)", description = "QC xác nhận kết thúc kiểm đếm (nếu 100% pass) hoặc Hệ thống tự động gọi sau khi Manager duyệt Incident. Chuyển từ SUBMITTED thành GRN_CREATED. \n\n"
+    /** POST /v1/receiving-orders/{id}/qc-approve — QC */
+    @PostMapping("/{id}/qc-approve")
+    @PreAuthorize("hasRole('QC')")
+    @Operation(summary = "QC xác nhận chất lượng OK", description = "QC xác nhận lô hàng đạt chất lượng (100% pass hoặc đã báo cáo sự cố xong). Chuyển phiếu từ SUBMITTED thành QC_APPROVED. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách hoặc kết quả API POST tạo bảng).\n"
-            + "👉 **Note:** Yêu cầu các Incident phải được giải quyết xong mới có thể tạo GRN.")
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách `GET /v1/receiving-orders?status=SUBMITTED`).\n\n"
+            + "👉 **Sau bước này:** Keeper mới được phép tạo GRN (`POST /v1/receiving-orders/{id}/generate-grn`).")
+    public ApiResponse<ReceivingOrderResponse> qcApprove(
+            @PathVariable Long id,
+            Authentication auth) {
+        return receivingOrderService.qcApprove(id, extractUserId(auth));
+    }
+
+    /** POST /v1/receiving-orders/{id}/generate-grn — Keeper */
+    @PostMapping("/{id}/generate-grn")
+    @Operation(summary = "Tạo phiếu nhập kho GRN (Keeper)", description = "Keeper tạo GRN sau khi QC đã xác nhận chất lượng (status = QC_APPROVED). Chuyển từ QC_APPROVED thành GRN_CREATED. \n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách `GET /v1/receiving-orders?status=QC_APPROVED`).\n\n"
+            + "👉 **Điều kiện:** Status phải là `QC_APPROVED`. Các Incident (nếu có) phải được Manager resolve xong.")
     public ApiResponse<GrnResponse> generateGrn(
             @PathVariable Long id,
             Authentication auth) {

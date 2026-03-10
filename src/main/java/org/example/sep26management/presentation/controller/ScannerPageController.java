@@ -310,7 +310,7 @@ public class ScannerPageController {
                                                     </table>
                                                 </div>
 
-                                                <div class='card'>
+                                                <div class='card' id='keeperSection'>
                                                     <div class='card-title'>Chốt & Tạo Phiếu Kho</div>
 
                                                     <div class='row' style='margin-bottom:8px'>
@@ -333,7 +333,19 @@ public class ScannerPageController {
                                                         <input type='text' id='note' placeholder='Ghi chú' autocomplete='off'/>
                                                     </div>
 
-                                                    <button class='btn full' id='createGrnBtn' style='background:#10b981;margin-top:5px'>✅ Tạo Phiếu GRN</button>
+                                                    <button class='btn full' id='createGrnBtn' style='background:#10b981;margin-top:5px'>✅ Xác nhận kiểm đếm</button>
+                                                </div>
+
+                                                <div class='card' id='qcSection' style='display:none'>
+                                                    <div class='card-title'>QC — Xác nhận chất lượng</div>
+
+                                                    <div class='row' style='margin-bottom:8px'>
+                                                        <input type='number' id='receivingIdInput' placeholder='Mã Phiếu Nhận (receivingId)' style='flex:1'/>
+                                                    </div>
+
+                                                    <button class='btn full' id='qcApproveBtn' style='background:#10b981;margin-top:5px'>✅ Xác nhận chất lượng OK</button>
+
+                                                    <button class='btn full' id='reportIncidentBtn' style='background:#f59e0b;margin-top:8px;color:#000'>📋 Báo cáo sự cố (hàng FAIL)</button>
                                                 </div>
 
                                                 <div class='card'>
@@ -759,7 +771,121 @@ public class ScannerPageController {
                                                     .catch(function (e) {
                                                         toast('Lỗi mạng: ' + e, true);
                                                         btn.disabled = false;
-                                                        btn.textContent = '✅ Tạo Phiếu GRN';
+                                                        btn.textContent = '✅ Xác nhận kiểm đếm';
+                                                    });
+                                                }
+
+                                                // ── QC: Xác nhận chất lượng OK ──
+                                                function qcApprove() {
+                                                    var recvId = document.getElementById('receivingIdInput').value.trim();
+                                                    if (!recvId) {
+                                                        toast('Vui lòng nhập Mã Phiếu Nhận (receivingId)', true);
+                                                        return;
+                                                    }
+                                                    var btn = document.getElementById('qcApproveBtn');
+                                                    btn.disabled = true;
+                                                    btn.textContent = 'Đang xử lý...';
+
+                                                    fetch(API_BASE + '/v1/receiving-orders/' + recvId + '/qc-approve', {
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Content-Type': 'application/json',
+                                                            'Authorization': 'Bearer ' + TOKEN
+                                                        }
+                                                    })
+                                                    .then(function (r) { return r.json(); })
+                                                    .then(function (d) {
+                                                        if (d && d.success) {
+                                                            toast('✅ Đã xác nhận chất lượng OK! Keeper có thể tạo GRN.', false);
+                                                            btn.textContent = '✅ Đã xác nhận';
+                                                        } else {
+                                                            toast((d && d.message) || 'Lỗi xác nhận QC', true);
+                                                            btn.disabled = false;
+                                                            btn.textContent = '✅ Xác nhận chất lượng OK';
+                                                        }
+                                                    })
+                                                    .catch(function (e) {
+                                                        toast('Lỗi mạng: ' + e, true);
+                                                        btn.disabled = false;
+                                                        btn.textContent = '✅ Xác nhận chất lượng OK';
+                                                    });
+                                                }
+
+                                                // ── QC: Báo cáo sự cố (hàng FAIL) ──
+                                                function reportIncident() {
+                                                    var recvId = document.getElementById('receivingIdInput').value.trim();
+                                                    if (!recvId) {
+                                                        toast('Vui lòng nhập Mã Phiếu Nhận (receivingId)', true);
+                                                        return;
+                                                    }
+
+                                                    // Gom danh sách items FAIL từ session
+                                                    var failItems = [];
+                                                    var rows = document.querySelectorAll('#tbl tbody tr');
+                                                    rows.forEach(function (row) {
+                                                        var cells = row.querySelectorAll('td');
+                                                        if (cells.length >= 4) {
+                                                            var cond = cells[3].textContent.trim();
+                                                            if (cond === 'FAIL') {
+                                                                failItems.push({
+                                                                    skuId: parseInt(cells[0].getAttribute('data-sku-id') || '0'),
+                                                                    damagedQty: parseFloat(cells[2].textContent) || 0,
+                                                                    reasonCode: cells[3].getAttribute('data-reason') || 'DAMAGE'
+                                                                });
+                                                            }
+                                                        }
+                                                    });
+
+                                                    if (failItems.length === 0) {
+                                                        toast('Không có hàng FAIL để báo cáo. Hãy dùng "Xác nhận chất lượng OK".', true);
+                                                        return;
+                                                    }
+
+                                                    var desc = prompt('Mô tả sự cố (VD: Hàng bị hỏng bao bì):');
+                                                    if (!desc) return;
+
+                                                    var warehouseId = null;
+                                                    try {
+                                                        var p = TOKEN.split('.')[1];
+                                                        var d = JSON.parse(base64UrlDecode(p));
+                                                        warehouseId = d.warehouseId;
+                                                    } catch (e) {}
+
+                                                    var body = {
+                                                        warehouseId: warehouseId,
+                                                        incidentType: 'DAMAGE',
+                                                        description: desc,
+                                                        receivingId: parseInt(recvId),
+                                                        items: failItems
+                                                    };
+
+                                                    var btn = document.getElementById('reportIncidentBtn');
+                                                    btn.disabled = true;
+                                                    btn.textContent = 'Đang gửi...';
+
+                                                    fetch(API_BASE + '/v1/incidents', {
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Content-Type': 'application/json',
+                                                            'Authorization': 'Bearer ' + TOKEN
+                                                        },
+                                                        body: JSON.stringify(body)
+                                                    })
+                                                    .then(function (r) { return r.json(); })
+                                                    .then(function (d) {
+                                                        if (d && d.success) {
+                                                            toast('📋 Đã tạo báo cáo sự cố #' + (d.data.id || ''), false);
+                                                            btn.textContent = '📋 Đã báo cáo';
+                                                        } else {
+                                                            toast((d && d.message) || 'Lỗi tạo sự cố', true);
+                                                            btn.disabled = false;
+                                                            btn.textContent = '📋 Báo cáo sự cố (hàng FAIL)';
+                                                        }
+                                                    })
+                                                    .catch(function (e) {
+                                                        toast('Lỗi mạng: ' + e, true);
+                                                        btn.disabled = false;
+                                                        btn.textContent = '📋 Báo cáo sự cố (hàng FAIL)';
                                                     });
                                                 }
 
@@ -775,9 +901,15 @@ public class ScannerPageController {
                                                     if (IS_QC) {
                                                         roleBadge.style.background = '#a78bfa';
                                                         roleBadge.style.color = '#4c1d95';
+                                                        // Show QC section, hide Keeper section
+                                                        document.getElementById('keeperSection').style.display = 'none';
+                                                        document.getElementById('qcSection').style.display = 'block';
                                                     } else {
                                                         roleBadge.style.background = '#34d399';
                                                         roleBadge.style.color = '#064e3b';
+                                                        // Show Keeper section, hide QC section
+                                                        document.getElementById('keeperSection').style.display = 'block';
+                                                        document.getElementById('qcSection').style.display = 'none';
                                                     }
 
                                                     // Hide classification section for KEEPER
@@ -795,6 +927,12 @@ public class ScannerPageController {
                                                     document.getElementById('manualBtn').addEventListener('click', submitManual);
                                                     document.getElementById('closeBtn').addEventListener('click', toggleCamera);
                                                     document.getElementById('createGrnBtn').addEventListener('click', createGrn);
+
+                                                    // QC buttons
+                                                    var qcApproveBtn = document.getElementById('qcApproveBtn');
+                                                    if (qcApproveBtn) qcApproveBtn.addEventListener('click', qcApprove);
+                                                    var reportBtn = document.getElementById('reportIncidentBtn');
+                                                    if (reportBtn) reportBtn.addEventListener('click', reportIncident);
 
                                                     document.getElementById('bc').addEventListener('keydown', function (e) {
                                                         if (e.key === 'Enter') {
