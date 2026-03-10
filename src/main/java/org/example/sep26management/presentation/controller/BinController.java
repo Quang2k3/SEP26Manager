@@ -71,7 +71,9 @@ public class BinController {
 
     @GetMapping("/{locationId}/occupancy")
     @PreAuthorize("hasAnyRole('MANAGER','KEEPER')")
-    @Operation(summary = "Chi tiết occupancy 1 bin", description = "Xem chi tiết inventory trong 1 bin cụ thể: danh sách SKU, số lượng, lot, tỉ lệ chiếm dụng.")
+    @Operation(summary = "Chi tiết occupancy 1 bin", description = "Xem chi tiết inventory trong 1 bin cụ thể: danh sách SKU, số lượng, lot, tỉ lệ chiếm dụng.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable locationId`: Mã ID của Bin (Location ID). LẤY TỪ: attribute `locationId` của API danh sách Bin Occupancy hoặc Search Empty Bin.")
     public ResponseEntity<ApiResponse<BinOccupancyResponse>> getBinDetail(
             @PathVariable Long locationId) {
 
@@ -114,7 +116,9 @@ public class BinController {
 
     @PatchMapping("/{locationId}/capacity")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Cấu hình dung lượng bin (Manager)", description = "Cập nhật maxWeightKg và maxVolumeM3 cho bin. Chỉ role MANAGER. Dùng để set giới hạn lưu trữ cho putaway suggestion.")
+    @Operation(summary = "Cấu hình dung lượng bin (Manager)", description = "Cập nhật maxWeightKg và maxVolumeM3 cho bin. Chỉ role MANAGER. Dùng để set giới hạn lưu trữ cho putaway suggestion.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable locationId`: Mã ID của Bin (Location ID). LẤY TỪ: attribute `locationId` của API danh sách Bin Occupancy hoặc Search Empty Bin.")
     public ResponseEntity<ApiResponse<BinCapacityResponse>> configureBinCapacity(
             @PathVariable Long locationId,
             @Valid @RequestBody ConfigureBinCapacityRequest request,

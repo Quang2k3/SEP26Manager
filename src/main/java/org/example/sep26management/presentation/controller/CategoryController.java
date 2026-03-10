@@ -41,8 +41,7 @@ public class CategoryController {
     // ─────────────────────────────────────────────────────────────
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @Operation(summary = "Tạo category mới",
-            description = "Tạo category với categoryCode và categoryName. categoryCode phải unique. Chỉ ADMIN/MANAGER.")
+    @Operation(summary = "Tạo category mới", description = "Tạo category với categoryCode và categoryName. categoryCode phải unique. Chỉ ADMIN/MANAGER.")
     public ResponseEntity<ApiResponse<CategoryResponse>> createCategory(
             @Valid @RequestBody CreateCategoryRequest request,
             HttpServletRequest httpRequest) {
@@ -69,8 +68,9 @@ public class CategoryController {
      */
     @PutMapping("/{categoryId}")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @Operation(summary = "Cập nhật category",
-            description = "Cập nhật categoryName, description. Chỉ ADMIN/MANAGER.")
+    @Operation(summary = "Cập nhật category", description = "Cập nhật categoryName, description. Chỉ ADMIN/MANAGER.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable categoryId`: Mã Category ID. LẤY TỪ: attribute `id` của API danh sách Category.")
     public ResponseEntity<ApiResponse<CategoryResponse>> updateCategory(
             @PathVariable Long categoryId,
             @Valid @RequestBody UpdateCategoryRequest request,
@@ -98,8 +98,9 @@ public class CategoryController {
      */
     @GetMapping("/{categoryId}")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Chi tiết category",
-            description = "Lấy thông tin chi tiết 1 category theo ID.")
+    @Operation(summary = "Chi tiết category", description = "Lấy thông tin chi tiết 1 category theo ID.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable categoryId`: Mã Category ID. LẤY TỪ: attribute `id` của API danh sách Category.")
     public ResponseEntity<ApiResponse<CategoryResponse>> getCategoryById(
             @PathVariable Long categoryId) {
         ApiResponse<CategoryResponse> response = categoryService.getCategoryById(categoryId);
@@ -129,8 +130,9 @@ public class CategoryController {
      */
     @PatchMapping("/{categoryId}/deactivate")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @Operation(summary = "Vô hiệu hóa category",
-            description = "Vô hiệu hóa category. SKU thuộc category này sẽ không được gợi ý putaway nữa.")
+    @Operation(summary = "Vô hiệu hóa category", description = "Vô hiệu hóa category. SKU thuộc category này sẽ không được gợi ý putaway nữa.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable categoryId`: Mã Category ID. LẤY TỪ: attribute `id` của API danh sách Category.")
     public ResponseEntity<ApiResponse<CategoryResponse>> deactivateCategory(
             @PathVariable Long categoryId,
             HttpServletRequest httpRequest) {
@@ -150,8 +152,7 @@ public class CategoryController {
      */
     @GetMapping("/tree")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Cây category-zone",
-            description = "Hiển thị cây category kèm thông tin zone mapping (convention: Z-{categoryCode}). ")
+    @Operation(summary = "Cây category-zone", description = "Hiển thị cây category kèm thông tin zone mapping (convention: Z-{categoryCode}). ")
     public ResponseEntity<ApiResponse<List<CategoryTreeResponse>>> getCategoryTree() {
         Long warehouseId = getCurrentWarehouseId();
         ApiResponse<List<CategoryTreeResponse>> response = categoryService.getCategoryTree(warehouseId);
@@ -165,9 +166,9 @@ public class CategoryController {
      */
     @PostMapping("/{categoryId}/map-to-zone")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @Operation(summary = "Map category vào zone",
-            description = "Mapping category → zone theo convention: zoneCode = 'Z-' + categoryCode. "
-                    )
+    @Operation(summary = "Map category vào zone", description = "Mapping category → zone theo convention: zoneCode = 'Z-' + categoryCode.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable categoryId`: Mã Category ID. LẤY TỪ: attribute `id` của API danh sách Category.")
     public ResponseEntity<ApiResponse<MapCategoryToZoneResponse>> mapCategoryToZone(
             @PathVariable Long categoryId,
             HttpServletRequest httpRequest) {
@@ -198,9 +199,12 @@ public class CategoryController {
             @SuppressWarnings("unchecked")
             Map<String, Object> detailsMap = (Map<String, Object>) details;
             Object userIdObj = detailsMap.get("userId");
-            if (userIdObj instanceof Long)    return (Long) userIdObj;
-            if (userIdObj instanceof Integer) return ((Integer) userIdObj).longValue();
-            if (userIdObj != null)            return Long.parseLong(userIdObj.toString());
+            if (userIdObj instanceof Long)
+                return (Long) userIdObj;
+            if (userIdObj instanceof Integer)
+                return ((Integer) userIdObj).longValue();
+            if (userIdObj != null)
+                return Long.parseLong(userIdObj.toString());
         }
         throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
     }
@@ -220,10 +224,14 @@ public class CategoryController {
             Object raw = map.get("warehouseIds");
             if (raw instanceof List<?> list && !list.isEmpty()) {
                 Object first = list.get(0);
-                if (first instanceof Long l)    return l;
-                if (first instanceof Integer i) return i.longValue();
-                if (first instanceof Number n)  return n.longValue();
-                if (first != null)              return Long.parseLong(first.toString());
+                if (first instanceof Long l)
+                    return l;
+                if (first instanceof Integer i)
+                    return i.longValue();
+                if (first instanceof Number n)
+                    return n.longValue();
+                if (first != null)
+                    return Long.parseLong(first.toString());
             }
         }
         throw new RuntimeException(

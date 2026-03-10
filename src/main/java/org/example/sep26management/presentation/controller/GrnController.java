@@ -32,21 +32,27 @@ public class GrnController {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "Chi tiết GRN", description = "Xem chi tiết một GRN bao gồm danh sách các sản phẩm (SKU) PASS.")
+    @Operation(summary = "Chi tiết GRN", description = "Xem chi tiết một GRN bao gồm danh sách các sản phẩm (SKU) PASS.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã GRN ID. LẤY TỪ: attribute `grnId` của API danh sách GRN (`GET /v1/grns`) hoặc từ kết quả API Generate GRN.")
     public ApiResponse<GrnResponse> get(@PathVariable Long id) {
         return grnService.getGrn(id);
     }
 
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Duyệt phiếu GRN (Manager)", description = "Manager xác nhận GRN hợp lệ, sẵn sàng để nhập kho. Chuyển từ PENDING_APPROVAL thành APPROVED.")
+    @Operation(summary = "Duyệt phiếu GRN (Manager)", description = "Manager xác nhận GRN hợp lệ, sẵn sàng để nhập kho. Chuyển từ PENDING_APPROVAL thành APPROVED.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã GRN ID. LẤY TỪ: attribute `grnId` của API danh sách GRN.")
     public ApiResponse<GrnResponse> approve(@PathVariable Long id, Authentication auth) {
         return grnService.approve(id, extractUserId(auth));
     }
 
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Từ chối phiếu GRN (Manager)", description = "Manager từ chối GRN.")
+    @Operation(summary = "Từ chối phiếu GRN (Manager)", description = "Manager từ chối GRN.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã GRN ID. LẤY TỪ: attribute `grnId` của API danh sách GRN.")
     public ApiResponse<GrnResponse> reject(
             @PathVariable Long id,
             @RequestBody RejectRequest request,
@@ -55,7 +61,9 @@ public class GrnController {
     }
 
     @PostMapping("/{id}/post")
-    @Operation(summary = "Thực thi Nhập Kho (Post GRN)", description = "Cất hàng vào Trạm Chờ (Staging), ghi nhận Inventory Transaction & Tự động tạo Task Xếp Kệ (Putaway). Chuyển thành POSTED.")
+    @Operation(summary = "Thực thi Nhập Kho (Post GRN)", description = "Cất hàng vào Trạm Chờ (Staging), ghi nhận Inventory Transaction & Tự động tạo Task Xếp Kệ (Putaway). Chuyển thành POSTED.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã GRN ID. LẤY TỪ: attribute `grnId` của API danh sách GRN.")
     public ApiResponse<GrnResponse> post(@PathVariable Long id, Authentication auth) {
         return grnService.post(id, extractUserId(auth));
     }
