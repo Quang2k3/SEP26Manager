@@ -539,6 +539,7 @@ CREATE TABLE public.incidents (
     reported_by bigint,
     attachment_id bigint,
     status character varying(50) DEFAULT 'OPEN'::character varying NOT NULL,
+    category character varying(50) DEFAULT 'QUALITY'::character varying NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     receiving_id bigint
 );
@@ -5033,6 +5034,7 @@ ALTER TABLE ONLY public.incident_items ADD CONSTRAINT incident_items_pkey PRIMAR
 -- Name: grns; Type: TABLE; Schema: public; Owner: -
 --
 
+DROP TABLE IF EXISTS public.grns CASCADE;
 CREATE TABLE public.grns (
     grn_id bigint NOT NULL,
     receiving_id bigint NOT NULL,
@@ -5144,3 +5146,13 @@ ALTER TABLE ONLY public.return_items ADD CONSTRAINT fk_return_items_return FOREI
 
 \unrestrict DLupeTyv82GatHcqDa9Y0xv7EThKlj8dW3GV5VR8D1pL1Er27LeeSJScibf1s6o
 
+
+-- ============================================================
+-- MIGRATION: Cập nhật category cho incidents và grns
+-- ============================================================
+ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS category character varying(50) DEFAULT 'QUALITY'::character varying NOT NULL;
+
+ALTER TABLE public.grns ADD COLUMN IF NOT EXISTS source_type character varying(50);
+ALTER TABLE public.grns ADD COLUMN IF NOT EXISTS source_warehouse_id bigint;
+ALTER TABLE public.grns ADD COLUMN IF NOT EXISTS supplier_id bigint;
+ALTER TABLE public.grns ADD COLUMN IF NOT EXISTS source_reference_code character varying(100);
