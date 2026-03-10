@@ -216,14 +216,14 @@ public class JwtTokenProvider {
 
     /**
      * Generate a scan token for iPhone scanner (no DB user required).
-     * Claims: type=SCANNER, sessionId, exp=10 minutes.
+     * Claims: type=SCANNER, sessionId, role (KEEPER or QC), exp=2 hours.
      */
-    public String generateScanToken(String sessionId, Long warehouseId) {
+    public String generateScanToken(String sessionId, Long warehouseId, String role) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("type", "SCANNER");
         claims.put("sessionId", sessionId);
         claims.put("warehouseId", warehouseId);
-        claims.put("roles", "KEEPER");
+        claims.put("roles", role != null ? role : "KEEPER");
 
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + 2 * 60 * 60 * 1000L); // 2 hours

@@ -92,14 +92,14 @@ public class ReceivingSessionService {
 
         // ─── Generate scan token ──────────────────────────────────────────────────
 
-        public ApiResponse<Map<String, String>> generateScanToken(String sessionId, Long userId) {
+        public ApiResponse<Map<String, String>> generateScanToken(String sessionId, Long userId, String role) {
                 ScanSessionData session = sessionRedis.findById(sessionId)
                                 .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
 
-                String token = jwtTokenProvider.generateScanToken(sessionId, session.getWarehouseId());
+                String token = jwtTokenProvider.generateScanToken(sessionId, session.getWarehouseId(), role);
                 String scanUrl = baseUrl + "/v1/scan?token=" + token;
 
-                log.info("Scan token generated for session {} by userId={}", sessionId, userId);
+                log.info("Scan token generated for session {} by userId={}, role={}", sessionId, userId, role);
 
                 return ApiResponse.success("Scan token generated", Map.of(
                                 "sessionId", sessionId,
