@@ -14,21 +14,36 @@ import org.springframework.web.bind.annotation.RestController;
 public class ScannerPageController {
 
     @GetMapping(value = "/v1/scan/url", produces = MediaType.TEXT_PLAIN_VALUE)
-    @Operation(summary = "Lấy URL trang scan", description = "Trả về URL đầy đủ để mở trang quét barcode trên iPhone. Dùng cho QR code.")
-    public String getScanUrl(@RequestParam("token") String token, HttpServletRequest request) {
+    @Operation(summary = "Lấy URL trang scan", description = "Trả về URL đầy đủ để mở trang quét barcode trên iPhone. Dùng cho QR code.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `token`: JWT scan token, lấy từ `POST /v1/receiving-sessions/{sessionId}/scan-token`.\n"
+            + "- `receivingId` *(Tùy chọn)*: ID Phiếu Nhận Hàng (GRN), lấy từ response của `POST /v1/receiving-sessions/{sessionId}/create-grn` (field `receivingId`). "
+            + "Nếu truyền vào, trang scan sẽ **tự động hiển thị** ID phiếu nhận mà không cần nhập tay.")
+    public String getScanUrl(@RequestParam("token") String token,
+                             @RequestParam(value = "receivingId", required = false) Long receivingId,
+                             HttpServletRequest request) {
         String base = request.getScheme() + "://" + request.getServerName()
                 + (request.getServerPort() == 80 || request.getServerPort() == 443 ? ""
-                        : ":" + request.getServerPort());
-        return base + "/v1/scan?token=" + token + "&v=qr3";
+                : ":" + request.getServerPort());
+        String url = base + "/v1/scan?token=" + token + "&v=qr3";
+        if (receivingId != null) {
+            url += "&receivingId=" + receivingId;
+        }
+        return url;
     }
 
     @GetMapping(value = "/v1/scan", produces = MediaType.TEXT_HTML_VALUE)
-    @Operation(summary = "Trang quét barcode (HTML)", description = "Trả về trang HTML với camera QR scanner. iPhone mở trang này để quét barcode và gửi scan event.")
-    public ResponseEntity<String> scannerPage(@RequestParam("token") String token) {
+    @Operation(summary = "Trang quét barcode (HTML)", description = "Trả về trang HTML với camera QR scanner. iPhone mở trang này để quét barcode và gửi scan event.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `token`: JWT scan token.\n"
+            + "- `receivingId` *(Tùy chọn)*: Nếu được truyền qua URL (do FE nhúng từ bước `create-grn`), "
+            + "trường **PHIẾU NHẬN HÀNG** trên trang sẽ **tự động điền sẵn** — người dùng không cần nhập tay nữa.")
+    public ResponseEntity<String> scannerPage(@RequestParam("token") String token,
+                                              @RequestParam(value = "receivingId", required = false) Long receivingId) {
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 .header("Pragma", "no-cache")
-                .body(buildHtml(escapeForJs(token)));
+                .body(buildHtml(escapeForJs(token), receivingId));
     }
 
     private static String escapeForJs(String s) {
@@ -37,7 +52,8 @@ public class ScannerPageController {
         return s.replace("\\", "\\\\").replace("'", "\\'");
     }
 
-    private String buildHtml(String token) {
+    private String buildHtml(String token, Long receivingId) {
+        String receivingIdJs = receivingId != null ? String.valueOf(receivingId) : "null";
         return "<!DOCTYPE html>" +
                 "<html lang='vi'><head>" +
                 "<meta charset='UTF-8'>" +
@@ -101,6 +117,19 @@ public class ScannerPageController {
                 "<div id='cam-wrap'><div id='reader'></div><div id='scan-line'></div></div>" +
                 "<div id='cam-status'>Đang khởi động camera QR…</div>" +
 
+                // ── PHIẾU NHẬN HÀNG card ──
+                "<div class='card'>" +
+                "<div class='card-title'>Phiếu Nhận Hàng</div>" +
+                "<div id='recv-display' style='display:none;padding:10px 14px;background:#0f172a;border-radius:8px;border:1.5px solid #22c55e'>" +
+                "  <span style='color:#64748b;font-size:12px'>ID Phiếu Nhận</span>" +
+                "  <div style='font-size:22px;font-weight:800;color:#22c55e;margin-top:2px' id='recv-id-label'></div>" +
+                "</div>" +
+                "<div id='recv-manual' style='display:none'>" +
+                "  <input type='number' id='recv-input' placeholder='Nhập ID Phiếu Nhận ...' style='width:100%'/>" +
+                "  <div style='color:#f59e0b;font-size:11px;margin-top:6px'>⚠️ Không tìm thấy ID phiếu trong URL. Vui lòng nhập tay.</div>" +
+                "</div>" +
+                "</div>" +
+
                 "<div class='card'>" +
                 "<div class='card-title'>Quét QR</div>" +
                 "<div class='hint'>Đưa mã QR vào khung. Nếu không quét được, kéo xuống nhập mã SKU bằng tay.</div>" +
@@ -132,6 +161,7 @@ public class ScannerPageController {
 
                 "<script>\n" +
                 "var TOKEN='" + token + "';\n" +
+                "var RECEIVING_ID=" + receivingIdJs + ";\n" +
                 "var API=window.location.origin+'/api/v1/scan-events';\n" +
                 "var lineData={};\n" +
                 "var inflight=false;\n" +
@@ -302,6 +332,15 @@ public class ScannerPageController {
                 "} \n" +
 
                 "document.addEventListener('DOMContentLoaded',function(){\n" +
+                "  // Auto-populate receiving ID từ URL param (truyền qua khi FE tạo scan URL)\n" +
+                "  if(RECEIVING_ID !== null && RECEIVING_ID !== undefined){\n" +
+                "    document.getElementById('recv-id-label').textContent='#'+RECEIVING_ID;\n" +
+                "    document.getElementById('recv-display').style.display='block';\n" +
+                "    document.getElementById('recv-manual').style.display='none';\n" +
+                "  } else {\n" +
+                "    document.getElementById('recv-display').style.display='none';\n" +
+                "    document.getElementById('recv-manual').style.display='block';\n" +
+                "  }\n" +
                 "  document.getElementById('manualBtn').addEventListener('click', submitManual);\n" +
                 "  document.getElementById('closeBtn').addEventListener('click', closeScan);\n" +
                 "  document.getElementById('bc').addEventListener('keydown', function(e){ if(e.key==='Enter') submitManual(); });\n"

@@ -93,7 +93,13 @@ public class ReceivingSessionController {
             + "- `@PathVariable sessionId`: UUID của session đang quét.\n"
             + "- `Body.supplierCode`: Mã Nhà Cung Cấp — **LẤY TỪ** API `GET /v1/suppliers` (field `supplierCode`). FE hiển thị `supplierName` để người dùng chọn, sau đó gửi `supplierCode` lên đây. BE tự resolve ra `supplierId` nội bộ.\n"
             + "- `Body.sourceReferenceCode`: Mã kiện/Bill (Ví dụ: PO-001, người dùng tự nhập tay).\n\n"
-            + "👉 **Kết quả trả về:** Dữ liệu chứa thuộc tính `receivingId` (Đây là mã **ORDER ID / GRN ID**). **FE lưu LẠI `receivingId` này** để submit và duyệt đơn ở màn hình tiếp theo.")
+            + "👉 **Kết quả trả về:** Dữ liệu chứa thuộc tính `receivingId` (Đây là mã **ORDER ID / GRN ID**). **FE lưu LẠI `receivingId` này** để:\n"
+            + "  1. Submit và duyệt đơn ở màn hình tiếp theo.\n"
+            + "  2. **QUAN TRỌNG — Tự động điền phiếu lên trang scanner:** Khi tạo URL trang quét QR cho iPhone, "
+            + "FE phải truyền `receivingId` vào query param khi gọi `GET /v1/scan/url`. "
+            + "Ví dụ: `GET /v1/scan/url?token={scanToken}&receivingId={receivingId}`. "
+            + "Nếu truyền đúng, trang scanner trên iPhone sẽ **tự động hiển thị ID phiếu nhận** màu xanh — "
+            + "người dùng **không cần nhập tay** nữa. Nếu thiếu `receivingId`, trang sẽ fallback hiện ô nhập tay và cảnh báo màu vàng.")
     public ApiResponse<Map<String, Object>> createGrn(
             @PathVariable String sessionId,
             @Valid @RequestBody CreateGrnRequest request,
