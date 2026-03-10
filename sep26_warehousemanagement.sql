@@ -477,6 +477,10 @@ CREATE TABLE receiving_items (
     sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
     expected_qty NUMERIC(12,2),
     received_qty NUMERIC(12,2) NOT NULL,
+    accepted_qty NUMERIC(12,2) DEFAULT 0,
+    damaged_qty NUMERIC(12,2) DEFAULT 0,
+    rejected_qty NUMERIC(12,2) DEFAULT 0,
+    discrepancy_reason TEXT,
     lot_number VARCHAR(100),
     manufacture_date DATE,
     expiry_date DATE,
@@ -1037,12 +1041,14 @@ INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES
 
 INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code, is_terminal) VALUES 
 ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'DRAFT', 'Draft', 'Nháp', 1, '#6c757d', false),
-((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'SUBMITTED', 'Submitted', 'Đã gửi', 2, '#17a2b8', false),
-((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'APPROVED', 'Approved', 'Đã duyệt', 3, '#007bff', false),
-((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'POSTED', 'Posted', 'Đã ghi nhận', 4, '#28a745', false),
-((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'PUTAWAY_DONE', 'Putaway Done', 'Đã cất kho', 5, '#20c997', true),
-((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'CANCELLED', 'Cancelled', 'Đã hủy', 6, '#dc3545', true),
-((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'REJECTED', 'Rejected', 'Bị từ chối', 7, '#dc3545', true);
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'RECEIVED', 'Received', 'Đã tiếp nhận', 2, '#17a2b8', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'VERIFIED', 'Verified / QC Checked', 'Đã kiểm tra QC', 3, '#ffc107', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'PENDING_INCIDENT', 'Pending Incident', 'Chờ xử lý sự cố', 4, '#fd7e14', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'APPROVED', 'Approved / GRN Created', 'Đã duyệt / Đã nhập kho', 5, '#007bff', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'POSTED', 'Posted', 'Đã ghi sổ', 6, '#28a745', false),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'PUTAWAY_DONE', 'Putaway Done', 'Đã cất kho', 7, '#20c997', true),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'CANCELLED', 'Cancelled', 'Đã hủy', 8, '#dc3545', true),
+((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'RECEIVING_STATUS'), 'REJECTED', 'Rejected', 'Bị từ chối', 9, '#dc3545', true);
 
 -- SALES_ORDER_STATUS
 INSERT INTO enum_types (enum_type_code, enum_type_name, description) VALUES 
@@ -1307,3 +1313,22 @@ VALUES
   ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'QC_DECISION'), 'RETURN', 'Return to Supplier', 'Trả hàng', 2, '#fd7e14'),
   ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'QC_DECISION'), 'DOWNGRADE', 'Downgrade / Salvage', 'Thanh lý', 3, '#ffc107')
 ON CONFLICT (enum_type_id, value_code) DO NOTHING;
+
+-- ============================================================
+-- 6) MIGRATION: MỚI NHẤT CHO LUỒNG QC VÀ INCIDENT (GRN FLOW)
+-- ============================================================
+
+-- Thêm các cột cho bảng receiving_items nếu chưa có (khi update file SQL lên DB cũ)
+ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS accepted_qty NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS damaged_qty NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS rejected_qty NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS discrepancy_reason TEXT;
+
+-- Bổ sung thêm Enum cho INCIDENT_TYPE để phù hợp với quy trình kho
+INSERT INTO enum_values (enum_type_id, value_code, value_name, value_name_vi, display_order, color_code)
+VALUES
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'SHORTAGE', 'Shortage', 'Phát hiện thiếu hàng', 5, '#ffc107'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'OVERAGE', 'Overage', 'Phát hiện thừa hàng', 6, '#17a2b8'),
+  ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'DAMAGE', 'Damage / Quality Issue', 'Hàng hóa hư hỏng/Lỗi QC', 7, '#dc3545')
+ON CONFLICT (enum_type_id, value_code) DO NOTHING;
+

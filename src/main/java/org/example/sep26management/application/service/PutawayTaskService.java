@@ -79,6 +79,13 @@ public class PutawayTaskService {
         return ApiResponse.success("OK", response);
     }
 
+    @Transactional(readOnly = true)
+    public ApiResponse<PutawayTaskResponse> getTaskByReceivingId(Long receivingId) {
+        PutawayTaskEntity task = putawayTaskRepo.findByReceivingId(receivingId)
+                .orElseThrow(() -> new RuntimeException("No putaway task found for GRN: " + receivingId));
+        return getTask(task.getPutawayTaskId());
+    }
+
     // ─── Get suggestions for a task ───────────────────────────────────────────
 
     @Transactional(readOnly = true)

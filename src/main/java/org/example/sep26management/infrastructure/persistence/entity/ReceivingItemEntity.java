@@ -33,6 +33,21 @@ public class ReceivingItemEntity {
     @Column(name = "received_qty", nullable = false, precision = 12, scale = 2)
     private BigDecimal receivedQty;
 
+    @Column(name = "accepted_qty", precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal acceptedQty = BigDecimal.ZERO;
+
+    @Column(name = "damaged_qty", precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal damagedQty = BigDecimal.ZERO;
+
+    @Column(name = "rejected_qty", precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal rejectedQty = BigDecimal.ZERO;
+
+    @Column(name = "discrepancy_reason", columnDefinition = "TEXT")
+    private String discrepancyReason;
+
     @Column(name = "lot_number", length = 100)
     private String lotNumber;
 
