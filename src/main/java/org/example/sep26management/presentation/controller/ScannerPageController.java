@@ -20,11 +20,11 @@ public class ScannerPageController {
             + "- `receivingId` *(Tùy chọn)*: ID Phiếu Nhận Hàng (GRN), lấy từ response của `POST /v1/receiving-sessions/{sessionId}/create-grn` (field `receivingId`). "
             + "Nếu truyền vào, trang scan sẽ **tự động hiển thị** ID phiếu nhận mà không cần nhập tay.")
     public String getScanUrl(@RequestParam("token") String token,
-                             @RequestParam(value = "receivingId", required = false) Long receivingId,
-                             HttpServletRequest request) {
+            @RequestParam(value = "receivingId", required = false) Long receivingId,
+            HttpServletRequest request) {
         String base = request.getScheme() + "://" + request.getServerName()
                 + (request.getServerPort() == 80 || request.getServerPort() == 443 ? ""
-                : ":" + request.getServerPort());
+                        : ":" + request.getServerPort());
         String url = base + "/v1/scan?token=" + token + "&v=qr3";
         if (receivingId != null) {
             url += "&receivingId=" + receivingId;
@@ -39,7 +39,7 @@ public class ScannerPageController {
             + "- `receivingId` *(Tùy chọn)*: Nếu được truyền qua URL (do FE nhúng từ bước `create-grn`), "
             + "trường **PHIẾU NHẬN HÀNG** trên trang sẽ **tự động điền sẵn** — người dùng không cần nhập tay nữa.")
     public ResponseEntity<String> scannerPage(@RequestParam("token") String token,
-                                              @RequestParam(value = "receivingId", required = false) Long receivingId) {
+            @RequestParam(value = "receivingId", required = false) Long receivingId) {
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 .header("Pragma", "no-cache")
@@ -61,7 +61,7 @@ public class ScannerPageController {
                 "<title>Warehouse Scanner (QR)</title>" +
 
                 // html5-qrcode - load local (must include context-path /api)
-                "<script src='/api/js/html5-qrcode.min.js'></script>" +
+                "<script src='/js/html5-qrcode.min.js'></script>" +
 
                 "<style>" +
                 "*{box-sizing:border-box;margin:0;padding:0}" +
@@ -120,13 +120,15 @@ public class ScannerPageController {
                 // ── PHIẾU NHẬN HÀNG card ──
                 "<div class='card'>" +
                 "<div class='card-title'>Phiếu Nhận Hàng</div>" +
-                "<div id='recv-display' style='display:none;padding:10px 14px;background:#0f172a;border-radius:8px;border:1.5px solid #22c55e'>" +
+                "<div id='recv-display' style='display:none;padding:10px 14px;background:#0f172a;border-radius:8px;border:1.5px solid #22c55e'>"
+                +
                 "  <span style='color:#64748b;font-size:12px'>ID Phiếu Nhận</span>" +
                 "  <div style='font-size:22px;font-weight:800;color:#22c55e;margin-top:2px' id='recv-id-label'></div>" +
                 "</div>" +
                 "<div id='recv-manual' style='display:none'>" +
                 "  <input type='number' id='recv-input' placeholder='Nhập ID Phiếu Nhận ...' style='width:100%'/>" +
-                "  <div style='color:#f59e0b;font-size:11px;margin-top:6px'>⚠️ Không tìm thấy ID phiếu trong URL. Vui lòng nhập tay.</div>" +
+                "  <div style='color:#f59e0b;font-size:11px;margin-top:6px'>⚠️ Không tìm thấy ID phiếu trong URL. Vui lòng nhập tay.</div>"
+                +
                 "</div>" +
                 "</div>" +
 
