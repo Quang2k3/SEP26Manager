@@ -494,13 +494,18 @@ COMMENT ON TABLE receiving_items IS 'Receiving order line items';
 -- 7.1) GOODS RECEIPT NOTES (GRN)
 -- ============================================================
 
+DROP TABLE IF EXISTS grns CASCADE;
 CREATE TABLE grns (
     grn_id BIGSERIAL PRIMARY KEY,
-    grn_code VARCHAR(100) NOT NULL UNIQUE,
     receiving_id BIGINT NOT NULL REFERENCES receiving_orders(receiving_id),
     warehouse_id BIGINT NOT NULL REFERENCES warehouses(warehouse_id),
+    grn_code VARCHAR(100) NOT NULL UNIQUE,
+    source_type VARCHAR(50),
+    source_warehouse_id BIGINT REFERENCES warehouses(warehouse_id),
+    supplier_id BIGINT REFERENCES suppliers(supplier_id),
+    source_reference_code VARCHAR(100),
     status VARCHAR(50) NOT NULL DEFAULT 'DRAFT',
-    created_by BIGINT REFERENCES users(user_id),
+    created_by BIGINT NOT NULL REFERENCES users(user_id),
     approved_by BIGINT REFERENCES users(user_id),
     approved_at TIMESTAMP,
     note TEXT,
@@ -1022,8 +1027,10 @@ CREATE TABLE incidents (
     description TEXT,
     reported_by BIGINT REFERENCES users(user_id),
     attachment_id BIGINT REFERENCES attachments(attachment_id),
+    category VARCHAR(50) NOT NULL DEFAULT 'QUALITY',
     status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    receiving_id BIGINT REFERENCES receiving_orders(receiving_id),
     UNIQUE(warehouse_id, incident_code)
 );
 
@@ -1320,8 +1327,7 @@ ON CONFLICT (supplier_code) DO NOTHING;
 ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS condition VARCHAR(20) DEFAULT 'PASS';
 ALTER TABLE receiving_items ADD COLUMN IF NOT EXISTS reason_code VARCHAR(100);
 
--- 2) Add receiving_id FK to incidents (links incident to a receiving order)
-ALTER TABLE incidents ADD COLUMN IF NOT EXISTS receiving_id BIGINT REFERENCES receiving_orders(receiving_id);
+-- 2) Add index if missing
 CREATE INDEX IF NOT EXISTS idx_incident_receiving ON incidents(receiving_id) WHERE receiving_id IS NOT NULL;
 
 -- 3) Add new enum values for incident types
@@ -1379,3 +1385,16 @@ VALUES
   ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'DAMAGE', 'Damage / Quality Issue', 'Hàng hóa hư hỏng/Lỗi QC', 7, '#dc3545')
 ON CONFLICT (enum_type_id, value_code) DO NOTHING;
 
+
+-- ============================================================
+-- 7) MIGRATION: Cập nhật bảng GRN cho luồng duyệt của Manager
+-- (Chạy phần này nếu DB đã có bảng grns cũ mà không muốn xóa dữ liệu)
+-- ============================================================
+
+ALTER TABLE grns ADD COLUMN IF NOT EXISTS source_type VARCHAR(50);
+ALTER TABLE grns ADD COLUMN IF NOT EXISTS source_warehouse_id BIGINT REFERENCES warehouses(warehouse_id);
+ALTER TABLE grns ADD COLUMN IF NOT EXISTS supplier_id BIGINT REFERENCES suppliers(supplier_id);
+ALTER TABLE grns ADD COLUMN IF NOT EXISTS source_reference_code VARCHAR(100);
+
+-- Đảm bảo created_by là NOT NULL (nếu bản cũ cho phép null)
+ALTER TABLE grns ALTER COLUMN created_by SET NOT NULL;
