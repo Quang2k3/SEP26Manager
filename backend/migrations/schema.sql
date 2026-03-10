@@ -1088,10 +1088,6 @@ CREATE TABLE public.receiving_items (
     sku_id bigint NOT NULL,
     expected_qty numeric(12,2),
     received_qty numeric(12,2) NOT NULL,
-    accepted_qty numeric(12,2) DEFAULT 0,
-    damaged_qty numeric(12,2) DEFAULT 0,
-    rejected_qty numeric(12,2) DEFAULT 0,
-    discrepancy_reason text,
     lot_number character varying(100),
     manufacture_date date,
     expiry_date date,
@@ -5005,6 +5001,87 @@ VALUES
   ((SELECT enum_type_id FROM public.enum_types WHERE enum_type_code = 'QC_DECISION'), 'DOWNGRADE', 'Downgrade / Salvage', 'Thanh lý', 3, '#ffc107')
 ON CONFLICT (enum_type_id, value_code) DO NOTHING;
 
+--
+-- Name: incident_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.incident_items (
+    incident_item_id bigint NOT NULL,
+    incident_id bigint NOT NULL,
+    sku_id bigint NOT NULL,
+    damaged_qty numeric(12,2) NOT NULL,
+    reason_code character varying(100),
+    note text,
+    action_pass_qty numeric(12,2) DEFAULT 0,
+    action_return_qty numeric(12,2) DEFAULT 0,
+    action_scrap_qty numeric(12,2) DEFAULT 0
+);
+
+CREATE SEQUENCE public.incident_items_incident_item_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.incident_items_incident_item_id_seq OWNED BY public.incident_items.incident_item_id;
+ALTER TABLE ONLY public.incident_items ALTER COLUMN incident_item_id SET DEFAULT nextval('public.incident_items_incident_item_id_seq'::regclass);
+ALTER TABLE ONLY public.incident_items ADD CONSTRAINT incident_items_pkey PRIMARY KEY (incident_item_id);
+-- Note: incidents table foreign key might need to be resolved if incidents is created elsewhere
+
+--
+-- Name: grns; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.grns (
+    grn_id bigint NOT NULL,
+    receiving_id bigint NOT NULL,
+    warehouse_id bigint NOT NULL,
+    grn_code character varying(100) NOT NULL,
+    status character varying(50) DEFAULT 'DRAFT'::character varying NOT NULL,
+    created_by bigint NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    approved_by bigint,
+    approved_at timestamp without time zone,
+    note text
+);
+
+CREATE SEQUENCE public.grns_grn_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.grns_grn_id_seq OWNED BY public.grns.grn_id;
+ALTER TABLE ONLY public.grns ALTER COLUMN grn_id SET DEFAULT nextval('public.grns_grn_id_seq'::regclass);
+ALTER TABLE ONLY public.grns ADD CONSTRAINT grns_pkey PRIMARY KEY (grn_id);
+ALTER TABLE ONLY public.grns ADD CONSTRAINT fk_grns_receiving FOREIGN KEY (receiving_id) REFERENCES public.receiving_orders(receiving_id);
+
+--
+-- Name: grn_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.grn_items (
+    grn_item_id bigint NOT NULL,
+    grn_id bigint NOT NULL,
+    sku_id bigint NOT NULL,
+    quantity numeric(12,2) NOT NULL,
+    note text
+);
+
+CREATE SEQUENCE public.grn_items_grn_item_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.grn_items_grn_item_id_seq OWNED BY public.grn_items.grn_item_id;
+ALTER TABLE ONLY public.grn_items ALTER COLUMN grn_item_id SET DEFAULT nextval('public.grn_items_grn_item_id_seq'::regclass);
+ALTER TABLE ONLY public.grn_items ADD CONSTRAINT grn_items_pkey PRIMARY KEY (grn_item_id);
+ALTER TABLE ONLY public.grn_items ADD CONSTRAINT fk_grn_items_grn FOREIGN KEY (grn_id) REFERENCES public.grns(grn_id);
 
 \unrestrict DLupeTyv82GatHcqDa9Y0xv7EThKlj8dW3GV5VR8D1pL1Er27LeeSJScibf1s6o
 

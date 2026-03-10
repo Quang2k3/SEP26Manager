@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.CreateIncidentRequest;
 import org.example.sep26management.application.dto.request.RejectRequest;
+import org.example.sep26management.application.dto.request.ResolveIncidentRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.IncidentResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
@@ -81,6 +82,17 @@ public class IncidentController {
             @RequestBody RejectRequest request,
             Authentication auth) {
         return incidentService.rejectIncident(id, request.getReason(), extractUserId(auth));
+    }
+
+    /** POST /v1/incidents/{id}/resolve — Manager xử lý sự cố chất lượng */
+    @PostMapping("/{id}/resolve")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Xử lý sự cố chất lượng (Manager)", description = "Manager xử lý sự cố chất lượng sau khi dỡ hàng, quyết định số lượng Pass, Return, Scrap cho từng item lỗi.")
+    public ApiResponse<IncidentResponse> resolve(
+            @PathVariable Long id,
+            @Valid @RequestBody ResolveIncidentRequest request,
+            Authentication auth) {
+        return incidentService.resolveIncident(id, request, extractUserId(auth));
     }
 
     @SuppressWarnings("unchecked")

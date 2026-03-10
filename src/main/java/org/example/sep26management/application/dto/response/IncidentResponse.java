@@ -43,4 +43,7 @@ public class IncidentResponse {
     private String receivingCode;
     @Schema(description = "Ngày tạo phiếu", example = "2026-03-08T10:00:00")
     private LocalDateTime createdAt;
+
+    @Schema(description = "Danh sách sản phẩm bị lỗi trong sự cố này")
+    private java.util.List<IncidentItemResponse> items;
 }

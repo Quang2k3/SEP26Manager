@@ -4,12 +4,11 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.ReceivingOrderRequest;
-import org.example.sep26management.application.dto.request.RejectRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
+import org.example.sep26management.application.dto.response.GrnResponse;
 import org.example.sep26management.application.service.ReceivingOrderService;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -88,42 +87,16 @@ public class ReceivingOrderController {
         return receivingOrderService.submit(id, extractUserId(auth));
     }
 
-    /** POST /v1/receiving-orders/{id}/approve — Manager only */
-    @PostMapping("/{id}/approve")
-    @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Duyệt phiếu nhập kho (Manager)", description = "Điểm danh và xác nhận phiếu hợp lệ. Chuyển từ SUBMITTED thành APPROVED. \n\n"
+    /** POST /v1/receiving-orders/{id}/generate-grn — QC */
+    @PostMapping("/{id}/generate-grn")
+    @Operation(summary = "Tạo phiếu nhập kho (GRN) tự động (QC)", description = "QC xác nhận kết thúc kiểm đếm (nếu 100% pass) hoặc Hệ thống tự động gọi sau khi Manager duyệt Incident. Chuyển từ SUBMITTED thành GRN_CREATED. \n\n"
             + "**Data yêu cầu:** \n"
             + "- `@PathVariable id`: Mã GRN ID (Lấy từ URL hoặc Table row ID).\n"
-            + "👉 **Note:** Yêu cầu quyền bộ đàm tài khoản có ROLE_MANAGER.")
-    public ApiResponse<ReceivingOrderResponse> approve(
+            + "👉 **Note:** Yêu cầu các Incident phải được giải quyết xong mới có thể tạo GRN.")
+    public ApiResponse<GrnResponse> generateGrn(
             @PathVariable Long id,
             Authentication auth) {
-        return receivingOrderService.approve(id, extractUserId(auth));
-    }
-
-    /** POST /v1/receiving-orders/{id}/reject — Manager/Keeper */
-    @PostMapping("/{id}/reject")
-    @Operation(summary = "Từ chối phiếu nhập kho", description = "Hủy bỏ hoặc trả lại phiếu sai. Chuyển trạng thái sang REJECTED. \n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID.\n"
-            + "- `Body.reason`: **BẮT BUỘC**, Chuỗi string diễn giải lý do tại sao Keeper/Manager từ chối phiếu này.")
-    public ApiResponse<ReceivingOrderResponse> reject(
-            @PathVariable Long id,
-            @RequestBody RejectRequest request,
-            Authentication auth) {
-        return receivingOrderService.reject(id, request.getReason(), extractUserId(auth));
-    }
-
-    /** POST /v1/receiving-orders/{id}/post — QC */
-    @PostMapping("/{id}/post")
-    @Operation(summary = "Cất hàng vào Trạm Chờ (Staging) & Tự động tạo Task Xếp Kệ", description = "Hành động kết thúc quy trình nhận hàng. Trạng thái chuyển thành POSTED. \n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã GRN ID của phiếu đã APPROVED.\n\n"
-            + "👉 **Phép thuật:** API này sẽ TỰ ĐỘNG sinh ra 1 công việc dọn kho gọi là **Putaway Task**. Giao diện tiếp theo FE cần dẫn người dùng sang màn hình Putaway để xem các task vừa đc sinh ra này.")
-    public ApiResponse<ReceivingOrderResponse> post(
-            @PathVariable Long id,
-            Authentication auth) {
-        return receivingOrderService.post(id, extractUserId(auth));
+        return receivingOrderService.generateGrn(id, extractUserId(auth));
     }
 
     @SuppressWarnings("unchecked")
