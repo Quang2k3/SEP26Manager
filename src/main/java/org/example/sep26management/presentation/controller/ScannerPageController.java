@@ -311,26 +311,10 @@ public class ScannerPageController {
                                                 </div>
 
                                                 <div class='card' id='keeperSection'>
-                                                    <div class='card-title'>Chốt & Tạo Phiếu Kho</div>
+                                                    <div class='card-title'>Xác nhận kiểm đếm</div>
 
                                                     <div class='row' style='margin-bottom:8px'>
-                                                        <select id='sourceType'>
-                                                            <option value='SUPPLIER'>Nhập từ NCC (SUPPLIER)</option>
-                                                            <option value='TRANSFER'>Chuyển Kho (TRANSFER)</option>
-                                                            <option value='RETURN'>Khách Hàng Trả (RETURN)</option>
-                                                        </select>
-                                                    </div>
-
-                                                    <div class='row' style='margin-bottom:8px'>
-                                                        <input type='text' id='supplierCode' placeholder='Mã NCC (vd: SUP-001)' autocapitalize='characters' autocomplete='off'/>
-                                                    </div>
-
-                                                    <div class='row' style='margin-bottom:8px'>
-                                                        <input type='text' id='sourceRef' placeholder='Mã chứng từ / PO' autocapitalize='characters' autocomplete='off'/>
-                                                    </div>
-
-                                                    <div class='row' style='margin-bottom:8px'>
-                                                        <input type='text' id='note' placeholder='Ghi chú' autocomplete='off'/>
+                                                        <input type='number' id='keeperReceivingId' placeholder='Mã Phiếu Nhận (receivingId)' style='flex:1'/>
                                                     </div>
 
                                                     <button class='btn full' id='createGrnBtn' style='background:#10b981;margin-top:5px'>✅ Xác nhận kiểm đếm</button>
@@ -515,6 +499,14 @@ public class ScannerPageController {
 
                                                     var cond = IS_QC ? document.getElementById('cond').value : 'PASS';
                                                     var reason = (IS_QC && cond === 'FAIL') ? document.getElementById('reason').value : null;
+                                                    var receivingId = null;
+                                                    try {
+                                                        var recvEl = IS_QC ? document.getElementById('receivingIdInput') : document.getElementById('keeperReceivingId');
+                                                        if (recvEl && recvEl.value) {
+                                                            var v = (recvEl.value || '').trim();
+                                                            if (v) receivingId = parseInt(v, 10);
+                                                        }
+                                                    } catch (e) {}
 
                                                     if (IS_QC && cond === 'FAIL' && !reason) {
                                                         toast('Vui lòng chọn Lý do lỗi', true);
@@ -533,7 +525,8 @@ public class ScannerPageController {
                                                             barcode: barcode,
                                                             qty: qty,
                                                             condition: cond,
-                                                            reasonCode: reason
+                                                            reasonCode: reason,
+                                                            receivingId: receivingId
                                                         })
                                                     })
                                                     .then(function (r) {
@@ -720,8 +713,9 @@ public class ScannerPageController {
                                                 }
 
                                                 function createGrn() {
-                                                    if (!SESSION_ID) {
-                                                        toast('Không tìm thấy session', true);
+                                                    var recvId = document.getElementById('keeperReceivingId').value.trim();
+                                                    if (!recvId) {
+                                                        toast('Vui lòng nhập Mã Phiếu Nhận (receivingId)', true);
                                                         return;
                                                     }
 
@@ -730,46 +724,75 @@ public class ScannerPageController {
                                                         return;
                                                     }
 
-                                                    if (!confirm('Chốt số lượng và tạo Phiếu Nhập Kho?')) {
+                                                    if (!confirm('Chốt số lượng kiểm đếm vào Phiếu #' + recvId + '?')) {
                                                         return;
                                                     }
 
-                                                    var body = {
-                                                        sourceType: document.getElementById('sourceType').value,
-                                                        supplierCode: document.getElementById('supplierCode').value.trim() || null,
-                                                        sourceReferenceCode: document.getElementById('sourceRef').value.trim() || null,
-                                                        note: document.getElementById('note').value.trim() || null
-                                                    };
-
                                                     var btn = document.getElementById('createGrnBtn');
                                                     btn.disabled = true;
-                                                    btn.textContent = 'Đang tạo...';
+                                                    btn.textContent = 'Đang xử lý...';
 
-                                                    fetch(API_BASE + '/v1/receiving-sessions/' + SESSION_ID + '/create-grn', {
-                                                        method: 'POST',
-                                                        headers: {
-                                                            'Content-Type': 'application/json',
-                                                            'Authorization': 'Bearer ' + TOKEN
-                                                        },
-                                                        body: JSON.stringify(body)
+                                                    // Step 1: Fetch receiving order to get receivingItemId mapping
+                                                    fetch(API_BASE + '/v1/receiving-orders/' + recvId, {
+                                                        method: 'GET',
+                                                        headers: { 'Authorization': 'Bearer ' + TOKEN }
+                                                    })
+                                                    .then(function (r) { return r.json(); })
+                                                    .then(function (orderRes) {
+                                                        if (!orderRes || !orderRes.success || !orderRes.data) {
+                                                            throw new Error((orderRes && orderRes.message) || 'Không tìm thấy phiếu nhận');
+                                                        }
+
+                                                        var orderItems = orderRes.data.items || [];
+                                                        // Map skuId -> receivingItemId
+                                                        var skuToItemId = {};
+                                                        orderItems.forEach(function (item) {
+                                                            skuToItemId[item.skuId] = item.receivingItemId;
+                                                        });
+
+                                                        // Build lines from scanned data
+                                                        var lines = [];
+                                                        lineData.forEach(function (scan) {
+                                                            var itemId = skuToItemId[scan.skuId];
+                                                            if (itemId) {
+                                                                lines.push({
+                                                                    receivingItemId: itemId,
+                                                                    receivedQty: scan.qty
+                                                                });
+                                                            }
+                                                        });
+
+                                                        if (lines.length === 0) {
+                                                            throw new Error('Không khớp SKU nào với phiếu nhận. Kiểm tra lại receivingId.');
+                                                        }
+
+                                                        // Step 2: Call PUT lines API
+                                                        return fetch(API_BASE + '/v1/receiving-orders/' + recvId + '/lines', {
+                                                            method: 'PUT',
+                                                            headers: {
+                                                                'Content-Type': 'application/json',
+                                                                'Authorization': 'Bearer ' + TOKEN
+                                                            },
+                                                            body: JSON.stringify({ lines: lines })
+                                                        });
                                                     })
                                                     .then(function (r) { return r.json(); })
                                                     .then(function (d) {
                                                         if (d && d.success) {
-                                                            toast('✅ Đã tạo GRN: ' + (d.data.receivingId || 'Thành công'), false);
+                                                            toast('✅ Đã cập nhật kiểm đếm vào Phiếu #' + recvId, false);
                                                             stopQr();
-                                                            document.getElementById('cam-status').textContent = 'Đã hoàn tất phiên quét.';
-                                                            btn.textContent = '✅ Đã tạo Phiếu';
+                                                            document.getElementById('cam-status').textContent = 'Đã hoàn tất kiểm đếm.';
+                                                            btn.textContent = '✅ Đã xác nhận';
                                                             document.getElementById('manualBtn').disabled = true;
                                                             document.getElementById('closeBtn').disabled = true;
                                                         } else {
-                                                            toast((d && d.message) || 'Lỗi tạo phiếu', true);
+                                                            toast((d && d.message) || 'Lỗi cập nhật kiểm đếm', true);
                                                             btn.disabled = false;
-                                                            btn.textContent = '✅ Tạo Phiếu GRN';
+                                                            btn.textContent = '✅ Xác nhận kiểm đếm';
                                                         }
                                                     })
                                                     .catch(function (e) {
-                                                        toast('Lỗi mạng: ' + e, true);
+                                                        toast('Lỗi: ' + e.message, true);
                                                         btn.disabled = false;
                                                         btn.textContent = '✅ Xác nhận kiểm đếm';
                                                     });
