@@ -70,7 +70,14 @@ public class ScannerPageController {
                 "header{background:linear-gradient(135deg,#1e40af,#1d4ed8);padding:14px 16px;display:flex;align-items:center;gap:10px}"
                 +
                 "header h1{font-size:17px;font-weight:700;flex:1}" +
-                ".badge{background:#dbeafe;color:#1e3a8a;border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700}"
+                ".badge{border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700}" +
+                ".badge-role{background:#22c55e;color:#fff;text-transform:uppercase;letter-spacing:.05em}" +
+                ".badge-role.role-keeper{background:#22c55e}" +
+                ".badge-role.role-qc{background:#f59e0b;color:#000}" +
+                ".badge-role.role-manager{background:#a855f7}" +
+                ".badge-role.role-admin{background:#ef4444}" +
+                ".badge-role.role-staff{background:#3b82f6}" +
+                ".badge-cnt{background:#dbeafe;color:#1e3a8a}"
                 +
                 ".container{padding:12px;max-width:520px;margin:0 auto}" +
 
@@ -98,6 +105,9 @@ public class ScannerPageController {
                 +
                 ".btn.full{width:100%}" +
                 ".btn.danger{background:#ef4444;width:100%}" +
+                ".btn.success{background:linear-gradient(135deg,#22c55e,#16a34a);width:100%;font-size:17px;padding:14px 18px;margin-top:10px}"
+                +
+                ".btn.success:disabled{opacity:.5;cursor:not-allowed}" +
 
                 "table{width:100%;border-collapse:collapse;font-size:13px}" +
                 "th{text-align:left;color:#475569;padding:5px 4px;font-size:11px;font-weight:600}" +
@@ -105,12 +115,27 @@ public class ScannerPageController {
                 ".qc{text-align:right;font-weight:800;color:#34d399;font-size:15px}" +
                 ".sc{color:#94a3b8;font-size:11px}" +
 
+                // Order info styles
+                ".order-info{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}" +
+                ".order-info-item{background:#0f172a;border-radius:8px;padding:10px}" +
+                ".order-info-label{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em}" +
+                ".order-info-value{font-size:14px;font-weight:700;color:#e2e8f0;margin-top:2px}" +
+                ".order-info-item.full{grid-column:1/-1}" +
+
+                // Comparison table styles
+                ".status-match{color:#22c55e;font-weight:800}" +
+                ".status-mismatch{color:#ef4444;font-weight:800}" +
+                ".status-pending{color:#64748b}" +
+                ".expected-col{text-align:center;color:#94a3b8;font-size:12px}" +
+                ".received-col{text-align:center;font-weight:800;font-size:14px}" +
+                ".loading-spinner{text-align:center;padding:20px;color:#64748b}" +
+
                 ".toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;padding:11px 24px;border-radius:28px;font-weight:800;font-size:14px;display:none;white-space:nowrap;box-shadow:0 4px 24px rgba(0,0,0,.5)}"
                 +
                 ".toast.err{background:#ef4444}" +
                 "</style></head><body>" +
 
-                "<header><span style='font-size:20px'>📦</span><h1>Warehouse Scanner</h1><span class='badge' id='cnt'>0 SKU</span></header>"
+                "<header><span style='font-size:20px'>📦</span><h1>Warehouse Scanner</h1><span class='badge badge-role' id='role-badge'></span><span class='badge badge-cnt' id='cnt'>0 dòng</span></header>"
                 +
 
                 "<div class='container'>" +
@@ -128,6 +153,41 @@ public class ScannerPageController {
                 "<div id='recv-manual' style='display:none'>" +
                 "  <input type='number' id='recv-input' placeholder='Nhập ID Phiếu Nhận ...' style='width:100%'/>" +
                 "  <div style='color:#f59e0b;font-size:11px;margin-top:6px'>⚠️ Không tìm thấy ID phiếu trong URL. Vui lòng nhập tay.</div>"
+                +
+                "</div>" +
+                "</div>" +
+
+                // ── THÔNG TIN ĐƠN HÀNG card ── (chỉ hiện khi có receivingId)
+                "<div class='card' id='order-info-card' style='display:none'>" +
+                "<div class='card-title'>📋 Thông tin đơn hàng</div>" +
+                "<div id='order-loading' class='loading-spinner'>Đang tải thông tin đơn hàng...</div>" +
+                "<div id='order-info-content' style='display:none'>" +
+                "  <div class='order-info'>" +
+                "    <div class='order-info-item'><div class='order-info-label'>Mã phiếu</div><div class='order-info-value' id='oi-code'>—</div></div>"
+                +
+                "    <div class='order-info-item'><div class='order-info-label'>Trạng thái</div><div class='order-info-value' id='oi-status'>—</div></div>"
+                +
+                "    <div class='order-info-item'><div class='order-info-label'>Nhà cung cấp</div><div class='order-info-value' id='oi-supplier'>—</div></div>"
+                +
+                "    <div class='order-info-item'><div class='order-info-label'>Dự kiến</div><div class='order-info-value' id='oi-expected'>—</div></div>"
+                +
+                "  </div>" +
+                "  <div style='color:#64748b;font-size:11px;margin-top:4px' id='oi-note'></div>" +
+                "</div>" +
+                "</div>" +
+
+                // ── BẢNG KIỂM ĐẾM (Dự kiến vs Thực nhận) ──
+                "<div class='card' id='comparison-card' style='display:none'>" +
+                "<div class='card-title'>📊 Kiểm đếm (Dự kiến vs Thực nhận)</div>" +
+                "<table>" +
+                "<thead><tr><th>SKU</th><th>Tên SP</th><th style='text-align:center'>Dự kiến</th><th style='text-align:center'>Thực nhận</th><th style='text-align:center'>KQ</th></tr></thead>"
+                +
+                "<tbody id='comparison-lines'></tbody>" +
+                "</table>" +
+                "<div style='margin-top:10px;display:flex;gap:8px;justify-content:space-between'>" +
+                "  <div style='font-size:12px;color:#64748b'>Tổng dòng: <b id='comp-total' style='color:#e2e8f0'>0</b></div>"
+                +
+                "  <div style='font-size:12px'>✓ <span id='comp-match' style='color:#22c55e;font-weight:700'>0</span> &nbsp; ✗ <span id='comp-mismatch' style='color:#ef4444;font-weight:700'>0</span></div>"
                 +
                 "</div>" +
                 "</div>" +
@@ -150,10 +210,15 @@ public class ScannerPageController {
                 "</div>" +
 
                 "<div class='card'>" +
-                "<div class='card-title'>Đã scan</div>" +
+                "<div class='card-title'>Đã scan (phiên hiện tại)</div>" +
                 "<table><thead><tr><th>SKU</th><th>Tên sản phẩm</th><th style='text-align:right'>Qty</th></tr></thead>"
                 +
                 "<tbody id='lines'></tbody></table>" +
+                "</div>" +
+
+                // ── NÚT XÁC NHẬN KIỂM ĐẾM (chỉ hiện khi có receivingId) ──
+                "<div class='card' id='confirm-card' style='display:none'>" +
+                "<button class='btn success' id='confirmBtn'>✅ Xác nhận kiểm đếm — Gửi QC</button>" +
                 "</div>" +
 
                 "<div class='card'><button class='btn danger' id='closeBtn'>🛑 Kết thúc Scan</button></div>" +
@@ -165,7 +230,10 @@ public class ScannerPageController {
                 "var TOKEN='" + token + "';\n" +
                 "var RECEIVING_ID=" + receivingIdJs + ";\n" +
                 "var API=window.location.origin+'/api/v1/scan-events';\n" +
+                "var ORDER_API=window.location.origin+'/api/v1/receiving-orders';\n" +
                 "var lineData={};\n" +
+                "var orderItems=[];\n" +
+                "var orderData=null;\n" +
                 "var inflight=false;\n" +
                 "var lastCode=null;\n" +
                 "var lastAt=0;\n" +
@@ -188,7 +256,10 @@ public class ScannerPageController {
                 +
                 "function getSessionId(){try{var p=TOKEN.split('.')[1];var d=JSON.parse(base64UrlDecode(p));return d.sessionId||null;}catch(e){return null;}} \n"
                 +
+                "function getRoleFromToken(){try{var p=TOKEN.split('.')[1];var d=JSON.parse(base64UrlDecode(p));return (d.roles||'').split(',')[0].trim().toUpperCase()||'UNKNOWN';}catch(e){return 'UNKNOWN';}} \n"
+                +
                 "var SESSION_ID=getSessionId();\n" +
+                "var USER_ROLE=getRoleFromToken();\n" +
 
                 "function toast(msg,err){var t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(err?' err':'');t.style.display='block';clearTimeout(t._t);t._t=setTimeout(function(){t.style.display='none';},2600);} \n"
                 +
@@ -200,7 +271,87 @@ public class ScannerPageController {
                 "  for(var k in lineData){rows+='<tr><td class=\"sc\">'+k+'</td><td>'+lineData[k].name+'</td><td class=\"qc\">'+lineData[k].qty+'</td></tr>';}\n"
                 +
                 "  document.getElementById('lines').innerHTML=rows;\n" +
-                "  document.getElementById('cnt').textContent=Object.keys(lineData).length+' SKU';\n" +
+                "  document.getElementById('cnt').textContent=Object.keys(lineData).length+' dòng';\n" +
+                "  updateComparisonTable();\n" +
+                "} \n" +
+
+                // ── Load order details from API ──
+                "function loadOrderDetails(){\n" +
+                "  if(!RECEIVING_ID) return;\n" +
+                "  document.getElementById('order-info-card').style.display='block';\n" +
+                "  document.getElementById('comparison-card').style.display='block';\n" +
+                "  document.getElementById('confirm-card').style.display='block';\n" +
+                "  fetch(ORDER_API+'/'+RECEIVING_ID,{headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "  .then(function(r){return r.json();})\n" +
+                "  .then(function(resp){\n" +
+                "    if(resp && resp.success && resp.data){\n" +
+                "      orderData=resp.data;\n" +
+                "      orderItems=resp.data.items||[];\n" +
+                "      document.getElementById('order-loading').style.display='none';\n" +
+                "      document.getElementById('order-info-content').style.display='block';\n" +
+                "      document.getElementById('oi-code').textContent=orderData.receivingCode||'N/A';\n" +
+                "      document.getElementById('oi-status').textContent=orderData.status||'N/A';\n" +
+                "      document.getElementById('oi-supplier').textContent=orderData.supplierName||'N/A';\n" +
+                "      document.getElementById('oi-expected').textContent=(orderData.totalExpectedQty||0)+' sp / '+(orderData.totalLines||0)+' dòng';\n"
+                +
+                "      if(orderData.note){document.getElementById('oi-note').textContent='📝 '+orderData.note;}\n" +
+                "      updateComparisonTable();\n" +
+                "    } else {\n" +
+                "      document.getElementById('order-loading').textContent='Không tải được thông tin đơn: '+(resp&&resp.message?resp.message:'Lỗi');\n"
+                +
+                "    }\n" +
+                "  })\n" +
+                "  .catch(function(e){document.getElementById('order-loading').textContent='Lỗi kết nối: '+e;});\n" +
+                "} \n" +
+
+                // ── Update comparison table (expected vs scanned) ──
+                "function updateComparisonTable(){\n" +
+                "  if(!orderItems.length) return;\n" +
+                "  var rows='';\n" +
+                "  var matchCount=0, mismatchCount=0;\n" +
+                "  for(var i=0;i<orderItems.length;i++){\n" +
+                "    var item=orderItems[i];\n" +
+                "    var sku=item.skuCode||'';\n" +
+                "    var name=item.skuName||'';\n" +
+                "    var expected=parseFloat(item.expectedQty)||0;\n" +
+                "    var scanned=(lineData[sku])?parseFloat(lineData[sku].qty)||0:0;\n" +
+                "    var statusCls='status-pending', statusTxt='⏳';\n" +
+                "    if(scanned>0){\n" +
+                "      if(scanned>=expected){statusCls='status-match';statusTxt='✓';matchCount++;}\n" +
+                "      else{statusCls='status-mismatch';statusTxt='✗ '+scanned+'/'+expected;mismatchCount++;}\n" +
+                "    }\n" +
+                "    rows+='<tr><td class=\"sc\">'+sku+'</td><td>'+name+'</td><td class=\"expected-col\">'+expected+'</td><td class=\"received-col\">'+scanned+'</td><td class=\"'+statusCls+'\" style=\"text-align:center\">'+statusTxt+'</td></tr>';\n"
+                +
+                "  }\n" +
+                "  document.getElementById('comparison-lines').innerHTML=rows;\n" +
+                "  document.getElementById('comp-total').textContent=orderItems.length;\n" +
+                "  document.getElementById('comp-match').textContent=matchCount;\n" +
+                "  document.getElementById('comp-mismatch').textContent=(orderItems.length-matchCount);\n" +
+                "} \n" +
+
+                // ── Confirm and submit to QC ──
+                "function confirmAndSubmit(){\n" +
+                "  if(!RECEIVING_ID){toast('Không có ID phiếu!',true);return;}\n" +
+                "  if(!confirm('Xác nhận kiểm đếm xong?\\nPhiếu sẽ được gửi cho QC kiểm tra chất lượng.')) return;\n" +
+                "  var btn=document.getElementById('confirmBtn');\n" +
+                "  btn.disabled=true;btn.textContent='Đang gửi...';\n" +
+                "  fetch(ORDER_API+'/'+RECEIVING_ID+'/submit',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n"
+                +
+                "  .then(function(r){return r.json();})\n" +
+                "  .then(function(d){\n" +
+                "    if(d && d.success){\n" +
+                "      toast('✅ Đã gửi QC kiểm tra!');\n" +
+                "      btn.textContent='✅ Đã gửi QC';\n" +
+                "      btn.style.background='#475569';\n" +
+                "      if(document.getElementById('oi-status')){document.getElementById('oi-status').textContent='SUBMITTED';}\n"
+                +
+                "    } else {\n" +
+                "      toast((d&&d.message)?d.message:'Lỗi submit',true);\n" +
+                "      btn.disabled=false;btn.textContent='✅ Xác nhận kiểm đếm — Gửi QC';\n" +
+                "    }\n" +
+                "  })\n" +
+                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent='✅ Xác nhận kiểm đếm — Gửi QC';});\n"
+                +
                 "} \n" +
 
                 "function sendBarcode(barcode,qty){\n" +
@@ -334,17 +485,23 @@ public class ScannerPageController {
                 "} \n" +
 
                 "document.addEventListener('DOMContentLoaded',function(){\n" +
+                "  // Display role badge\n" +
+                "  var roleBadge=document.getElementById('role-badge');\n" +
+                "  if(roleBadge && USER_ROLE){roleBadge.textContent=USER_ROLE;roleBadge.classList.add('role-'+USER_ROLE.toLowerCase());}\n"
+                +
                 "  // Auto-populate receiving ID từ URL param (truyền qua khi FE tạo scan URL)\n" +
                 "  if(RECEIVING_ID !== null && RECEIVING_ID !== undefined){\n" +
                 "    document.getElementById('recv-id-label').textContent='#'+RECEIVING_ID;\n" +
                 "    document.getElementById('recv-display').style.display='block';\n" +
                 "    document.getElementById('recv-manual').style.display='none';\n" +
+                "    loadOrderDetails();\n" +
                 "  } else {\n" +
                 "    document.getElementById('recv-display').style.display='none';\n" +
                 "    document.getElementById('recv-manual').style.display='block';\n" +
                 "  }\n" +
                 "  document.getElementById('manualBtn').addEventListener('click', submitManual);\n" +
                 "  document.getElementById('closeBtn').addEventListener('click', closeScan);\n" +
+                "  document.getElementById('confirmBtn').addEventListener('click', confirmAndSubmit);\n" +
                 "  document.getElementById('bc').addEventListener('keydown', function(e){ if(e.key==='Enter') submitManual(); });\n"
                 +
                 "});\n" +

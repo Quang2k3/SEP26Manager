@@ -96,7 +96,7 @@ public class ReceivingSessionService {
                 ScanSessionData session = sessionRedis.findById(sessionId)
                                 .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
 
-                String token = jwtTokenProvider.generateScanToken(sessionId, session.getWarehouseId(), role);
+                String token = jwtTokenProvider.generateScanToken(sessionId, session.getWarehouseId(), role, userId);
                 String scanUrl = baseUrl + "/v1/scan?token=" + token;
 
                 log.info("Scan token generated for session {} by userId={}, role={}", sessionId, userId, role);
