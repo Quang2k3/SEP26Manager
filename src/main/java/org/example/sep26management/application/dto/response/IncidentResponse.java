@@ -3,6 +3,7 @@ package org.example.sep26management.application.dto.response;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
 import org.example.sep26management.application.enums.IncidentType;
+import org.example.sep26management.application.enums.IncidentCategory;
 
 import java.time.LocalDateTime;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -23,6 +24,8 @@ public class IncidentResponse {
     private String incidentCode;
     @Schema(description = "Loại Sự Cố", example = "DAMAGE")
     private IncidentType incidentType;
+    @Schema(description = "Phân loại báo cáo (GATE/QUALITY)", example = "GATE")
+    private IncidentCategory category;
     @Schema(description = "Độ Nghiêm Trọng (HIGH/MEDIUM/LOW)", example = "HIGH")
     private String severity;
     @Schema(description = "Thời gian xảy ra/báo cáo", example = "2026-03-08T10:00:00")

@@ -3,6 +3,7 @@ package org.example.sep26management.infrastructure.persistence.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.example.sep26management.application.enums.IncidentType;
+import org.example.sep26management.application.enums.IncidentCategory;
 
 import java.time.LocalDateTime;
 
@@ -29,6 +30,11 @@ public class IncidentEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "incident_type", nullable = false, length = 50)
     private IncidentType incidentType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "category", nullable = false, length = 50)
+    @Builder.Default
+    private IncidentCategory category = IncidentCategory.QUALITY; // Default to QUALITY for safety
 
     @Column(name = "severity", nullable = false, length = 50)
     @Builder.Default
