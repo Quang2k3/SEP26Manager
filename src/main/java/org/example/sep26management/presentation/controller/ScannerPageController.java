@@ -468,8 +468,22 @@ public class ScannerPageController {
 
                                                     // Auto-load if receivingId is in URL
                                                     try {
+                                                        var rid = null;
                                                         var urlParams = new URLSearchParams(window.location.search);
-                                                        var rid = urlParams.get('receivingId');
+                                                        if (urlParams.has('receivingId')) {
+                                                            rid = urlParams.get('receivingId');
+                                                        } else {
+                                                            var hashParams = new URLSearchParams(window.location.hash.substring(1));
+                                                            if (hashParams.has('receivingId')) {
+                                                                rid = hashParams.get('receivingId');
+                                                            }
+                                                        }
+
+                                                        if (!rid) {
+                                                            var match = window.location.href.match(/receivingId=([^&]+)/);
+                                                            if (match) rid = match[1];
+                                                        }
+
                                                         if (rid) {
                                                             var inputEl = document.getElementById('commonReceivingId');
                                                             if (inputEl) {
@@ -477,7 +491,9 @@ public class ScannerPageController {
                                                                 setTimeout(loadReceivingOrder, 500); // Give it a slight delay so token is ready
                                                             }
                                                         }
-                                                    } catch (e) {}
+                                                    } catch (e) {
+                                                        console.error('Auto-load URL parsing error', e);
+                                                    }
                                                 });
 
                                                 function updateTable(lines) {
