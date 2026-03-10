@@ -499,6 +499,14 @@ public class ScannerPageController {
 
                                                     var cond = IS_QC ? document.getElementById('cond').value : 'PASS';
                                                     var reason = (IS_QC && cond === 'FAIL') ? document.getElementById('reason').value : null;
+                                                    var receivingId = null;
+                                                    try {
+                                                        var recvEl = IS_QC ? document.getElementById('receivingIdInput') : document.getElementById('keeperReceivingId');
+                                                        if (recvEl && recvEl.value) {
+                                                            var v = (recvEl.value || '').trim();
+                                                            if (v) receivingId = parseInt(v, 10);
+                                                        }
+                                                    } catch (e) {}
 
                                                     if (IS_QC && cond === 'FAIL' && !reason) {
                                                         toast('Vui lòng chọn Lý do lỗi', true);
@@ -517,7 +525,8 @@ public class ScannerPageController {
                                                             barcode: barcode,
                                                             qty: qty,
                                                             condition: cond,
-                                                            reasonCode: reason
+                                                            reasonCode: reason,
+                                                            receivingId: receivingId
                                                         })
                                                     })
                                                     .then(function (r) {

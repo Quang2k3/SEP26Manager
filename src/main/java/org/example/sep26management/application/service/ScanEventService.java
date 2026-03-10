@@ -7,15 +7,22 @@ import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.scan.ScanLineItem;
 import org.example.sep26management.application.dto.scan.ScanSessionData;
 import org.example.sep26management.infrastructure.SseEmitterRegistry;
+import org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity;
+import org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity;
 import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
 import org.example.sep26management.infrastructure.persistence.redis.ScanSessionRedisRepository;
+import org.example.sep26management.infrastructure.persistence.repository.ReceivingItemJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.example.sep26management.infrastructure.security.JwtTokenProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -27,11 +34,14 @@ public class ScanEventService {
     private final ScanSessionRedisRepository sessionRedis;
     private final SkuJpaRepository skuRepository;
     private final SseEmitterRegistry sseRegistry;
+    private final ReceivingOrderJpaRepository receivingOrderRepo;
+    private final ReceivingItemJpaRepository receivingItemRepo;
 
     /**
      * Process a barcode scan event sent from the iPhone/Tablet.
      * Now supports condition (PASS/FAIL) to separate good and damaged items.
      */
+    @Transactional
     public ApiResponse<Map<String, Object>> processScan(String scanToken, ScanEventRequest request) {
         // 1. Extract sessionId
         String sessionId;
@@ -60,6 +70,60 @@ public class ScanEventService {
         String condition = request.getCondition() != null ? request.getCondition().toUpperCase() : "PASS";
         if (!"PASS".equals(condition) && !"FAIL".equals(condition)) {
             return ApiResponse.error("Invalid condition. Must be PASS or FAIL.");
+        }
+
+        // 4.1 Optional: apply scan directly to a Receiving Order line (carton = 1 qty)
+        // This enables "scan -> map to initial receiving slip -> progress expected/received/remaining".
+        if (request.getReceivingId() != null) {
+            Long receivingId = Objects.requireNonNull(request.getReceivingId());
+            ReceivingOrderEntity order = receivingOrderRepo.findById(receivingId)
+                    .orElseThrow(() -> new RuntimeException("Receiving order not found: " + receivingId));
+
+            String status = order.getStatus() != null ? order.getStatus().toUpperCase() : "DRAFT";
+            if ("POSTED".equals(status) || "PUTAWAY_DONE".equals(status) || "CANCELLED".equals(status)
+                    || "REJECTED".equals(status)) {
+                return ApiResponse.error("Cannot scan into receiving order in status: " + status);
+            }
+
+            ReceivingItemEntity item = receivingItemRepo
+                    .findByReceivingOrderReceivingIdAndSkuId(receivingId, sku.getSkuId())
+                    .orElseThrow(() -> new RuntimeException(
+                            "SKU " + sku.getSkuCode() + " is not in receiving order: " + receivingId));
+
+            BigDecimal inc = request.getQty() != null ? request.getQty() : BigDecimal.ONE;
+            BigDecimal current = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
+            BigDecimal newReceived = current.add(inc);
+            item.setReceivedQty(newReceived);
+
+            // If QC marks FAIL, keep reason on the line and flag QC required.
+            if ("FAIL".equals(condition)) {
+                item.setCondition("FAIL");
+                item.setQcRequired(true);
+                if (request.getReasonCode() != null && !request.getReasonCode().isBlank()) {
+                    item.setReasonCode(request.getReasonCode());
+                }
+            }
+
+            receivingItemRepo.save(item);
+
+            BigDecimal expected = item.getExpectedQty() != null ? item.getExpectedQty() : BigDecimal.ZERO;
+            BigDecimal remaining = expected.subtract(newReceived);
+            BigDecimal over = remaining.compareTo(BigDecimal.ZERO) < 0 ? remaining.abs() : BigDecimal.ZERO;
+            BigDecimal remainingNonNegative = remaining.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : remaining;
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("mode", "RECEIVING_ORDER");
+            payload.put("receivingId", receivingId);
+            payload.put("skuId", sku.getSkuId());
+            payload.put("skuCode", sku.getSkuCode());
+            payload.put("skuName", sku.getSkuName());
+            payload.put("barcode", sku.getBarcode());
+            payload.put("condition", condition);
+            payload.put("expectedQty", expected);
+            payload.put("receivedQty", newReceived);
+            payload.put("remainingQty", remainingNonNegative);
+            payload.put("overQty", over);
+            return ApiResponse.success("Scanned", payload);
         }
 
         // 5. INCR qty — keyed by (skuId + condition)
