@@ -21,6 +21,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.example.sep26management.application.dto.scan.ScanLineItem;
@@ -242,6 +243,35 @@ public class ReceivingOrderService {
         public ApiResponse<ReceivingOrderResponse> submit(Long id, Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
                 validateStatus(order, "submit", "DRAFT");
+
+                // --- Sync from active session if exists (Failsafe for mobile scans) ---
+                Optional<String> activeSessionId = sessionRedis.findActiveSession(order.getWarehouseId(), userId);
+                if (activeSessionId.isPresent()) {
+                        sessionRedis.findById(activeSessionId.get()).ifPresent(sessionData -> {
+                                List<ScanLineItem> sessionLines = sessionData.getLines();
+                                if (sessionLines != null && !sessionLines.isEmpty()) {
+                                        log.info("Syncing {} lines from session {} into order {} before submit",
+                                                        sessionLines.size(), activeSessionId.get(), id);
+                                        for (ScanLineItem sLine : sessionLines) {
+                                                receivingItemRepo
+                                                                .findByReceivingOrderReceivingIdAndSkuId(id,
+                                                                                sLine.getSkuId())
+                                                                .ifPresent(ri -> {
+                                                                        if (sLine.getQty() != null) {
+                                                                                ri.setReceivedQty(sLine.getQty());
+                                                                                ri.setCondition(sLine
+                                                                                                .getCondition() != null
+                                                                                                                ? sLine.getCondition()
+                                                                                                                : "PASS");
+                                                                                ri.setReasonCode(sLine.getReasonCode());
+                                                                                receivingItemRepo.save(ri);
+                                                                        }
+                                                                });
+                                        }
+                                }
+                        });
+                }
+                // ----------------------------------------------------------------------
 
                 List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
                 boolean hasDiscrepancy = false;
