@@ -5011,6 +5011,8 @@ CREATE TABLE public.incident_items (
     incident_id bigint NOT NULL,
     sku_id bigint NOT NULL,
     damaged_qty numeric(12,2) NOT NULL,
+    expected_qty numeric(12,2),
+    actual_qty numeric(12,2),
     reason_code character varying(100),
     note text,
     action_pass_qty numeric(12,2) DEFAULT 0,

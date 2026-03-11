@@ -259,7 +259,9 @@ public class ReceivingOrderService {
 
                                 IncidentItemEntity incItem = IncidentItemEntity.builder()
                                                 .skuId(item.getSkuId())
-                                                .damagedQty(shortageQty) // Reuse damagedQty to hold shortage amount
+                                                .damagedQty(shortageQty) // Hàng thiếu
+                                                .expectedQty(expectedQty)
+                                                .actualQty(receivedQty)
                                                 .note("Hệ thống tự động ghi nhận thiếu hàng khi Keeper trình duyệt")
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)
@@ -365,7 +367,9 @@ public class ReceivingOrderService {
                                 IncidentItemEntity incidentItem = IncidentItemEntity.builder()
                                                 // incident reference will be set later
                                                 .skuId(skuId)
-                                                .damagedQty(failQty)
+                                                .damagedQty(failQty) // Hàng lỗi QC
+                                                .expectedQty(totalScanned) // Tổng QC quét
+                                                .actualQty(passQty) // Số lượng đạt
                                                 .note("Báo cáo từ QC Scanner")
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)

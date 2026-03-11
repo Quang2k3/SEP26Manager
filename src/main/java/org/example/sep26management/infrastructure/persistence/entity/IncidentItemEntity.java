@@ -29,6 +29,12 @@ public class IncidentItemEntity {
     @Column(name = "damaged_qty", nullable = false, precision = 12, scale = 2)
     private BigDecimal damagedQty;
 
+    @Column(name = "expected_qty", precision = 12, scale = 2)
+    private BigDecimal expectedQty;
+
+    @Column(name = "actual_qty", precision = 12, scale = 2)
+    private BigDecimal actualQty;
+
     @Column(name = "reason_code", length = 100)
     private String reasonCode;
 
