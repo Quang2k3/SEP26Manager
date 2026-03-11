@@ -828,7 +828,10 @@ CREATE TABLE public.picking_task_items (
     lot_id bigint,
     from_location_id bigint NOT NULL,
     required_qty numeric(12,2) NOT NULL,
-    picked_qty numeric(12,2) DEFAULT 0 NOT NULL
+    picked_qty numeric(12,2) DEFAULT 0 NOT NULL,
+    qc_result character varying(10),
+    qc_note text,
+    qc_scanned_at timestamp without time zone
 );
 
 
