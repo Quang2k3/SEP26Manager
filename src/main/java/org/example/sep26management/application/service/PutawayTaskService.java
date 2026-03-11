@@ -138,7 +138,7 @@ public class PutawayTaskService {
 
             // Decrease from staging location (Use Repository)
             if (fromLocationId != null) {
-                inventorySnapshotRepo.decrementInventory(
+                inventorySnapshotRepo.decrementQuantity(
                         task.getWarehouseId(),
                         item.getSkuId(),
                         item.getLotId(),
