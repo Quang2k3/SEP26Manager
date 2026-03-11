@@ -74,6 +74,9 @@ public class GrnService {
                     .skuCode(skuCode)
                     .skuName(skuName)
                     .quantity(gi.getQuantity())
+                    .lotNumber(gi.getLotNumber())
+                    .manufactureDate(gi.getManufactureDate())
+                    .expiryDate(gi.getExpiryDate())
                     .build();
         }).collect(Collectors.toList()));
 

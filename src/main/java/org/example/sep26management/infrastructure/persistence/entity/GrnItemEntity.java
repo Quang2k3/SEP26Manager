@@ -29,6 +29,15 @@ public class GrnItemEntity {
     @Column(name = "quantity", nullable = false, precision = 12, scale = 2)
     private BigDecimal quantity;
 
+    @Column(name = "lot_number", length = 100)
+    private String lotNumber;
+
+    @Column(name = "manufacture_date")
+    private java.time.LocalDate manufactureDate;
+
+    @Column(name = "expiry_date")
+    private java.time.LocalDate expiryDate;
+
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 }

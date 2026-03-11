@@ -25,4 +25,13 @@ public class GrnItemResponse {
 
     @Schema(description = "Số lượng nhập kho (đã trừ hàng lỗi / bị từ chối)", example = "10.0")
     private BigDecimal quantity;
+
+    @Schema(description = "Số lô (Lot Number)", example = "LOT-20231015")
+    private String lotNumber;
+
+    @Schema(description = "Ngày sản xuất (Manufacture Date)", example = "2023-10-15")
+    private java.time.LocalDate manufactureDate;
+
+    @Schema(description = "Ngày hết hạn (Expiry Date)", example = "2024-10-15")
+    private java.time.LocalDate expiryDate;
 }
