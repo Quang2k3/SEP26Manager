@@ -5076,6 +5076,9 @@ CREATE TABLE public.grn_items (
     grn_id bigint NOT NULL,
     sku_id bigint NOT NULL,
     quantity numeric(12,2) NOT NULL,
+    lot_number character varying(100),
+    manufacture_date date,
+    expiry_date date,
     note text
 );
 
@@ -5158,3 +5161,8 @@ ALTER TABLE public.grns ADD COLUMN IF NOT EXISTS source_type character varying(5
 ALTER TABLE public.grns ADD COLUMN IF NOT EXISTS source_warehouse_id bigint;
 ALTER TABLE public.grns ADD COLUMN IF NOT EXISTS supplier_id bigint;
 ALTER TABLE public.grns ADD COLUMN IF NOT EXISTS source_reference_code character varying(100);
+
+-- MIGRATION: Bổ sung thông tin lô/date cho grn_items
+ALTER TABLE public.grn_items ADD COLUMN IF NOT EXISTS lot_number character varying(100);
+ALTER TABLE public.grn_items ADD COLUMN IF NOT EXISTS manufacture_date date;
+ALTER TABLE public.grn_items ADD COLUMN IF NOT EXISTS expiry_date date;
