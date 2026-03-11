@@ -1390,7 +1390,43 @@ VALUES
   ((SELECT enum_type_id FROM enum_types WHERE enum_type_code = 'INCIDENT_TYPE'), 'DAMAGE', 'Damage / Quality Issue', 'Hàng hóa hư hỏng/Lỗi QC', 7, '#dc3545')
 ON CONFLICT (enum_type_id, value_code) DO NOTHING;
 
+-- ============================================================
+-- INSERT DATA: customers
+-- ============================================================
 
+INSERT INTO customers (customer_code, customer_name, email, phone, address, active)
+VALUES
+    -- Khách hàng cá nhân
+    ('CUS-001', 'Nguyễn Văn An',         'nguyenvanan@gmail.com',       '0901111001', '12 Lê Lợi, Quận 1, TP.HCM',                       true),
+    ('CUS-002', 'Trần Thị Bình',         'tranthibibinh@gmail.com',      '0901111002', '45 Nguyễn Huệ, Quận 1, TP.HCM',                   true),
+    ('CUS-003', 'Lê Minh Cường',         'leminhcuong@gmail.com',        '0901111003', '78 Đinh Tiên Hoàng, Bình Thạnh, TP.HCM',          true),
+    ('CUS-004', 'Phạm Thị Dung',         'phamthidung@gmail.com',        '0901111004', '23 Hoàng Diệu, Quận 4, TP.HCM',                   true),
+    ('CUS-005', 'Hoàng Văn Em',          'hoangvanem@gmail.com',         '0901111005', '90 Cách Mạng Tháng 8, Quận 3, TP.HCM',            true),
+
+    -- Công ty / doanh nghiệp
+    ('CUS-006', 'Công ty TNHH Phát Đạt', 'contact@phatdat.com',          '0281234001', '100 Nguyễn Thị Minh Khai, Quận 3, TP.HCM',       true),
+    ('CUS-007', 'Công ty CP Minh Long',  'info@minhlong.vn',             '0281234002', '55 Võ Văn Tần, Quận 3, TP.HCM',                   true),
+    ('CUS-008', 'Siêu thị BigC Hà Nội',  'procurement@bigc.vn',          '0241234003', '222 Trần Duy Hưng, Cầu Giấy, Hà Nội',            true),
+    ('CUS-009', 'Công ty CP Thế Giới Di Động', 'supply@thegioididong.com','0281234004', '128 Trần Quang Khải, Quận 1, TP.HCM',           true),
+    ('CUS-010', 'Bách Hóa Xanh HCM',     'order@bachhoaxanh.com',        '0281234005', '456 Kinh Dương Vương, Bình Tân, TP.HCM',          true),
+
+    -- Đại lý / nhà phân phối
+    ('CUS-011', 'Đại lý Hương Giang',    'huonggiang.daily@gmail.com',   '0711234001', '15 Lý Thường Kiệt, Cần Thơ',                      true),
+    ('CUS-012', 'Đại lý Miền Bắc',       'daily.mienbac@gmail.com',      '0241234006', '88 Bà Triệu, Hoàn Kiếm, Hà Nội',                 true),
+    ('CUS-013', 'Đại lý Đà Nẵng Plus',   'danangplus@gmail.com',         '0236123001', '30 Hùng Vương, Hải Châu, Đà Nẵng',               true),
+    ('CUS-014', 'Đại lý Khánh Hòa',      'khanhhoa.agent@gmail.com',     '0258123001', '10 Quang Trung, Nha Trang, Khánh Hòa',            true),
+    ('CUS-015', 'Đại lý Long An',        'longan.daily@gmail.com',       '0272123001', '5 Nguyễn Huệ, Tân An, Long An',                   true),
+
+    -- Khách xuất khẩu
+    ('CUS-016', 'Singapore Trading Co.', 'order@sgtrading.sg',           '+6561234001', '50 Raffles Place, Singapore 048623',              true),
+    ('CUS-017', 'Japan Import LLC',      'import@japanllc.co.jp',        '+81312345678','2-1 Marunouchi, Chiyoda, Tokyo',                  true),
+
+    -- Khách VIP / key account
+    ('CUS-018', 'VinCommerce',           'procurement@vincommerce.vn',   '0281234010', '72 Lê Thánh Tôn, Quận 1, TP.HCM',                true),
+    ('CUS-019', 'AEON Mall Việt Nam',    'supply@aeon.com.vn',           '0281234011', '30 Bờ Bao Tân Thắng, Tân Phú, TP.HCM',           true),
+    ('CUS-020', 'Co.opmart Việt Nam',    'order@coopmart.vn',            '0281234012', '199 Nguyễn Thái Học, Quận 1, TP.HCM',             true)
+
+    ON CONFLICT (customer_code) DO NOTHING;
 -- ============================================================
 -- 7) MIGRATION: Cập nhật bảng GRN cho luồng duyệt của Manager
 -- (Chạy phần này nếu DB đã có bảng grns cũ mà không muốn xóa dữ liệu)
