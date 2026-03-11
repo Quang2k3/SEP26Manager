@@ -243,11 +243,61 @@ public class ReceivingOrderService {
                 ReceivingOrderEntity order = findOrder(id);
                 validateStatus(order, "DRAFT", "submit");
 
-                order.setStatus("SUBMITTED");
+                List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
+                boolean hasShortage = false;
+                List<IncidentItemEntity> incidentItems = new ArrayList<>();
+
+                for (ReceivingItemEntity item : items) {
+                        BigDecimal expectedQty = item.getExpectedQty() != null ? item.getExpectedQty()
+                                        : BigDecimal.ZERO;
+                        BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
+                                        : BigDecimal.ZERO;
+
+                        if (expectedQty.compareTo(receivedQty) > 0) {
+                                hasShortage = true;
+                                BigDecimal shortageQty = expectedQty.subtract(receivedQty);
+
+                                IncidentItemEntity incItem = IncidentItemEntity.builder()
+                                                .skuId(item.getSkuId())
+                                                .damagedQty(shortageQty) // Reuse damagedQty to hold shortage amount
+                                                .note("Hệ thống tự động ghi nhận thiếu hàng khi Keeper trình duyệt")
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                incidentItems.add(incItem);
+                        }
+                }
+
+                if (hasShortage) {
+                        IncidentEntity incident = IncidentEntity.builder()
+                                        .warehouseId(order.getWarehouseId())
+                                        .incidentType(org.example.sep26management.application.enums.IncidentType.SHORTAGE)
+                                        .category(org.example.sep26management.application.enums.IncidentCategory.GATE)
+                                        .incidentCode("INC-SHORT-" + System.currentTimeMillis() % 10000)
+                                        .description("Hệ thống tự động tạo sự cố do phát hiện số lượng thực nhận ít hơn dự kiến.")
+                                        .receivingId(id)
+                                        .status("OPEN")
+                                        .reportedBy(userId)
+                                        .build();
+
+                        IncidentEntity savedIncident = incidentRepo.save(incident);
+
+                        for (IncidentItemEntity incItem : incidentItems) {
+                                incItem.setIncident(savedIncident);
+                                incidentItemRepo.save(incItem);
+                        }
+                        order.setStatus("PENDING_INCIDENT");
+                        log.info("GRN {} submitted with Shortage. Created Incident {} by userId={}",
+                                        order.getReceivingCode(), savedIncident.getIncidentId(), userId);
+                } else {
+                        order.setStatus("SUBMITTED");
+                        log.info("GRN {} submitted (Full received) by userId={}", order.getReceivingCode(), userId);
+                }
+
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
 
-                log.info("GRN {} submitted by userId={}", order.getReceivingCode(), userId);
                 return ApiResponse.success("GRN submitted successfully", getOrder(id).getData());
         }
 
@@ -396,7 +446,7 @@ public class ReceivingOrderService {
                 ReceivingOrderEntity order = findOrder(id);
 
                 if (!"QC_APPROVED".equals(order.getStatus())) {
-                        throw new RuntimeException(
+                        throw new org.example.sep26management.infrastructure.exception.BusinessException(
                                         "Can only generate GRN from QC_APPROVED Receiving Order. Current status: "
                                                         + order.getStatus());
                 }
@@ -406,7 +456,8 @@ public class ReceivingOrderService {
                 boolean hasUnsettled = incidents.stream()
                                 .anyMatch(i -> "OPEN".equals(i.getStatus()) || "APPROVED".equals(i.getStatus()));
                 if (hasUnsettled) {
-                        throw new RuntimeException("Cannot generate GRN: there are unsettled incidents.");
+                        throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                                        "Cannot generate GRN: there are unsettled incidents.");
                 }
 
                 // Tính toán số lượng GRN (Pass/Nhập kho) cho từng SKU
@@ -530,12 +581,13 @@ public class ReceivingOrderService {
 
         private ReceivingOrderEntity findOrder(Long id) {
                 return receivingOrderRepo.findById(id)
-                                .orElseThrow(() -> new RuntimeException("Receiving order not found: " + id));
+                                .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.BusinessException(
+                                                "Receiving order not found: " + id));
         }
 
         private void validateStatus(ReceivingOrderEntity order, String expectedStatus, String action) {
                 if (!expectedStatus.equals(order.getStatus())) {
-                        throw new RuntimeException(
+                        throw new org.example.sep26management.infrastructure.exception.BusinessException(
                                         "Cannot " + action + " GRN in status '" + order.getStatus() + "'. Expected: "
                                                         + expectedStatus);
                 }

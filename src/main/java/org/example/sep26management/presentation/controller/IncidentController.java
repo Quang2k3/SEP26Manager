@@ -8,6 +8,7 @@ import org.example.sep26management.application.enums.IncidentCategory;
 import org.example.sep26management.application.dto.request.CreateIncidentRequest;
 import org.example.sep26management.application.dto.request.RejectRequest;
 import org.example.sep26management.application.dto.request.ResolveIncidentRequest;
+import org.example.sep26management.application.dto.request.ResolveShortageRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.IncidentResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
@@ -104,6 +105,21 @@ public class IncidentController {
             @Valid @RequestBody ResolveIncidentRequest request,
             Authentication auth) {
         return incidentService.resolveIncident(id, request, extractUserId(auth));
+    }
+
+    /** POST /v1/incidents/{id}/resolve-shortage — Manager xử lý sự cố thiếu hàng */
+    @PostMapping("/{id}/resolve-shortage")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Xử lý sự cố thiếu hàng (Manager)", description = "Manager xử lý sự cố khi số lượng quét được ít hơn số lượng mong đợi "
+            + "(thường được hệ thống tự động tạo khi hoàn tất đếm).\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Mã Sự cố (Incident ID).\n"
+            + "- `ResolveShortageRequest.resolution`: Chọn `CLOSE_SHORT` (Chốt thiếu, kết thúc đơn) hoặc `WAIT_BACKORDER` (Chờ giao bù, nhập từng phần).")
+    public ApiResponse<IncidentResponse> resolveShortage(
+            @PathVariable Long id,
+            @Valid @RequestBody ResolveShortageRequest request,
+            Authentication auth) {
+        return incidentService.resolveShortage(id, request.getResolution(), extractUserId(auth));
     }
 
     private Long extractUserId(Authentication auth) {
