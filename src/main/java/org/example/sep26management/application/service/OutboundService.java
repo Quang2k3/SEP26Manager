@@ -626,6 +626,48 @@ public class OutboundService {
                 );
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-508 (Reject path): UC-OUT-04 Reject Sales Order (MANAGER)
+    // Tách riêng khỏi approveSalesOrder để controller gọi rõ ràng hơn
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<OutboundResponse> rejectOutbound(
+            Long soId,
+            String rejectionReason,
+            Long managerId, String ip, String ua) {
+
+        log.info("Rejecting sales order: soId={}, managerId={}", soId, managerId);
+
+        SalesOrderEntity so = soRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
+
+        if (!"PENDING_APPROVAL".equals(so.getStatus())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_PENDING_APPROVAL);
+        }
+
+        if (rejectionReason == null || rejectionReason.trim().length() < 20) {
+            throw new BusinessException(MessageConstants.OUTBOUND_REJECTION_REASON_REQUIRED);
+        }
+
+        so.setStatus("REJECTED");
+        so.setNote((so.getNote() != null ? so.getNote() + " | " : "") + "Rejected: " + rejectionReason);
+        so.setApprovedBy(managerId);   // tái dụng approvedBy để lưu người xử lý
+        so.setApprovedAt(LocalDateTime.now());
+        soRepository.save(so);
+
+        log.info("Sales order {} rejected by managerId={}", so.getSoCode(), managerId);
+
+        auditLogService.logAction(managerId, "OUTBOUND_REJECTED", "SALES_ORDER", soId,
+                "Sales order " + so.getSoCode() + " rejected. Reason: " + rejectionReason, ip, ua);
+
+        List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
+        CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
+        return ApiResponse.success(MessageConstants.OUTBOUND_REJECTED_SUCCESS,
+                buildSalesOrderResponse(so, items, customer, null));
+    }
+
     // ─── Response builders ───────────────────────────────────────
 
     private OutboundResponse buildSalesOrderResponse(
