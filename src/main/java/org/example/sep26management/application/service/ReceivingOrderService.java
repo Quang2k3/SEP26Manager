@@ -122,6 +122,9 @@ public class ReceivingOrderService {
                                                 .expectedQty(itemReq.getExpectedQty() != null ? itemReq.getExpectedQty()
                                                                 : BigDecimal.ZERO)
                                                 .receivedQty(BigDecimal.ZERO)
+                                                .lotNumber(itemReq.getLotNumber())
+                                                .manufactureDate(itemReq.getManufactureDate())
+                                                .expiryDate(itemReq.getExpiryDate())
                                                 .build();
                                 receivingItemRepo.save(item);
                         }
@@ -161,6 +164,12 @@ public class ReceivingOrderService {
                                         item.setReceivedQty(line.getReceivedQty());
                                 if (line.getNote() != null)
                                         item.setNote(line.getNote());
+                                if (line.getLotNumber() != null)
+                                        item.setLotNumber(line.getLotNumber());
+                                if (line.getManufactureDate() != null)
+                                        item.setManufactureDate(line.getManufactureDate());
+                                if (line.getExpiryDate() != null)
+                                        item.setExpiryDate(line.getExpiryDate());
 
                                 receivingItemRepo.save(item);
                         }
@@ -264,6 +273,10 @@ public class ReceivingOrderService {
                                                                                                                 ? sLine.getCondition()
                                                                                                                 : "PASS");
                                                                                 ri.setReasonCode(sLine.getReasonCode());
+                                                                                ri.setLotNumber(sLine.getLotNumber());
+                                                                                ri.setManufactureDate(sLine
+                                                                                                .getManufactureDate());
+                                                                                ri.setExpiryDate(sLine.getExpiryDate());
                                                                                 receivingItemRepo.save(ri);
                                                                         }
                                                                 });

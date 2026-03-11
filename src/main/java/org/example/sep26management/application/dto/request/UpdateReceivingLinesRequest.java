@@ -32,5 +32,14 @@ public class UpdateReceivingLinesRequest {
 
         @Schema(description = "Ghi chú thêm", example = "")
         private String note;
+
+        @Schema(description = "Số lô sản xuất", example = "LOT123")
+        private String lotNumber;
+
+        @Schema(description = "Ngày sản xuất", example = "2023-10-01")
+        private java.time.LocalDate manufactureDate;
+
+        @Schema(description = "Ngày hết hạn", example = "2024-10-01")
+        private java.time.LocalDate expiryDate;
     }
 }

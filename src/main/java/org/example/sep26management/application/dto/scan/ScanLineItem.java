@@ -23,4 +23,8 @@ public class ScanLineItem {
 
     /** Reason code when condition = FAIL (e.g. LEAK, TORN_PACKAGING, DENTED) */
     private String reasonCode;
+
+    private String lotNumber;
+    private java.time.LocalDate manufactureDate;
+    private java.time.LocalDate expiryDate;
 }
