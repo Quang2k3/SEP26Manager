@@ -241,7 +241,7 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<ReceivingOrderResponse> submit(Long id, Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
-                validateStatus(order, "DRAFT", "submit");
+                validateStatus(order, "submit", "DRAFT");
 
                 List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
                 boolean hasShortage = false;
@@ -306,7 +306,7 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<ReceivingOrderResponse> qcApprove(Long id, Long qcUserId) {
                 ReceivingOrderEntity order = findOrder(id);
-                validateStatus(order, "SUBMITTED", "qc-approve");
+                validateStatus(order, "qc-approve", "SUBMITTED", "PENDING_INCIDENT");
 
                 order.setStatus("QC_APPROVED");
                 order.setUpdatedAt(LocalDateTime.now());
@@ -321,7 +321,7 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<Map<String, Object>> qcSubmitSession(Long id, String sessionId, Long qcUserId) {
                 ReceivingOrderEntity order = findOrder(id);
-                validateStatus(order, "SUBMITTED", "qc-submit-session");
+                validateStatus(order, "qc-submit-session", "SUBMITTED", "PENDING_INCIDENT");
 
                 ScanSessionData session = sessionRedis.findById(sessionId)
                                 .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
@@ -585,11 +585,19 @@ public class ReceivingOrderService {
                                                 "Receiving order not found: " + id));
         }
 
-        private void validateStatus(ReceivingOrderEntity order, String expectedStatus, String action) {
-                if (!expectedStatus.equals(order.getStatus())) {
+        private void validateStatus(ReceivingOrderEntity order, String action, String... expectedStatuses) {
+                boolean isValid = false;
+                for (String expected : expectedStatuses) {
+                        if (expected.equals(order.getStatus())) {
+                                isValid = true;
+                                break;
+                        }
+                }
+
+                if (!isValid) {
                         throw new org.example.sep26management.infrastructure.exception.BusinessException(
-                                        "Cannot " + action + " GRN in status '" + order.getStatus() + "'. Expected: "
-                                                        + expectedStatus);
+                                        "Cannot " + action + " in status '" + order.getStatus() + "'. Expected one of: "
+                                                        + String.join(", ", expectedStatuses));
                 }
         }
 
