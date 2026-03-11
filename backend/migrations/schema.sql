@@ -1233,7 +1233,7 @@ ALTER SEQUENCE public.reservations_reservation_id_seq OWNED BY public.reservatio
 -- Name: return_items; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.return_items (
+CREATE TABLE IF NOT EXISTS public.return_items (
     return_item_id bigint NOT NULL,
     return_id bigint NOT NULL,
     sku_id bigint NOT NULL,

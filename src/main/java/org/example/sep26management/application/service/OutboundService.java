@@ -123,9 +123,6 @@ public class OutboundService {
             throw new BusinessException(MessageConstants.OUTBOUND_SAME_WAREHOUSE);
         }
 
-        if (req.getTransferDate() != null && req.getTransferDate().isBefore(LocalDate.now())) {
-            throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
-        }
 
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 req.getWarehouseId(), req.getItems());
@@ -480,8 +477,6 @@ public class OutboundService {
         } else {
             if (req.getDestinationWarehouseCode() == null || req.getDestinationWarehouseCode().isBlank())
                 throw new BusinessException(MessageConstants.OUTBOUND_DESTINATION_REQUIRED);
-            if (req.getReceiverName() == null || req.getReceiverName().isBlank())
-                throw new BusinessException(MessageConstants.OUTBOUND_RECEIVER_REQUIRED);
         }
     }
 
