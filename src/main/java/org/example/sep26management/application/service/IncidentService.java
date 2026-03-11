@@ -13,6 +13,7 @@ import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
 import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
 import org.example.sep26management.infrastructure.persistence.repository.IncidentItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.IncidentJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.ReceivingItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
@@ -35,6 +36,7 @@ public class IncidentService {
     private final IncidentJpaRepository incidentRepo;
     private final IncidentItemJpaRepository incidentItemRepo;
     private final ReceivingOrderJpaRepository receivingOrderRepo;
+    private final ReceivingItemJpaRepository receivingItemRepo;
     private final UserJpaRepository userRepo;
     private final SkuJpaRepository skuRepo;
 
@@ -218,6 +220,69 @@ public class IncidentService {
         log.info("Incident {} resolved by managerId={}", incident.getIncidentCode(), managerId);
 
         return ApiResponse.success("Incident resolved successfully.", toResponse(incident));
+    }
+
+    // ─── Resolve Shortage Incident (Manager chốt thiếu / chờ) ──────────────────
+
+    @Transactional
+    public ApiResponse<IncidentResponse> resolveShortage(Long id, String resolution, Long managerId) {
+        IncidentEntity incident = incidentRepo.findById(id)
+                .orElseThrow(() -> new RuntimeException("Incident not found: " + id));
+
+        if (!"OPEN".equals(incident.getStatus())) {
+            throw new RuntimeException("Shortage incident is not in OPEN status. Current: " + incident.getStatus());
+        }
+
+        if (!org.example.sep26management.application.enums.IncidentType.SHORTAGE.equals(incident.getIncidentType())) {
+            throw new RuntimeException("This API is only for resolving SHORTAGE incidents.");
+        }
+
+        ReceivingOrderEntity order = receivingOrderRepo.findById(incident.getReceivingId())
+                .orElseThrow(() -> new RuntimeException("Receiving order not found: " + incident.getReceivingId()));
+
+        if ("CLOSE_SHORT".equalsIgnoreCase(resolution)) {
+            // Manager decides to close the order as short (chốt thiếu)
+            // We need to update the expectedQty of the receiving items to match the
+            // receivedQty
+            List<IncidentItemEntity> incidentItems = incidentItemRepo
+                    .findByIncidentIncidentId(incident.getIncidentId());
+            for (IncidentItemEntity incItem : incidentItems) {
+                // Find corresponding receiving item
+                org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity rcItem = receivingItemRepo
+                        .findByReceivingOrderReceivingId(order.getReceivingId()).stream()
+                        .filter(itm -> itm.getSkuId().equals(incItem.getSkuId()))
+                        .findFirst().orElse(null);
+
+                if (rcItem != null) {
+                    // Cập nhật lại expectedQty bằng với receivedQty
+                    rcItem.setExpectedQty(rcItem.getReceivedQty());
+                    receivingItemRepo.save(rcItem);
+                }
+            }
+            incident.setDescription(
+                    incident.getDescription() + "\n[Manager Decision]: CLOSE_SHORT (Chốt thiếu - Đơn hàng kết thúc)");
+            order.setStatus("SUBMITTED"); // Return to normal flow to allow QC / GRN generation for the received items
+
+        } else if ("WAIT_BACKORDER".equalsIgnoreCase(resolution)) {
+            // Manager decides to wait for the backorder (chờ giao bù - partial receipt)
+            // The expectedQty remains unchanged. The order will proceed for the received
+            // items, and later become PARTIALLY_RECEIVED
+            incident.setDescription(
+                    incident.getDescription() + "\n[Manager Decision]: WAIT_BACKORDER (Chờ giao bù - Nhập từng phần)");
+            order.setStatus("SUBMITTED"); // Return to normal flow for the currently received items
+
+        } else {
+            throw new IllegalArgumentException(
+                    "Invalid resolution: " + resolution + ". Must be CLOSE_SHORT or WAIT_BACKORDER");
+        }
+
+        incident.setStatus("RESOLVED");
+        incidentRepo.save(incident);
+        receivingOrderRepo.save(order);
+
+        log.info("Shortage Incident {} resolved as {} by managerId={}", incident.getIncidentCode(), resolution,
+                managerId);
+        return ApiResponse.success("Shortage incident resolved as: " + resolution, toResponse(incident));
     }
 
     // ─── Check if receiving order has pending incidents ──────────────────────
