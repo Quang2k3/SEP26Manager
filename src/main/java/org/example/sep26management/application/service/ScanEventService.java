@@ -19,7 +19,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -73,16 +72,17 @@ public class ScanEventService {
         }
 
         // 4.1 Optional: apply scan directly to a Receiving Order line (carton = 1 qty)
-        // This enables "scan -> map to initial receiving slip -> progress expected/received/remaining".
+        // This enables "scan -> map to initial receiving slip -> progress
+        // expected/received/remaining".
         if (request.getReceivingId() != null) {
             Long receivingId = Objects.requireNonNull(request.getReceivingId());
             ReceivingOrderEntity order = receivingOrderRepo.findById(receivingId)
                     .orElseThrow(() -> new RuntimeException("Receiving order not found: " + receivingId));
 
-            String status = order.getStatus() != null ? order.getStatus().toUpperCase() : "DRAFT";
-            if ("POSTED".equals(status) || "PUTAWAY_DONE".equals(status) || "CANCELLED".equals(status)
-                    || "REJECTED".equals(status)) {
-                return ApiResponse.error("Cannot scan into receiving order in status: " + status);
+            String orderStatus = order.getStatus() != null ? order.getStatus().toUpperCase() : "DRAFT";
+            if ("POSTED".equals(orderStatus) || "PUTAWAY_DONE".equals(orderStatus) || "CANCELLED".equals(orderStatus)
+                    || "REJECTED".equals(orderStatus)) {
+                return ApiResponse.error("Cannot scan into receiving order in status: " + orderStatus);
             }
 
             ReceivingItemEntity item = receivingItemRepo
@@ -105,25 +105,8 @@ public class ScanEventService {
             }
 
             receivingItemRepo.save(item);
-
-            BigDecimal expected = item.getExpectedQty() != null ? item.getExpectedQty() : BigDecimal.ZERO;
-            BigDecimal remaining = expected.subtract(newReceived);
-            BigDecimal over = remaining.compareTo(BigDecimal.ZERO) < 0 ? remaining.abs() : BigDecimal.ZERO;
-            BigDecimal remainingNonNegative = remaining.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : remaining;
-
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("mode", "RECEIVING_ORDER");
-            payload.put("receivingId", receivingId);
-            payload.put("skuId", sku.getSkuId());
-            payload.put("skuCode", sku.getSkuCode());
-            payload.put("skuName", sku.getSkuName());
-            payload.put("barcode", sku.getBarcode());
-            payload.put("condition", condition);
-            payload.put("expectedQty", expected);
-            payload.put("receivedQty", newReceived);
-            payload.put("remainingQty", remainingNonNegative);
-            payload.put("overQty", over);
-            return ApiResponse.success("Scanned", payload);
+            log.info("Directly updated ReceivingItem for order {}: SKU={} receivedQty={}",
+                    receivingId, sku.getSkuCode(), newReceived);
         }
 
         // 5. INCR qty — keyed by (skuId + condition)
