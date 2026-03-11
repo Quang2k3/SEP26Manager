@@ -523,6 +523,9 @@ CREATE TABLE grn_items (
     grn_id BIGINT NOT NULL REFERENCES grns(grn_id) ON DELETE CASCADE,
     sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
     quantity NUMERIC(12,2) NOT NULL,
+    lot_number VARCHAR(100),
+    manufacture_date DATE,
+    expiry_date DATE,
     note TEXT
 );
 
@@ -1400,3 +1403,8 @@ ALTER TABLE grns ADD COLUMN IF NOT EXISTS source_reference_code VARCHAR(100);
 
 -- Đảm bảo created_by là NOT NULL (nếu bản cũ cho phép null)
 ALTER TABLE grns ALTER COLUMN created_by SET NOT NULL;
+
+-- 8) MIGRATION: Bổ sung thông tin lô/date cho grn_items
+ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS lot_number VARCHAR(100);
+ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS manufacture_date DATE;
+ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS expiry_date DATE;
