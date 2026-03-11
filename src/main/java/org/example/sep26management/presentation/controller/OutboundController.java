@@ -26,48 +26,53 @@ import java.util.Map;
 /**
  * OutboundController — Full outbound lifecycle
  *
- * SCRUM-505 POST /v1/outbound — Create (KEEPER)
- * SCRUM-506 PUT /v1/outbound/sales-orders/{id} — Update SO (KEEPER)
- * PUT /v1/outbound/transfers/{id} — Update TF (KEEPER)
- * SCRUM-507 PATCH /v1/outbound/sales-orders/{id}/submit — Submit SO (KEEPER)
- * PATCH /v1/outbound/transfers/{id}/submit — Submit TF (KEEPER)
- * SCRUM-508 PATCH /v1/outbound/sales-orders/{id}/approve — Approve (MANAGER)
- * SCRUM-509 GET /v1/outbound — List (ALL)
- * GET /v1/outbound/summary — Summary (ALL)
- * SCRUM-510 POST /v1/outbound/allocate — Allocate (KEEPER/MANAGER)
- * SCRUM-511 POST /v1/outbound/pick-list — Gen PickList (KEEPER/MANAGER)
- * GET /v1/outbound/pick-list/{taskId} — Get PickList (KEEPER/MANAGER)
+ * SCRUM-505 POST   /v1/outbound
+ * SCRUM-506 PUT    /v1/outbound/sales-orders/{soId}
+ *           PUT    /v1/outbound/transfers/{transferId}
+ * SCRUM-507 PATCH  /v1/outbound/sales-orders/{soId}/submit
+ *           PATCH  /v1/outbound/transfers/{transferId}/submit
+ * SCRUM-508 PATCH  /v1/outbound/sales-orders/{soId}/approve
+ *           PATCH  /v1/outbound/sales-orders/{soId}/reject
+ * SCRUM-509 GET    /v1/outbound
+ *           GET    /v1/outbound/summary
+ * SCRUM-510 POST   /v1/outbound/allocate
+ * SCRUM-511 POST   /v1/outbound/pick-list
+ *           GET    /v1/outbound/pick-list/{taskId}
+ * NEW       POST   /v1/outbound/pick-list/{taskId}/start-qc
+ *           POST   /v1/outbound/qc-scan
+ *           GET    /v1/outbound/pick-list/{taskId}/qc-summary
+ *           GET    /v1/outbound/sales-orders/{soId}/dispatch-note
+ *           POST   /v1/outbound/sales-orders/{soId}/dispatch
  */
 @RestController
 @RequestMapping("/v1/outbound")
 @RequiredArgsConstructor
 @Slf4j
-@Tag(name = "Outbound Management", description = "Quản lý quy trình xuất kho (Outbound) cho Đơn hàng bán (Sales Order) hoặc Chuyển kho nội bộ (Internal Transfer). "
-        + "Quy trình: Tạo lệnh xuất → Submit (DRAFT -> SUBMITTED) → Manager duyệt (APPROVED) → Phân bổ tồn kho (Allocate) → Tạo danh sách lấy hàng (Gen Pick List) → Lấy hàng (Picking) → Xác nhận xuất kho thành công.")
+@Tag(name = "Outbound Management", description = "Quản lý quy trình xuất kho (Outbound). "
+        + "Lifecycle: DRAFT → SUBMITTED → APPROVED → ALLOCATED → PICKING → QC_SCAN → DISPATCHED")
 public class OutboundController {
 
     private final OutboundService outboundService;
     private final OutboundListService outboundListService;
     private final AllocateStockService allocateStockService;
     private final PickListService pickListService;
+    private final OutboundQcService outboundQcService;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
+    // createOutbound(request, createdBy, ip, ua) — warehouseId injected vào request
     // ─────────────────────────────────────────────────────────────
     @PostMapping
     @PreAuthorize("hasRole('KEEPER')")
     @Operation(summary = "Tạo lệnh xuất kho (DRAFT)", description = "Tạo một lệnh xuất kho mới (Sales Order hoặc Internal Transfer).\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `Body.orderType`: Chọn `SALES_ORDER` hoặc `INTERNAL_TRANSFER`.\n"
-            + "- `Body.customerCode`: Mã khách hàng — **LẤY TỪ** API `GET /v1/customers`. FE hiển thị tên, gửi mã code. (Bắt buộc nếu `SALES_ORDER`).\n"
-            + "- `Body.destinationWarehouseCode`: Mã kho đích — **LẤY TỪ** API `GET /v1/warehouses`. (Bắt buộc nếu `INTERNAL_TRANSFER`).\n"
-            + "- `Body.items`: Danh sách các món hàng (`skuCode` hoặc `skuId`) và số lượng cần xuất (`quantity`).\n\n"
-            + "👉 **Lưu ý:** `warehouseId` (kho nguồn) được lấy tự động từ JWT token — FE **không cần truyền** vào.\n\n"
-            + "👉 **Kết quả:** Trả về 1 lệnh xuất có trạng thái `DRAFT` và kèm theo thuộc tính `documentId` (Hay còn gọi là **Outbound ID**). FE sẽ DÙNG `documentId` này cho tất cả các bước tiếp theo.")
+            + "- `Body.orderType`: `SALES_ORDER` hoặc `INTERNAL_TRANSFER`.\n"
+            + "- `Body.customerCode`: Bắt buộc nếu SALES_ORDER. Lấy từ `GET /v1/customers`.\n"
+            + "- `Body.destinationWarehouseCode`: Bắt buộc nếu INTERNAL_TRANSFER.\n"
+            + "- `warehouseId` lấy tự động từ JWT — FE không cần truyền.")
     public ResponseEntity<ApiResponse<OutboundResponse>> createOutbound(
             @Valid @RequestBody CreateOutboundRequest request,
             HttpServletRequest http) {
-        // Inject warehouseId from JWT — FE does not need to send this
+        // Inject warehouseId từ JWT vào request — FE không cần truyền
         request.setWarehouseId(getWarehouseId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(outboundService.createOutbound(request, getUserId(), getIp(http), ua(http)));
@@ -75,14 +80,12 @@ public class OutboundController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-506: Update
+    // updateOutbound(OutboundType, id, request, userId, ip, ua)
     // ─────────────────────────────────────────────────────────────
     @PutMapping("/sales-orders/{soId}")
     @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Cập nhật đơn bán hàng (Keeper)", description = "Cập nhật yêu cầu xuất kho loại Đơn Bán Hàng (SO) đang ở trạng thái DRAFT.\n\n"
-            + "**Data yêu cầu:**\n"
-            + "- `@PathVariable soId`: Mã **Outbound ID**. LẤY TỪ: attribute `documentId` của API danh sách Outbound (`GET /v1/outbound`).\n"
-            + "- `Body.customerCode` (tuỳ chọn): Mã khách hàng mới — **LẤY TỪ** `GET /v1/customers`.\n"
-            + "- `Body.items`: Danh sách hàng cần cập nhật.")
+    @Operation(summary = "Cập nhật Sales Order (DRAFT)", description = "Cập nhật lệnh xuất kho loại Sales Order đang ở trạng thái DRAFT.\n\n"
+            + "- `@PathVariable soId`: Lấy từ `documentId` của `GET /v1/outbound`.")
     public ResponseEntity<ApiResponse<OutboundResponse>> updateSalesOrder(
             @PathVariable Long soId,
             @Valid @RequestBody UpdateOutboundRequest request,
@@ -93,11 +96,7 @@ public class OutboundController {
 
     @PutMapping("/transfers/{transferId}")
     @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Cập nhật đơn chuyển kho (Keeper)", description = "Cập nhật yêu cầu xuất kho loại Chuyển Kho (Transfer) đang ở trạng thái DRAFT.\n\n"
-            + "**Data yêu cầu:**\n"
-            + "- `@PathVariable transferId`: Mã **Outbound ID**. LẤY TỪ: attribute `documentId` của API danh sách Outbound (`GET /v1/outbound`).\n"
-            + "- `Body.destinationWarehouseCode` (tuỳ chọn): Mã kho đích mới — **LẤY TỪ** `GET /v1/warehouses`.\n"
-            + "- `Body.items`: Danh sách hàng cần cập nhật.")
+    @Operation(summary = "Cập nhật Internal Transfer (DRAFT)")
     public ResponseEntity<ApiResponse<OutboundResponse>> updateTransfer(
             @PathVariable Long transferId,
             @Valid @RequestBody UpdateOutboundRequest request,
@@ -108,48 +107,44 @@ public class OutboundController {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-507: Submit
+    // submitOutbound(OutboundType, id, request, userId, ip, ua)
     // ─────────────────────────────────────────────────────────────
     @PatchMapping("/sales-orders/{soId}/submit")
     @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Trình duyệt lệnh xuất (Submit)", description = "Nhân viên gửi lệnh xuất kho lên cho Manager duyệt.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable soId`: Mã **Outbound ID**. LẤY TỪ: attribute `documentId` của API danh sách Outbound hoặc từ lúc tạo DRAFT.\n"
-            + "👉 Trạng thái chuyển từ `DRAFT` thành `SUBMITTED`.")
+    @Operation(summary = "Submit Sales Order → SUBMITTED")
     public ResponseEntity<ApiResponse<OutboundResponse>> submitSalesOrder(
             @PathVariable Long soId,
             @RequestBody(required = false) SubmitOutboundRequest request,
             HttpServletRequest http) {
-        if (request == null)
-            request = new SubmitOutboundRequest();
+        if (request == null) request = new SubmitOutboundRequest();
         return ResponseEntity.ok(outboundService.submitOutbound(
                 OutboundType.SALES_ORDER, soId, request, getUserId(), getIp(http), ua(http)));
     }
 
     @PatchMapping("/transfers/{transferId}/submit")
     @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Trình duyệt đơn chuyển kho (Keeper)", description = "Gửi Lệnh chuyển kho (Transfer) yêu cầu Manager duyệt. Chuyển trạng thái từ DRAFT/REJECTED sang SUBMITTED.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable transferId`: Mã **Outbound ID**. LẤY TỪ: attribute `documentId` của API danh sách Outbound.")
+    @Operation(summary = "Submit Internal Transfer → SUBMITTED")
     public ResponseEntity<ApiResponse<OutboundResponse>> submitTransfer(
             @PathVariable Long transferId,
             @RequestBody(required = false) SubmitOutboundRequest request,
             HttpServletRequest http) {
-        if (request == null)
-            request = new SubmitOutboundRequest();
+        if (request == null) request = new SubmitOutboundRequest();
         return ResponseEntity.ok(outboundService.submitOutbound(
                 OutboundType.INTERNAL_TRANSFER, transferId, request, getUserId(), getIp(http), ua(http)));
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-508: Approve
+    // SCRUM-508: Approve / Reject
+    // approveSalesOrder(soId, ApproveOutboundRequest, managerId, ip, ua)
+    // rejectOutbound(soId, reason, managerId, ip, ua)
     // ─────────────────────────────────────────────────────────────
     @PatchMapping("/sales-orders/{soId}/approve")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Duyệt lệnh xuất kho (Manager)", description = "Manager đồng ý cho phép xuất lô hàng này.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable soId`: Mã **Outbound ID**. LẤY TỪ: attribute `documentId` của API danh sách Outbound.\n"
-            + "👉 Trạng thái chuyển từ `SUBMITTED` thành `APPROVED`.")
-    public ResponseEntity<ApiResponse<OutboundResponse>> approveOutbound(
+    @Operation(summary = "Duyệt lệnh xuất kho (MANAGER)", description = "Manager duyệt Sales Order. Trạng thái: PENDING_APPROVAL → APPROVED.\n\n"
+            + "- `@PathVariable soId`: Lấy từ `documentId` của `GET /v1/outbound`.\n"
+            + "- `Body.approved`: `true` = Duyệt.\n"
+            + "- `Body.note` (tuỳ chọn): Ghi chú khi duyệt.")
+    public ResponseEntity<ApiResponse<OutboundResponse>> approveSalesOrder(
             @PathVariable Long soId,
             @Valid @RequestBody ApproveOutboundRequest request,
             HttpServletRequest http) {
@@ -157,18 +152,27 @@ public class OutboundController {
                 soId, request, getUserId(), getIp(http), ua(http)));
     }
 
+    @PatchMapping("/sales-orders/{soId}/reject")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Từ chối lệnh xuất kho (MANAGER)", description = "Manager từ chối Sales Order. Trạng thái: PENDING_APPROVAL → REJECTED.\n\n"
+            + "- `Body.reason`: Lý do từ chối (tối thiểu 20 ký tự).")
+    public ResponseEntity<ApiResponse<OutboundResponse>> rejectSalesOrder(
+            @PathVariable Long soId,
+            @RequestBody RejectRequest request,
+            HttpServletRequest http) {
+        return ResponseEntity.ok(outboundService.rejectOutbound(
+                soId, request.getReason(), getUserId(), getIp(http), ua(http)));
+    }
+
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-509: View Outbound List
-    // GET
-    // /v1/outbound?warehouseId=1&status=DRAFT&orderType=SALES_ORDER&keyword=EXP&page=0&size=20
+    // SCRUM-509: List + Summary
+    // listOutbound(warehouseId, status, orderType, keyword, createdBy,
+    //              fromDate, toDate, currentUserId, currentUserRole, page, size)
+    // getSummary(warehouseId)
     // ─────────────────────────────────────────────────────────────
     @GetMapping
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Danh sách lệnh xuất kho", description = "Lấy danh sách các đơn xuất kho để hiển thị lên bảng.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `warehouseId` được lấy **tự động từ JWT token** — FE **không cần truyền**.\n"
-            + "- Các params tuỳ chọn: `status`, `orderType`, `keyword` dùng để filter.\n\n"
-            + "👉 **Kết quả:** Trả về danh sách. FE lấy thuộc tính `documentId` ở mỗi dòng để thao tác detail, submit, approve...")
+    @Operation(summary = "Danh sách lệnh xuất kho")
     public ResponseEntity<ApiResponse<PageResponse<OutboundListResponse>>> listOutbound(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) OutboundType orderType,
@@ -178,33 +182,28 @@ public class OutboundController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-
-        Long warehouseId = getWarehouseId(); // auto-resolved from JWT
-        String role = getCurrentRole();
         return ResponseEntity.ok(outboundListService.listOutbound(
-                warehouseId, status, orderType, keyword, createdBy,
-                fromDate, toDate, getUserId(), role, page, size));
+                getWarehouseId(), status, orderType, keyword,
+                createdBy, fromDate, toDate,
+                getUserId(), getCurrentRole(), page, size));
     }
 
     @GetMapping("/summary")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Thống kê tình trạng lệnh xuất", description = "Lấy dữ liệu thống kê số lượng đơn lệnh xuất theo trạng thái. warehouseId lấy tự động từ JWT.")
+    @Operation(summary = "Thống kê lệnh xuất kho")
     public ResponseEntity<ApiResponse<OutboundSummaryResponse>> getSummary() {
-        Long warehouseId = getWarehouseId();
-        return ResponseEntity.ok(outboundListService.getSummary(warehouseId));
+        return ResponseEntity.ok(outboundListService.getSummary(getWarehouseId()));
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-510: Allocate / Reserve Stock
-    // POST /v1/outbound/allocate
+    // SCRUM-510: Allocate
+    // allocateStock(AllocateStockRequest, userId, ip, ua)
     // ─────────────────────────────────────────────────────────────
     @PostMapping("/allocate")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
-    @Operation(summary = "Giữ/Khóa Hàng (Allocate Stock)", description = "Đây là bước TỰ ĐỘNG CẦN THIẾT trước khi đi lấy hàng. Hệ thống quét kho và khóa số lượng tồn thực tế lại để đơn này không bị thiếu hàng.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `Body.documentId`: Chính là cái mã **Outbound ID** (lấy từ Lệnh Xuất đã Approved).\n"
-            + "- `Body.orderType`: `SALES_ORDER` hoặc `INTERNAL_TRANSFER`.\n"
-            + "👉 **Kết quả:** Tồn kho (Inventory) chuyển từ AVAILABLE sang ALLOCATED.")
+    @Operation(summary = "Phân bổ / Khóa tồn kho (FEFO)", description = "Khóa số lượng tồn theo FEFO trước khi đi lấy hàng.\n\n"
+            + "- `Body.documentId`: Outbound ID đã APPROVED.\n"
+            + "- `Body.orderType`: `SALES_ORDER` hoặc `INTERNAL_TRANSFER`.")
     public ResponseEntity<ApiResponse<AllocateStockResponse>> allocateStock(
             @Valid @RequestBody AllocateStockRequest request,
             HttpServletRequest http) {
@@ -213,38 +212,83 @@ public class OutboundController {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-511: Generate Pick List
-    // POST /v1/outbound/pick-list
-    // GET /v1/outbound/pick-list/{taskId}
+    // SCRUM-511: Pick List
+    // generatePickList(GeneratePickListRequest, userId, ip, ua)
     // ─────────────────────────────────────────────────────────────
     @PostMapping("/pick-list")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
-    @Operation(summary = "Tạo lộ trình đi lấy hàng (Generate Pick List)", description = "Gom những đơn đã Khóa hàng để in ra 1 tờ giấy (điện tử) chỉ đường cho nhân viên đi lấy hàng.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `Body.documentId`: Mã **Outbound ID** — **LẤY TỪ** danh sách `GET /v1/outbound` (field `documentId`). Đây là đơn đã Allocate.\n"
+    @Operation(summary = "Tạo Pick List", description = "Tạo lộ trình lấy hàng từ tồn kho đã Allocate.\n\n"
+            + "- `Body.documentId`: Outbound ID đã Allocate.\n"
             + "- `Body.orderType`: `SALES_ORDER` hoặc `INTERNAL_TRANSFER`.\n"
-            + "- `Body.assignedTo` (tuỳ chọn): ID nhân viên được phân công lấy hàng.\n\n"
-            + "👉 **Kết quả:** Trả về 1 cái mã `pickingTaskId` (Mã Pick List). FE giữ `pickingTaskId` này để nhân viên mở danh sách lấy hàng chi tiết bằng API bên dưới.")
+            + "- `Body.assignedTo` (tuỳ chọn): ID nhân viên được phân công.")
     public ResponseEntity<ApiResponse<PickListResponse>> generatePickList(
             @Valid @RequestBody GeneratePickListRequest request,
             HttpServletRequest http) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(pickListService.generatePickList(request, getUserId(), getIp(http), ua(http)));
+                .body(pickListService.generatePickList(
+                        request, getUserId(), getIp(http), ua(http)));
     }
 
     @GetMapping("/pick-list/{taskId}")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
-    @Operation(summary = "Đọc danh sách Lấy hàng (Chi tiết Pick List)", description = "Xem và đi nhặt hàng theo sự chỉ dẫn.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable taskId`: Mã **Pick List Task ID**. LẤY TỪ: attribute `pickingTaskId` của response khi Generate Pick List ở bước trước.\n"
-            + "👉 **Kết quả:** Trả về 1 list báo cho thủ kho biết: Hãy đến kệ Z-HC lấy 2 cái điện thoại ra đây đóng gói.")
-    public ResponseEntity<ApiResponse<PickListResponse>> getPickList(
-            @PathVariable Long taskId) {
+    @Operation(summary = "Chi tiết Pick List")
+    public ResponseEntity<ApiResponse<PickListResponse>> getPickList(@PathVariable Long taskId) {
         return ResponseEntity.ok(pickListService.getPickList(taskId));
     }
 
+    // ═════════════════════════════════════════════════════════════
+    // NEW — QC Scan + Dispatch
+    // ═════════════════════════════════════════════════════════════
+
+    @PostMapping("/pick-list/{taskId}/start-qc")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Bắt đầu phiên QC (KEEPER)",
+            description = "Chuyển picking task `PICKED` → `QC_IN_PROGRESS`, Sales Order `PICKING` → `QC_SCAN`.")
+    public ResponseEntity<ApiResponse<Void>> startQcSession(@PathVariable Long taskId) {
+        return ResponseEntity.ok(outboundQcService.startQcSession(taskId, getUserId()));
+    }
+
+    @PostMapping("/qc-scan")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "QC Scan từng item (KEEPER)",
+            description = "Ghi nhận kết quả QC: `PASS` / `FAIL` / `HOLD`.\n\n"
+                    + "- **FAIL**: bắt buộc có `reason`.\n"
+                    + "- Task phải ở trạng thái `QC_IN_PROGRESS`.")
+    public ResponseEntity<ApiResponse<Void>> qcScanItem(@Valid @RequestBody QcScanRequest request) {
+        return ResponseEntity.ok(outboundQcService.scanItem(request, getUserId()));
+    }
+
+    @GetMapping("/pick-list/{taskId}/qc-summary")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @Operation(summary = "Tóm tắt kết quả QC",
+            description = "Trả về: `totalItems`, `passCount`, `failCount`, `holdCount`, `pendingCount`.")
+    public ResponseEntity<ApiResponse<QcSummaryResponse>> getQcSummary(@PathVariable Long taskId) {
+        return ResponseEntity.ok(outboundQcService.getQcSummary(taskId));
+    }
+
+    @GetMapping("/sales-orders/{soId}/dispatch-note")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @Operation(summary = "Phiếu xuất kho (Dispatch Note)",
+            description = "Sinh Dispatch Note từ item PASS. Không lưu DB.\n\n"
+                    + "- 400 nếu còn item chưa QC scan (BR-QC-03).\n"
+                    + "- 400 nếu còn incident OPEN (BR-QC-04).")
+    public ResponseEntity<ApiResponse<DispatchNoteResponse>> getDispatchNote(@PathVariable Long soId) {
+        return ResponseEntity.ok(outboundQcService.generateDispatchNote(soId));
+    }
+
+    @PostMapping("/sales-orders/{soId}/dispatch")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Xác nhận Xuất Kho (KEEPER)",
+            description = "Trừ tồn kho, tạo DISPATCH transaction, đóng reservation, "
+                    + "cập nhật task → COMPLETED, SO → DISPATCHED.\n\n"
+                    + "- 400 nếu còn item chưa QC scan (BR-DISPATCH-02).\n"
+                    + "- 400 nếu còn incident OPEN (BR-DISPATCH-03).")
+    public ResponseEntity<ApiResponse<Void>> confirmDispatch(@PathVariable Long soId) {
+        return ResponseEntity.ok(outboundQcService.confirmDispatch(soId, getUserId()));
+    }
+
     // ─────────────────────────────────────────────────────────────
-    // Helpers
+    // Helpers — giữ nguyên theo file gốc
     // ─────────────────────────────────────────────────────────────
     private Long getUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -253,12 +297,9 @@ public class OutboundController {
         Object details = auth.getDetails();
         if (details instanceof Map<?, ?> map) {
             Object uid = map.get("userId");
-            if (uid instanceof Long l)
-                return l;
-            if (uid instanceof Integer i)
-                return i.longValue();
-            if (uid != null)
-                return Long.parseLong(uid.toString());
+            if (uid instanceof Long l)      return l;
+            if (uid instanceof Integer i)   return i.longValue();
+            if (uid != null)                return Long.parseLong(uid.toString());
         }
         throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
     }
@@ -272,14 +313,10 @@ public class OutboundController {
             Object raw = map.get("warehouseIds");
             if (raw instanceof List<?> list && !list.isEmpty()) {
                 Object first = list.get(0);
-                if (first instanceof Long l)
-                    return l;
-                if (first instanceof Integer i)
-                    return i.longValue();
-                if (first instanceof Number n)
-                    return n.longValue();
-                if (first != null)
-                    return Long.parseLong(first.toString());
+                if (first instanceof Long l)    return l;
+                if (first instanceof Integer i) return i.longValue();
+                if (first instanceof Number n)  return n.longValue();
+                if (first != null)              return Long.parseLong(first.toString());
             }
         }
         throw new RuntimeException("Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
@@ -287,8 +324,7 @@ public class OutboundController {
 
     private String getCurrentRole() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null)
-            return "";
+        if (auth == null) return "";
         return auth.getAuthorities().stream()
                 .map(a -> a.getAuthority().replace("ROLE_", ""))
                 .findFirst().orElse("");
@@ -296,8 +332,7 @@ public class OutboundController {
 
     private String getIp(HttpServletRequest req) {
         String xff = req.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank())
-            return xff.split(",")[0].trim();
+        if (xff != null && !xff.isBlank()) return xff.split(",")[0].trim();
         String xri = req.getHeader("X-Real-IP");
         return (xri != null && !xri.isBlank()) ? xri : req.getRemoteAddr();
     }

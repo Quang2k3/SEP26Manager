@@ -4,7 +4,16 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
+/**
+ * Maps to table: picking_task_items
+ *
+ * QC columns added (BR-QC-01 / BR-QC-02):
+ *   qc_result     – PASS | FAIL | HOLD | NULL
+ *   qc_note       – reason text when qc_result = FAIL
+ *   qc_scanned_at – timestamp; NULL = not yet QC-scanned
+ */
 @Entity
 @Table(name = "picking_task_items")
 @Getter
@@ -37,4 +46,17 @@ public class PickingTaskItemEntity {
     @Column(name = "picked_qty", nullable = false, precision = 12, scale = 2)
     @Builder.Default
     private BigDecimal pickedQty = BigDecimal.ZERO;
+
+    // ── QC Scan columns ──────────────────────────────────────────
+    /** PASS | FAIL | HOLD | NULL (null = not yet scanned) */
+    @Column(name = "qc_result", length = 10)
+    private String qcResult;
+
+    /** Reason text — populated when qc_result = FAIL (BR-QC-01) */
+    @Column(name = "qc_note", columnDefinition = "TEXT")
+    private String qcNote;
+
+    /** Timestamp of QC scan; NULL means item has not been QC-scanned yet (BR-DISPATCH-02) */
+    @Column(name = "qc_scanned_at")
+    private LocalDateTime qcScannedAt;
 }
