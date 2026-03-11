@@ -129,6 +129,13 @@ public class PutawayTaskService {
             Long toLocationId = confirm.getLocationId();
             BigDecimal qty = confirm.getQty();
 
+            // Validation: Prevent over-putaway
+            BigDecimal remaining = item.getQuantity().subtract(item.getPutawayQty());
+            if (qty.compareTo(remaining) > 0) {
+                throw new RuntimeException(
+                        "Cannot putaway " + qty + " units. Remaining for this item is only " + remaining);
+            }
+
             // Decrease from staging location (Use Repository)
             if (fromLocationId != null) {
                 inventorySnapshotRepo.decrementInventory(
