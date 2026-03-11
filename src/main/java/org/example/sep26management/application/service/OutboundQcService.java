@@ -104,9 +104,9 @@ public class OutboundQcService {
      */
     @Transactional
     public ApiResponse<Void> scanItem(QcScanRequest request, Long userId) {
-        log.info("QC scan: taskId={}, itemId={}, barcode={}, result={}",
+        log.info("QC scan: taskId={}, itemId={}, result={}",
                 request.getPickingTaskId(), request.getPickingTaskItemId(),
-                request.getBarcode(), request.getResult());
+                request.getResult());
 
         // Validate task exists and is in QC_IN_PROGRESS
         PickingTaskEntity task = findPickingTask(request.getPickingTaskId());
