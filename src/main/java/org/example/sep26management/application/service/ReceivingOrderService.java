@@ -244,7 +244,7 @@ public class ReceivingOrderService {
                 validateStatus(order, "submit", "DRAFT");
 
                 List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
-                boolean hasShortage = false;
+                boolean hasDiscrepancy = false;
                 List<IncidentItemEntity> incidentItems = new ArrayList<>();
 
                 for (ReceivingItemEntity item : items) {
@@ -253,31 +253,45 @@ public class ReceivingOrderService {
                         BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
                                         : BigDecimal.ZERO;
 
-                        if (expectedQty.compareTo(receivedQty) > 0) {
-                                hasShortage = true;
-                                BigDecimal shortageQty = expectedQty.subtract(receivedQty);
+                        if (expectedQty.compareTo(receivedQty) != 0) {
+                                hasDiscrepancy = true;
+                                BigDecimal diffQty = expectedQty.subtract(receivedQty).abs();
+                                String typeStr = expectedQty.compareTo(receivedQty) > 0 ? "SHORTAGE" : "OVERAGE";
+
+                                log.warn("Discrepancy detected for SKU {}: Expected={}, Received={}, Type={}",
+                                                item.getSkuId(), expectedQty, receivedQty, typeStr);
 
                                 IncidentItemEntity incItem = IncidentItemEntity.builder()
                                                 .skuId(item.getSkuId())
-                                                .damagedQty(shortageQty) // Hàng thiếu
+                                                .damagedQty(diffQty)
                                                 .expectedQty(expectedQty)
                                                 .actualQty(receivedQty)
-                                                .note("Hệ thống tự động ghi nhận thiếu hàng khi Keeper trình duyệt")
+                                                .note("Hệ thống tự động ghi nhận "
+                                                                + (typeStr.equals("SHORTAGE") ? "thiếu" : "thừa")
+                                                                + " hàng khi Keeper trình duyệt")
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)
                                                 .actionScrapQty(BigDecimal.ZERO)
+                                                .reasonCode(typeStr)
                                                 .build();
                                 incidentItems.add(incItem);
                         }
                 }
 
-                if (hasShortage) {
+                if (hasDiscrepancy) {
+                        // Check if it's shortage or overage for the main incident type
+                        boolean isAllShortage = incidentItems.stream()
+                                        .allMatch(i -> "SHORTAGE".equals(i.getReasonCode()));
+                        org.example.sep26management.application.enums.IncidentType mainType = isAllShortage
+                                        ? org.example.sep26management.application.enums.IncidentType.SHORTAGE
+                                        : org.example.sep26management.application.enums.IncidentType.OVERAGE;
+
                         IncidentEntity incident = IncidentEntity.builder()
                                         .warehouseId(order.getWarehouseId())
-                                        .incidentType(org.example.sep26management.application.enums.IncidentType.SHORTAGE)
+                                        .incidentType(mainType)
                                         .category(org.example.sep26management.application.enums.IncidentCategory.GATE)
-                                        .incidentCode("INC-SHORT-" + System.currentTimeMillis() % 10000)
-                                        .description("Hệ thống tự động tạo sự cố do phát hiện số lượng thực nhận ít hơn dự kiến.")
+                                        .incidentCode("INC-GATE-" + System.currentTimeMillis() % 10000)
+                                        .description("Hệ thống tự động tạo sự cố do phát hiện sai lệch số lượng (Thiếu/Thừa) khi Keeper trình duyệt.")
                                         .receivingId(id)
                                         .status("OPEN")
                                         .reportedBy(userId)
@@ -290,7 +304,7 @@ public class ReceivingOrderService {
                                 incidentItemRepo.save(incItem);
                         }
                         order.setStatus("PENDING_INCIDENT");
-                        log.info("GRN {} submitted with Shortage. Created Incident {} by userId={}",
+                        log.info("GRN {} submitted with Discrepancy. Created Incident {} by userId={}",
                                         order.getReceivingCode(), savedIncident.getIncidentId(), userId);
                 } else {
                         order.setStatus("SUBMITTED");
