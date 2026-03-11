@@ -166,6 +166,22 @@ public interface InventorySnapshotJpaRepository
                         @Param("locationId") Long locationId,
                         @Param("qty") java.math.BigDecimal qty);
 
+        @Modifying
+        @Transactional
+        @Query(value = """
+                        UPDATE inventory_snapshot
+                        SET quantity = quantity - :qty, last_updated = NOW()
+                        WHERE warehouse_id = :warehouseId
+                          AND sku_id = :skuId
+                          AND (CASE WHEN :lotId IS NULL THEN lot_id IS NULL ELSE lot_id = :lotId END)
+                          AND location_id = :locationId
+                        """, nativeQuery = true)
+        int decrementInventory(@Param("warehouseId") Long warehouseId,
+                        @Param("skuId") Long skuId,
+                        @Param("lotId") Long lotId,
+                        @Param("locationId") Long locationId,
+                        @Param("qty") java.math.BigDecimal qty);
+
         @Transactional
         @Modifying
         @Query(value = "DELETE FROM inventory_snapshot WHERE quantity = 0 AND reserved_qty = 0", nativeQuery = true)

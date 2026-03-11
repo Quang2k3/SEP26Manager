@@ -9,6 +9,7 @@ import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskItemEntity;
+import org.example.sep26management.infrastructure.persistence.repository.InventorySnapshotJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.LocationJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskJpaRepository;
@@ -35,6 +36,7 @@ public class PutawayTaskService {
     private final JdbcTemplate jdbcTemplate;
     private final LocationJpaRepository locationRepo;
     private final ZoneJpaRepository zoneRepo;
+    private final InventorySnapshotJpaRepository inventorySnapshotRepo;
     private final PutawaySuggestionService putawaySuggestionService;
 
     // ─── List tasks ────────────────────────────────────────────────────────────
@@ -126,23 +128,23 @@ public class PutawayTaskService {
             Long toLocationId = confirm.getLocationId();
             BigDecimal qty = confirm.getQty();
 
-            // Decrease from staging location
+            // Decrease from staging location (Use Repository)
             if (fromLocationId != null) {
-                jdbcTemplate.update(
-                        "UPDATE inventory_snapshot SET quantity = quantity - ?, last_updated = NOW() " +
-                                "WHERE warehouse_id = ? AND sku_id = ? AND location_id = ? AND COALESCE(lot_id,0) = ?",
-                        qty, task.getWarehouseId(), item.getSkuId(), fromLocationId,
-                        item.getLotId() != null ? item.getLotId() : 0L);
+                inventorySnapshotRepo.decrementInventory(
+                        task.getWarehouseId(),
+                        item.getSkuId(),
+                        item.getLotId(),
+                        fromLocationId,
+                        qty);
             }
 
-            // Upsert to target location
-            jdbcTemplate.update(
-                    "INSERT INTO inventory_snapshot (warehouse_id, sku_id, lot_id, location_id, quantity, last_updated) "
-                            +
-                            "VALUES (?, ?, ?, ?, ?, NOW()) " +
-                            "ON CONFLICT (warehouse_id, sku_id, lot_id_safe, location_id) " +
-                            "DO UPDATE SET quantity = inventory_snapshot.quantity + EXCLUDED.quantity, last_updated = NOW()",
-                    task.getWarehouseId(), item.getSkuId(), item.getLotId(), toLocationId, qty);
+            // Upsert to target location (Use Repository for safety)
+            inventorySnapshotRepo.upsertInventory(
+                    task.getWarehouseId(),
+                    item.getSkuId(),
+                    item.getLotId(),
+                    toLocationId,
+                    qty);
 
             // Record PUTAWAY transaction
             jdbcTemplate.update(
