@@ -111,8 +111,9 @@ public class PutawayTaskService {
     public ApiResponse<PutawayTaskResponse> confirm(Long taskId, PutawayConfirmRequest request, Long userId) {
         PutawayTaskEntity task = findTask(taskId);
 
-        if (!"OPEN".equals(task.getStatus()) && !"IN_PROGRESS".equals(task.getStatus())) {
-            throw new RuntimeException("Putaway task " + taskId + " is already " + task.getStatus());
+        if (!"PENDING".equals(task.getStatus()) && !"OPEN".equals(task.getStatus())
+                && !"IN_PROGRESS".equals(task.getStatus())) {
+            throw new RuntimeException("Putaway task " + taskId + " is in invalid status: " + task.getStatus());
         }
 
         task.setStatus("IN_PROGRESS");
