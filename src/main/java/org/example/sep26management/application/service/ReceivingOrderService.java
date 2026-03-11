@@ -580,6 +580,9 @@ public class ReceivingOrderService {
                                                 .grn(savedGrn)
                                                 .skuId(skuId)
                                                 .quantity(finalPassQty)
+                                                .lotNumber(item.getLotNumber())
+                                                .manufactureDate(item.getManufactureDate())
+                                                .expiryDate(item.getExpiryDate())
                                                 .build();
                                 grnItemRepo.save(grnItem);
                                 validGrnItems.add(grnItem);
@@ -607,6 +610,9 @@ public class ReceivingOrderService {
                                                         .skuCode(skuCode)
                                                         .skuName(skuName)
                                                         .quantity(gi.getQuantity())
+                                                        .lotNumber(gi.getLotNumber())
+                                                        .manufactureDate(gi.getManufactureDate())
+                                                        .expiryDate(gi.getExpiryDate())
                                                         .build();
                                 }).collect(Collectors.toList());
 
