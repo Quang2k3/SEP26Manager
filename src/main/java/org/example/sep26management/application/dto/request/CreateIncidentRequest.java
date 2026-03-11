@@ -53,9 +53,15 @@ public class CreateIncidentRequest {
         @NotNull(message = "skuId is required")
         private Long skuId;
 
-        @Schema(description = "Số lượng bị lỗi", example = "5.0")
+        @Schema(description = "Số lượng bị lỗi/thiếu", example = "5.0")
         @NotNull(message = "damagedQty is required")
         private BigDecimal damagedQty;
+
+        @Schema(description = "Số lượng dự kiến (nếu có)", example = "10.0")
+        private BigDecimal expectedQty;
+
+        @Schema(description = "Số lượng thực nhận (nếu có)", example = "5.0")
+        private BigDecimal actualQty;
 
         @Schema(description = "Mã lỗi chi tiết cho mặt hàng này", example = "TORN_PACKAGING")
         private String reasonCode;

@@ -24,8 +24,14 @@ public class IncidentItemResponse {
     @Schema(description = "Mã SKU", example = "SKU-IP15")
     private String skuCode;
 
-    @Schema(description = "Số lượng bị lỗi", example = "5.0")
+    @Schema(description = "Số lượng bị lỗi/thiếu", example = "5.0")
     private BigDecimal damagedQty;
+
+    @Schema(description = "Số lượng dự kiến", example = "10.0")
+    private BigDecimal expectedQty;
+
+    @Schema(description = "Số lượng thực tế (quét được)", example = "5.0")
+    private BigDecimal actualQty;
 
     @Schema(description = "Mã lỗi chi tiết", example = "TORN_PACKAGING")
     private String reasonCode;

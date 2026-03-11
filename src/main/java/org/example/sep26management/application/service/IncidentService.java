@@ -69,6 +69,8 @@ public class IncidentService {
                         .incident(saved)
                         .skuId(itemDto.getSkuId())
                         .damagedQty(itemDto.getDamagedQty())
+                        .expectedQty(itemDto.getExpectedQty())
+                        .actualQty(itemDto.getActualQty())
                         .reasonCode(itemDto.getReasonCode())
                         .note(itemDto.getNote())
                         .build();
@@ -317,6 +319,8 @@ public class IncidentService {
                     .skuName(sku != null ? sku.getSkuName() : null)
                     .skuCode(sku != null ? sku.getSkuCode() : null)
                     .damagedQty(item.getDamagedQty())
+                    .expectedQty(item.getExpectedQty())
+                    .actualQty(item.getActualQty())
                     .reasonCode(item.getReasonCode())
                     .note(item.getNote())
                     .build();

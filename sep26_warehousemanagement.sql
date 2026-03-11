@@ -1045,6 +1045,8 @@ CREATE TABLE incident_items (
     incident_id BIGINT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
     sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
     damaged_qty NUMERIC(12,2),
+    expected_qty NUMERIC(12,2),
+    actual_qty NUMERIC(12,2),
     reason_code VARCHAR(100),
     action_pass_qty NUMERIC(12,2) DEFAULT 0,
     action_return_qty NUMERIC(12,2) DEFAULT 0,
