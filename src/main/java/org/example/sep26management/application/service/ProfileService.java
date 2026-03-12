@@ -134,12 +134,27 @@ public class ProfileService {
         // Step 4: User modifies data
         // Step 6: Validate (already done by @Valid annotation in controller)
 
-        // Update basic info
-        user.setFullName(request.getFullName());
-        user.setPhone(request.getPhone());
-        user.setGender(request.getGender());
-        user.setDateOfBirth(request.getDateOfBirth());
-        user.setAddress(request.getAddress());
+        // Update basic info - only if provided (not null/blank)
+        if (request.getFullName() != null && !request.getFullName().trim().isEmpty()) {
+            user.setFullName(request.getFullName().trim());
+        }
+        
+        if (request.getPhone() != null && !request.getPhone().trim().isEmpty()) {
+            user.setPhone(request.getPhone().trim());
+        }
+        
+        if (request.getGender() != null && !request.getGender().trim().isEmpty()) {
+            user.setGender(request.getGender());
+        }
+        
+        if (request.getDateOfBirth() != null) {
+            user.setDateOfBirth(request.getDateOfBirth());
+        }
+        
+        if (request.getAddress() != null && !request.getAddress().trim().isEmpty()) {
+            user.setAddress(request.getAddress().trim());
+        }
+        
         user.setUpdatedBy(userId);
 
         // Handle avatar upload if provided
