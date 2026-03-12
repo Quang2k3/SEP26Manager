@@ -1,6 +1,5 @@
 package org.example.sep26management.application.dto.request;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.*;
@@ -20,12 +19,10 @@ import java.time.LocalDate;
 public class UpdateProfileRequest {
 
     @Schema(description = "Họ và tên người dùng", example = "Nguyễn Văn A")
-    @NotBlank(message = "Full name cannot be empty")
     @Size(max = 200, message = "Full name cannot exceed 200 characters")
     private String fullName;
 
     @Schema(description = "Số điện thoại liên lạc", example = "0987654321")
-    @NotBlank(message = "Phone number is required")
     @Pattern(regexp = "^[0-9]{9,15}$", message = "Phone number must be between 9 and 15 digits")
     private String phone;
 

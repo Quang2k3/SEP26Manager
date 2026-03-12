@@ -18,7 +18,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.beans.PropertyEditorSupport;
 
 import java.util.Map;
 
@@ -31,6 +35,19 @@ import java.util.Map;
 public class ProfileController {
 
     private final ProfileService profileService;
+
+    @InitBinder
+    public void initBinder(WebDataBinder binder) {
+        // Handle empty string to MultipartFile conversion for Swagger "Send empty value"
+        binder.registerCustomEditor(MultipartFile.class, new PropertyEditorSupport() {
+            @Override
+            public void setAsText(String text) {
+                if (text == null || text.trim().isEmpty()) {
+                    setValue(null);
+                }
+            }
+        });
+    }
 
     @GetMapping("")
     @Operation(summary = "Xem hồ sơ cá nhân", description = "Lấy thông tin profile của user đang đăng nhập.\n\n"

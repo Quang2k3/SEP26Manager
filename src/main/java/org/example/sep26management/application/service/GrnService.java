@@ -29,6 +29,7 @@ public class GrnService {
     private final PutawaySuggestionService putawaySuggestionService;
     private final JdbcTemplate jdbcTemplate;
     private final ReceivingItemJpaRepository receivingItemRepo;
+    private final InventoryLotJpaRepository inventoryLotRepo;
     private final InventoryTransactionJpaRepository inventoryTransactionRepo;
     private final InventorySnapshotJpaRepository inventorySnapshotRepo;
 
@@ -144,6 +145,41 @@ public class GrnService {
         task = putawayTaskRepo.save(task);
 
         for (GrnItemEntity item : items) {
+            // Tìm receivingItem tương ứng (ưu tiên match theo SKU + lotNumber + expiryDate nếu có)
+            ReceivingItemEntity matchedReceivingItem = rcvItems.stream()
+                    .filter(r -> r.getSkuId().equals(item.getSkuId())
+                            && java.util.Objects.equals(r.getLotNumber(), item.getLotNumber())
+                            && java.util.Objects.equals(r.getExpiryDate(), item.getExpiryDate()))
+                    .findFirst()
+                    // fallback: match theo SKU nếu không tìm thấy bản ghi khớp lot/expiry
+                    .orElseGet(() -> rcvItems.stream()
+                            .filter(r -> r.getSkuId().equals(item.getSkuId()))
+                            .findFirst()
+                            .orElse(null));
+
+            Long recItemId = matchedReceivingItem != null ? matchedReceivingItem.getReceivingItemId() : null;
+
+            // 0. Tạo hoặc lấy InventoryLot cho dòng này (để bám FEFO theo lot/expiry)
+            Long lotId = null;
+            if (item.getLotNumber() != null && !item.getLotNumber().isBlank()) {
+                Optional<InventoryLotEntity> lotOpt = inventoryLotRepo
+                        .findBySkuIdAndLotNumberAndExpiryDate(
+                                item.getSkuId(),
+                                item.getLotNumber(),
+                                item.getExpiryDate());
+
+                InventoryLotEntity lot = lotOpt.orElseGet(() -> {
+                    InventoryLotEntity newLot = InventoryLotEntity.builder()
+                            .skuId(item.getSkuId())
+                            .lotNumber(item.getLotNumber())
+                            .manufactureDate(item.getManufactureDate())
+                            .expiryDate(item.getExpiryDate())
+                            .receivingItemId(recItemId)
+                            .build();
+                    return inventoryLotRepo.save(newLot);
+                });
+                lotId = lot.getLotId();
+            }
             // 1. Ghi log Transaction (Nhập kho vào staging)
             InventoryTransactionEntity tx = InventoryTransactionEntity.builder()
                     .warehouseId(grn.getWarehouseId())
@@ -157,11 +193,11 @@ public class GrnService {
                     .build();
             inventoryTransactionRepo.save(tx);
 
-            // 2. Cập nhật Snapshot (Sử dụng Native Upsert đã sửa)
+            // 2. Cập nhật Snapshot (Sử dụng Native Upsert đã sửa) — bám theo lotId để phục vụ FEFO
             inventorySnapshotRepo.upsertInventory(
                     grn.getWarehouseId(),
                     item.getSkuId(),
-                    null, // lotId = null cho luồng cơ bản
+                    lotId,
                     stagingLocationId,
                     item.getQuantity());
 
@@ -173,19 +209,14 @@ public class GrnService {
                 destLocationId = sug.get().getSuggestedLocationId();
             }
 
-            // Tìm receivingItemId tương ứng
-            Long recItemId = rcvItems.stream()
-                    .filter(r -> r.getSkuId().equals(item.getSkuId()))
-                    .map(ReceivingItemEntity::getReceivingItemId)
-                    .findFirst()
-                    .orElse(-1L);
-
             // 4. Sinh Putaway Task Item
             PutawayTaskItemEntity taskItem = PutawayTaskItemEntity.builder()
                     .putawayTask(task)
                     .receivingItemId(recItemId)
                     .skuId(item.getSkuId())
+                    .lotId(lotId)
                     .quantity(item.getQuantity())
+                    .putawayQty(java.math.BigDecimal.ZERO)
                     .suggestedLocationId(destLocationId)
                     .build();
             putawayTaskItemRepo.save(taskItem);
