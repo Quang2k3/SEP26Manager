@@ -110,14 +110,42 @@ public class IncidentController {
     /** POST /v1/incidents/{id}/resolve-discrepancy — Manager xử lý sai lệch số lượng */
     @PostMapping("/{id}/resolve-discrepancy")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Xử lý sự cố sai lệch số lượng (Manager)", description = "Manager xử lý sai lệch số lượng (thừa/thiếu) từng item riêng biệt.\n\n"
-            + "**Actions cho hàng THIẾU (SHORTAGE):**\n"
-            + "- `CLOSE_SHORT`: Chốt thiếu, chấp nhận số lượng đã nhận.\n"
-            + "- `WAIT_BACKORDER`: Chờ nhà cung cấp giao bù.\n\n"
-            + "**Actions cho hàng THỪA (OVERAGE):**\n"
-            + "- `ACCEPT`: Nhận hàng thừa, nhập kho tất cả.\n"
-            + "- `RETURN`: Trả hàng thừa cho nhà cung cấp.\n\n"
-            + "Sau khi resolve → đơn chuyển về SUBMITTED cho QC kiểm tra.")
+    @Operation(summary = "Xử lý sự cố sai lệch số lượng (Manager)",
+            description = "Manager xử lý sai lệch số lượng (thừa/thiếu) **từng item riêng biệt**.\n\n"
+                    + "## Quy trình\n"
+                    + "1. Gọi `GET /v1/incidents/{id}` để lấy danh sách items kèm `incidentItemId` và `reasonCode`\n"
+                    + "2. Dựa vào `reasonCode` để hiển thị lựa chọn phù hợp cho Manager\n"
+                    + "3. Gửi kết quả quyết định xuống API này\n\n"
+                    + "## Actions theo loại sai lệch\n\n"
+                    + "| reasonCode | Actions khả dụng | Ý nghĩa |\n"
+                    + "|---|---|---|\n"
+                    + "| `SHORTAGE` | `CLOSE_SHORT` | Chốt thiếu, chấp nhận số lượng đã nhận |\n"
+                    + "| `SHORTAGE` | `WAIT_BACKORDER` | Chờ NCC giao bù phần thiếu |\n"
+                    + "| `OVERAGE` | `ACCEPT` | Nhận hàng thừa, nhập kho tất cả |\n"
+                    + "| `OVERAGE` | `RETURN` | Trả hàng thừa cho NCC |\n\n"
+                    + "## Ví dụ đầy đủ\n\n"
+                    + "**Bước 1**: `GET /v1/incidents/9` trả ra:\n"
+                    + "```json\n"
+                    + "\"items\": [\n"
+                    + "  { \"incidentItemId\": 11, \"skuCode\": \"SKU001\", \"expectedQty\": 5, \"actualQty\": 4, \"reasonCode\": \"SHORTAGE\" },\n"
+                    + "  { \"incidentItemId\": 12, \"skuCode\": \"SKU002\", \"expectedQty\": 5, \"actualQty\": 8, \"reasonCode\": \"OVERAGE\" },\n"
+                    + "  { \"incidentItemId\": 13, \"skuCode\": \"SKU003\", \"expectedQty\": 5, \"actualQty\": 3, \"reasonCode\": \"SHORTAGE\" }\n"
+                    + "]\n"
+                    + "```\n\n"
+                    + "**Bước 2**: FE hiển thị cho Manager chọn action cho từng item, "
+                    + "ví dụ: SKU001 thiếu 1 → chọn 'Chốt thiếu', SKU002 thừa 3 → chọn 'Trả hàng'\n\n"
+                    + "**Bước 3**: Gửi request:\n"
+                    + "```json\n"
+                    + "{\n"
+                    + "  \"items\": [\n"
+                    + "    { \"incidentItemId\": 11, \"action\": \"CLOSE_SHORT\" },\n"
+                    + "    { \"incidentItemId\": 12, \"action\": \"RETURN\" },\n"
+                    + "    { \"incidentItemId\": 13, \"action\": \"WAIT_BACKORDER\" }\n"
+                    + "  ],\n"
+                    + "  \"note\": \"Đã liên hệ NCC về phần thiếu SKU003\"\n"
+                    + "}\n"
+                    + "```\n\n"
+                    + "**Kết quả**: Incident → RESOLVED, Đơn hàng → SUBMITTED (QC kiểm tra).")
     public ApiResponse<IncidentResponse> resolveDiscrepancy(
             @PathVariable Long id,
             @Valid @RequestBody org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest request,
