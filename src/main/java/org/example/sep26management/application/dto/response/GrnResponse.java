@@ -28,9 +28,6 @@ public class GrnResponse {
     @Schema(description = "Loại nguồn", example = "SUPPLIER")
     private String sourceType;
 
-    @Schema(description = "ID kho chuyển tới (Nếu Transfer)", example = "2")
-    private Long sourceWarehouseId;
-
     @Schema(description = "ID nhà cung cấp", example = "5")
     private Long supplierId;
 

@@ -16,6 +16,10 @@ import java.util.List;
 @Builder
 public class ReceivingOrderRequest {
 
+    @Schema(description = "ID kho nhập (user chọn từ API get-all warehouses)", example = "3")
+    @jakarta.validation.constraints.NotNull(message = "warehouseId is required")
+    private Long warehouseId;
+
     @Schema(description = "Loại nguồn (Ví dụ: SUPPLIER, TRANSFER, RETURN)", example = "SUPPLIER")
     @NotBlank(message = "sourceType is required")
     private String sourceType;
@@ -25,9 +29,6 @@ public class ReceivingOrderRequest {
 
     @Schema(description = "Mã nhà cung cấp (Lấy từ API danh sách supplier)", example = "SUP001")
     private String supplierCode;
-
-    @Schema(description = "ID kho chuyển tới (Nếu là Transfer)", example = "2")
-    private Long sourceWarehouseId;
 
     @Schema(description = "Ghi chú ban đầu", example = "Xe tải 29C-12345 giao hàng lúc 10h")
     private String note;
