@@ -51,26 +51,11 @@ public class ReceivingOrderEntity {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    @Column(name = "putaway_created_at")
-    private LocalDateTime putawayCreatedAt;
-
-    @Column(name = "putaway_done_by")
-    private Long putawayDoneBy;
-
-    @Column(name = "putaway_done_at")
-    private LocalDateTime putawayDoneAt;
-
     @Column(name = "approved_by")
     private Long approvedBy;
 
     @Column(name = "approved_at")
     private LocalDateTime approvedAt;
-
-    @Column(name = "confirmed_by")
-    private Long confirmedBy;
-
-    @Column(name = "confirmed_at")
-    private LocalDateTime confirmedAt;
 
     @Column(name = "rejected_by")
     private Long rejectedBy;

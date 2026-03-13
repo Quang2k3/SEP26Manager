@@ -1146,13 +1146,8 @@ CREATE TABLE public.receiving_orders (
     created_by bigint NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
-    putaway_created_at timestamp without time zone,
-    putaway_done_by bigint,
-    putaway_done_at timestamp without time zone,
     approved_by bigint,
     approved_at timestamp without time zone,
-    confirmed_by bigint,
-    confirmed_at timestamp without time zone,
     rejected_by bigint,
     rejected_at timestamp without time zone,
     reject_reason text,
@@ -4461,12 +4456,6 @@ ALTER TABLE ONLY public.receiving_orders
     ADD CONSTRAINT receiving_orders_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.users(user_id);
 
 
---
--- Name: receiving_orders receiving_orders_confirmed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.receiving_orders
-    ADD CONSTRAINT receiving_orders_confirmed_by_fkey FOREIGN KEY (confirmed_by) REFERENCES public.users(user_id);
 
 
 --
@@ -4477,12 +4466,6 @@ ALTER TABLE ONLY public.receiving_orders
     ADD CONSTRAINT receiving_orders_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(user_id);
 
 
---
--- Name: receiving_orders receiving_orders_putaway_done_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.receiving_orders
-    ADD CONSTRAINT receiving_orders_putaway_done_by_fkey FOREIGN KEY (putaway_done_by) REFERENCES public.users(user_id);
 
 
 --

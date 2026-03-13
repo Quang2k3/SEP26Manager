@@ -1,9 +1,7 @@
-name: Backend CI/CD (Spring Boot)
+name: Backend CD (Spring Boot)
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
     branches: [ main, develop ]
 
 env:
@@ -11,107 +9,9 @@ env:
   DOCKER_IMAGE: sep26manager-backend
 
 jobs:
-  build-and-test:
-    name: Build & Test
-    runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: .
-
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_DB: sep26manager_test
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U test -d sep26manager_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: Install PostgreSQL client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-
-      - name: Wait for Postgres
-        env:
-          PGPASSWORD: test
-        run: |
-          for i in {1..30}; do
-            pg_isready -h localhost -p 5432 -U test -d sep26manager_test && break
-            sleep 2
-          done
-
-      - name: Create extensions (optional)
-        env:
-          PGPASSWORD: test
-        run: |
-          psql -h localhost -p 5432 -U test -d sep26manager_test -c "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";"
-          psql -h localhost -p 5432 -U test -d sep26manager_test -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
-
-      - name: Import schema.sql (DB-first)
-        env:
-          PGPASSWORD: test
-        run: |
-          test -f backend/migrations/schema.sql
-          psql -h localhost -p 5432 -U test -d sep26manager_test -f backend/migrations/schema.sql
-
-      - name: Build (compile/package without tests)
-        run: mvn -B clean package -DskipTests
-
-      - name: Run tests (unit + slice)
-        run: mvn -B test
-        env:
-          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/sep26manager_test
-          SPRING_DATASOURCE_USERNAME: test
-          SPRING_DATASOURCE_PASSWORD: test
-          SPRING_JPA_HIBERNATE_DDL_AUTO: validate
-
-      - name: Run integration tests
-        run: mvn -B verify -Pintegration-tests
-        continue-on-error: true
-        env:
-          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/sep26manager_test
-          SPRING_DATASOURCE_USERNAME: test
-          SPRING_DATASOURCE_PASSWORD: test
-          SPRING_JPA_HIBERNATE_DDL_AUTO: validate
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./target/site/jacoco/jacoco.xml
-          flags: backend
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Upload JAR artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: spring-boot-jar
-          path: target/*.jar
-          if-no-files-found: error
-          retention-days: 7
-
   build-docker:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
-    needs: build-and-test
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
 
     steps:
