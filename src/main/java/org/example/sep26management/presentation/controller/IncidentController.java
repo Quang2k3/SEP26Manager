@@ -8,7 +8,7 @@ import org.example.sep26management.application.enums.IncidentCategory;
 import org.example.sep26management.application.dto.request.CreateIncidentRequest;
 import org.example.sep26management.application.dto.request.RejectRequest;
 import org.example.sep26management.application.dto.request.ResolveIncidentRequest;
-import org.example.sep26management.application.dto.request.ResolveShortageRequest;
+
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.IncidentResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
@@ -107,19 +107,22 @@ public class IncidentController {
         return incidentService.resolveIncident(id, request, extractUserId(auth));
     }
 
-    /** POST /v1/incidents/{id}/resolve-shortage — Manager xử lý sự cố thiếu hàng */
-    @PostMapping("/{id}/resolve-shortage")
+    /** POST /v1/incidents/{id}/resolve-discrepancy — Manager xử lý sai lệch số lượng */
+    @PostMapping("/{id}/resolve-discrepancy")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Xử lý sự cố thiếu hàng (Manager)", description = "Manager xử lý sự cố khi số lượng quét được ít hơn số lượng mong đợi "
-            + "(thường được hệ thống tự động tạo khi hoàn tất đếm).\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Sự cố (Incident ID).\n"
-            + "- `ResolveShortageRequest.resolution`: Chọn `CLOSE_SHORT` (Chốt thiếu, kết thúc đơn) hoặc `WAIT_BACKORDER` (Chờ giao bù, nhập từng phần).")
-    public ApiResponse<IncidentResponse> resolveShortage(
+    @Operation(summary = "Xử lý sự cố sai lệch số lượng (Manager)", description = "Manager xử lý sai lệch số lượng (thừa/thiếu) từng item riêng biệt.\n\n"
+            + "**Actions cho hàng THIẾU (SHORTAGE):**\n"
+            + "- `CLOSE_SHORT`: Chốt thiếu, chấp nhận số lượng đã nhận.\n"
+            + "- `WAIT_BACKORDER`: Chờ nhà cung cấp giao bù.\n\n"
+            + "**Actions cho hàng THỪA (OVERAGE):**\n"
+            + "- `ACCEPT`: Nhận hàng thừa, nhập kho tất cả.\n"
+            + "- `RETURN`: Trả hàng thừa cho nhà cung cấp.\n\n"
+            + "Sau khi resolve → đơn chuyển về SUBMITTED cho QC kiểm tra.")
+    public ApiResponse<IncidentResponse> resolveDiscrepancy(
             @PathVariable Long id,
-            @Valid @RequestBody ResolveShortageRequest request,
+            @Valid @RequestBody org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest request,
             Authentication auth) {
-        return incidentService.resolveShortage(id, request.getResolution(), extractUserId(auth));
+        return incidentService.resolveDiscrepancy(id, request, extractUserId(auth));
     }
 
     private Long extractUserId(Authentication auth) {

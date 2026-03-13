@@ -340,10 +340,10 @@ public class ReceivingOrderService {
                 }
 
                 if (hasDiscrepancy) {
-                        // Check if it's shortage or overage for the main incident type
-                        boolean isAllShortage = incidentItems.stream()
-                                        .allMatch(i -> "SHORTAGE".equals(i.getReasonCode()));
-                        org.example.sep26management.application.enums.IncidentType mainType = isAllShortage
+                        // Determine main incident type: SHORTAGE if any item is short, else OVERAGE
+                        boolean hasShortage = incidentItems.stream()
+                                        .anyMatch(i -> "SHORTAGE".equals(i.getReasonCode()));
+                        org.example.sep26management.application.enums.IncidentType mainType = hasShortage
                                         ? org.example.sep26management.application.enums.IncidentType.SHORTAGE
                                         : org.example.sep26management.application.enums.IncidentType.OVERAGE;
 
@@ -593,26 +593,36 @@ public class ReceivingOrderService {
 
                 // Tính toán số lượng GRN (Pass/Nhập kho) cho từng SKU
                 List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
-                List<IncidentItemEntity> allIncidentItems = new ArrayList<>();
+
+                // Only collect damagedQty from QC QUALITY incidents (actual physical damage),
+                // NOT from SHORTAGE/OVERAGE discrepancy incidents (those are already resolved
+                // by adjusting receivedQty in resolveDiscrepancy)
+                List<IncidentItemEntity> qcDamageItems = new ArrayList<>();
                 for (IncidentEntity inc : incidents) {
-                        // Chỉ tính những incident đã RESOLVED
-                        if ("RESOLVED".equals(inc.getStatus())) {
-                                allIncidentItems.addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
+                        if ("RESOLVED".equals(inc.getStatus())
+                                        && inc.getIncidentType() != null
+                                        && !org.example.sep26management.application.enums.IncidentType.SHORTAGE
+                                                        .equals(inc.getIncidentType())
+                                        && !org.example.sep26management.application.enums.IncidentType.OVERAGE
+                                                        .equals(inc.getIncidentType())) {
+                                qcDamageItems
+                                                .addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
                         }
                 }
 
-                // Map skuId -> tổng damagedQty, actionPassQty
-                Map<Long, BigDecimal> skuDamagedMap = allIncidentItems.stream()
+                // Map skuId -> total actual damage from QC (not discrepancy)
+                Map<Long, BigDecimal> skuDamagedMap = qcDamageItems.stream()
                                 .collect(Collectors.groupingBy(IncidentItemEntity::getSkuId,
                                                 Collectors.reducing(BigDecimal.ZERO,
                                                                 i -> i.getDamagedQty() != null ? i.getDamagedQty()
                                                                                 : BigDecimal.ZERO,
                                                                 BigDecimal::add)));
 
-                Map<Long, BigDecimal> skuManagerPassMap = allIncidentItems.stream()
+                Map<Long, BigDecimal> skuManagerPassMap = qcDamageItems.stream()
                                 .collect(Collectors.groupingBy(IncidentItemEntity::getSkuId,
                                                 Collectors.reducing(BigDecimal.ZERO,
-                                                                i -> i.getActionPassQty() != null ? i.getActionPassQty()
+                                                                i -> i.getActionPassQty() != null
+                                                                                ? i.getActionPassQty()
                                                                                 : BigDecimal.ZERO,
                                                                 BigDecimal::add)));
 
@@ -633,8 +643,10 @@ public class ReceivingOrderService {
 
                 for (ReceivingItemEntity item : items) {
                         Long skuId = item.getSkuId();
+                        // receivedQty already reflects Manager's decision from resolveDiscrepancy()
                         BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
                                         : BigDecimal.ZERO;
+                        // Only subtract actual QC damage, not discrepancy amounts
                         BigDecimal damagedQty = skuDamagedMap.getOrDefault(skuId, BigDecimal.ZERO);
                         BigDecimal managerPassQty = skuManagerPassMap.getOrDefault(skuId, BigDecimal.ZERO);
 

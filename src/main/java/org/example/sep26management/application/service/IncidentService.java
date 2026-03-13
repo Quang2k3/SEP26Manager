@@ -224,67 +224,118 @@ public class IncidentService {
         return ApiResponse.success("Incident resolved successfully.", toResponse(incident));
     }
 
-    // ─── Resolve Shortage Incident (Manager chốt thiếu / chờ) ──────────────────
+    // ─── Resolve Discrepancy Incident (Manager xử lý từng item thừa/thiếu) ──────
 
     @Transactional
-    public ApiResponse<IncidentResponse> resolveShortage(Long id, String resolution, Long managerId) {
+    public ApiResponse<IncidentResponse> resolveDiscrepancy(Long id,
+            org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest request,
+            Long managerId) {
         IncidentEntity incident = incidentRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("Incident not found: " + id));
 
         if (!"OPEN".equals(incident.getStatus())) {
-            throw new RuntimeException("Shortage incident is not in OPEN status. Current: " + incident.getStatus());
+            throw new RuntimeException(
+                    "Incident is not in OPEN status. Current: " + incident.getStatus());
         }
 
-        if (!org.example.sep26management.application.enums.IncidentType.SHORTAGE.equals(incident.getIncidentType())) {
-            throw new RuntimeException("This API is only for resolving SHORTAGE incidents.");
+        if (!org.example.sep26management.application.enums.IncidentType.SHORTAGE.equals(incident.getIncidentType())
+                && !org.example.sep26management.application.enums.IncidentType.OVERAGE
+                        .equals(incident.getIncidentType())) {
+            throw new RuntimeException(
+                    "This API is only for resolving quantity discrepancy incidents (SHORTAGE/OVERAGE).");
         }
 
         ReceivingOrderEntity order = receivingOrderRepo.findById(incident.getReceivingId())
                 .orElseThrow(() -> new RuntimeException("Receiving order not found: " + incident.getReceivingId()));
 
-        if ("CLOSE_SHORT".equalsIgnoreCase(resolution)) {
-            // Manager decides to close the order as short (chốt thiếu)
-            // We need to update the expectedQty of the receiving items to match the
-            // receivedQty
-            List<IncidentItemEntity> incidentItems = incidentItemRepo
-                    .findByIncidentIncidentId(incident.getIncidentId());
-            for (IncidentItemEntity incItem : incidentItems) {
-                // Find corresponding receiving item
-                org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity rcItem = receivingItemRepo
-                        .findByReceivingOrderReceivingId(order.getReceivingId()).stream()
-                        .filter(itm -> itm.getSkuId().equals(incItem.getSkuId()))
-                        .findFirst().orElse(null);
+        boolean hasWaitBackorder = false;
 
-                if (rcItem != null) {
-                    // Cập nhật lại expectedQty bằng với receivedQty
-                    rcItem.setExpectedQty(rcItem.getReceivedQty());
-                    receivingItemRepo.save(rcItem);
-                }
+        for (org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest.ItemResolution res : request
+                .getItems()) {
+            IncidentItemEntity incItem = incidentItemRepo.findById(res.getIncidentItemId())
+                    .orElseThrow(
+                            () -> new RuntimeException("Incident item not found: " + res.getIncidentItemId()));
+
+            if (!incItem.getIncident().getIncidentId().equals(id)) {
+                throw new RuntimeException("Incident item " + res.getIncidentItemId()
+                        + " does not belong to incident " + id);
             }
-            incident.setDescription(
-                    incident.getDescription() + "\n[Manager Decision]: CLOSE_SHORT (Chốt thiếu - Đơn hàng kết thúc)");
-            order.setStatus("SUBMITTED"); // Return to normal flow to allow QC / GRN generation for the received items
 
-        } else if ("WAIT_BACKORDER".equalsIgnoreCase(resolution)) {
-            // Manager decides to wait for the backorder (chờ giao bù - partial receipt)
-            // The expectedQty remains unchanged. The order will proceed for the received
-            // items, and later become PARTIALLY_RECEIVED
-            incident.setDescription(
-                    incident.getDescription() + "\n[Manager Decision]: WAIT_BACKORDER (Chờ giao bù - Nhập từng phần)");
-            order.setStatus("SUBMITTED"); // Return to normal flow for the currently received items
+            // Find corresponding receiving item
+            org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity rcItem = receivingItemRepo
+                    .findByReceivingOrderReceivingId(order.getReceivingId()).stream()
+                    .filter(itm -> itm.getSkuId().equals(incItem.getSkuId()))
+                    .findFirst().orElse(null);
 
-        } else {
-            throw new IllegalArgumentException(
-                    "Invalid resolution: " + resolution + ". Must be CLOSE_SHORT or WAIT_BACKORDER");
+            String action = res.getAction().toUpperCase();
+
+            switch (action) {
+                case "CLOSE_SHORT":
+                    // Chốt thiếu: expectedQty = receivedQty (accept what was received)
+                    if (rcItem != null) {
+                        rcItem.setExpectedQty(rcItem.getReceivedQty());
+                        receivingItemRepo.save(rcItem);
+                    }
+                    incItem.setNote(appendNote(incItem.getNote(),
+                            "[Manager]: CLOSE_SHORT — Chốt thiếu, chấp nhận số lượng nhận được"));
+                    break;
+
+                case "WAIT_BACKORDER":
+                    // Chờ giao bù: giữ nguyên expectedQty, đánh dấu chờ
+                    hasWaitBackorder = true;
+                    incItem.setNote(appendNote(incItem.getNote(),
+                            "[Manager]: WAIT_BACKORDER — Chờ giao bù cho phần thiếu"));
+                    break;
+
+                case "ACCEPT":
+                    // Nhận hàng thừa: expectedQty = receivedQty (accept all received)
+                    if (rcItem != null) {
+                        rcItem.setExpectedQty(rcItem.getReceivedQty());
+                        receivingItemRepo.save(rcItem);
+                    }
+                    incItem.setActionPassQty(incItem.getDamagedQty()); // pass the overage qty
+                    incItem.setNote(appendNote(incItem.getNote(),
+                            "[Manager]: ACCEPT — Nhận hàng thừa, nhập kho tất cả"));
+                    break;
+
+                case "RETURN":
+                    // Trả hàng thừa: receivedQty = expectedQty (return overage to supplier)
+                    if (rcItem != null) {
+                        incItem.setActionReturnQty(incItem.getDamagedQty()); // return the overage qty
+                        rcItem.setReceivedQty(rcItem.getExpectedQty());
+                        receivingItemRepo.save(rcItem);
+                    }
+                    incItem.setNote(appendNote(incItem.getNote(),
+                            "[Manager]: RETURN — Trả hàng thừa cho nhà cung cấp"));
+                    break;
+
+                default:
+                    throw new IllegalArgumentException(
+                            "Invalid action: " + action
+                                    + ". Must be CLOSE_SHORT, WAIT_BACKORDER, ACCEPT, or RETURN");
+            }
+
+            incidentItemRepo.save(incItem);
         }
 
+        // Resolve incident and move order to SUBMITTED for QC
         incident.setStatus("RESOLVED");
+        if (request.getNote() != null && !request.getNote().isBlank()) {
+            incident.setDescription(
+                    incident.getDescription() + "\n[Manager Resolution Note] " + request.getNote());
+        }
         incidentRepo.save(incident);
+
+        order.setStatus("SUBMITTED");
         receivingOrderRepo.save(order);
 
-        log.info("Shortage Incident {} resolved as {} by managerId={}", incident.getIncidentCode(), resolution,
-                managerId);
-        return ApiResponse.success("Shortage incident resolved as: " + resolution, toResponse(incident));
+        log.info("Discrepancy Incident {} resolved by managerId={}, hasWaitBackorder={}",
+                incident.getIncidentCode(), managerId, hasWaitBackorder);
+        return ApiResponse.success("Discrepancy incident resolved successfully.", toResponse(incident));
+    }
+
+    private String appendNote(String existing, String newNote) {
+        return existing != null ? existing + " | " + newNote : newNote;
     }
 
     // ─── Check if receiving order has pending incidents ──────────────────────
