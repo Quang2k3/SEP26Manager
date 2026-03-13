@@ -60,9 +60,19 @@ public class PutawaySuggestionService {
     public Optional<PutawaySuggestion> suggestLocation(Long warehouseId, Long skuId, BigDecimal qty) {
         SkuEntity sku = skuRepo.findByIdWithCategory(skuId).orElse(null);
         if (sku == null) {
-            log.warn("Putaway suggestion: SKU {} not found", skuId);
+            log.warn("Putaway suggestion FAILED: SKU {} not found in database", skuId);
             return Optional.empty();
         }
+
+        if (sku.getCategory() == null) {
+            log.warn("Putaway suggestion FAILED: SKU {} ({}) has no category assigned", skuId, sku.getSkuCode());
+            return Optional.empty();
+        }
+
+        String categoryCode = sku.getCategory().getCategoryCode();
+        String expectedZoneCode = "Z-" + categoryCode;
+        log.info("Putaway suggestion: SKU {} ({}) → category={} → looking for zone '{}'",
+                skuId, sku.getSkuCode(), categoryCode, expectedZoneCode);
 
         PutawaySuggestionRequest req = new PutawaySuggestionRequest();
         req.setWarehouseId(warehouseId);

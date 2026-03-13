@@ -23,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -95,12 +97,24 @@ public class PutawayTaskService {
         PutawayTaskEntity task = findTask(taskId);
         List<PutawayTaskItemEntity> items = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
 
-        List<PutawaySuggestion> suggestions = items.stream()
-                .map(item -> putawaySuggestionService.suggestLocation(
-                        task.getWarehouseId(), item.getSkuId(), item.getQuantity()))
-                .filter(java.util.Optional::isPresent)
-                .map(java.util.Optional::get)
-                .collect(Collectors.toList());
+        List<PutawaySuggestion> suggestions = new ArrayList<>();
+        for (PutawayTaskItemEntity item : items) {
+            Optional<PutawaySuggestion> suggestion = putawaySuggestionService.suggestLocation(
+                    task.getWarehouseId(), item.getSkuId(), item.getQuantity());
+            if (suggestion.isPresent()) {
+                suggestions.add(suggestion.get());
+            } else {
+                // Return a fallback entry so the caller knows which items couldn't be matched
+                PutawaySuggestion fallback = PutawaySuggestion.builder()
+                        .skuId(item.getSkuId())
+                        .reason("No matching zone or available BIN found for this SKU. "
+                                + "Check: (1) SKU has category assigned, "
+                                + "(2) Zone 'Z-{categoryCode}' exists and is active, "
+                                + "(3) Zone has active BIN locations with capacity.")
+                        .build();
+                suggestions.add(fallback);
+            }
+        }
 
         return ApiResponse.success("OK", suggestions);
     }

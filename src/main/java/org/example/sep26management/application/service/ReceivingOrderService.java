@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
-import org.example.sep26management.application.dto.response.PutawaySuggestion;
+
 import org.example.sep26management.application.dto.response.ReceivingItemResponse;
 import org.example.sep26management.application.dto.response.ReceivingOrderResponse;
 import org.example.sep26management.infrastructure.persistence.entity.*;
@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -642,13 +643,40 @@ public class ReceivingOrderService {
                         BigDecimal finalPassQty = goodQty.add(managerPassQty);
 
                         if (finalPassQty.compareTo(BigDecimal.ZERO) > 0) {
+                                // Auto-calculate lot/date if missing
+                                String lotNumber = item.getLotNumber();
+                                LocalDate manufactureDate = item.getManufactureDate();
+                                LocalDate expiryDate = item.getExpiryDate();
+
+                                SkuEntity sku = skuRepo.findById(skuId).orElse(null);
+
+                                if (lotNumber == null || lotNumber.isBlank()) {
+                                        String skuCode = sku != null ? sku.getSkuCode() : String.valueOf(skuId);
+                                        lotNumber = "LOT-" + order.getReceivingCode() + "-" + skuCode;
+                                        item.setLotNumber(lotNumber);
+                                }
+
+                                if (manufactureDate == null) {
+                                        manufactureDate = LocalDate.now();
+                                        item.setManufactureDate(manufactureDate);
+                                }
+
+                                if (expiryDate == null && sku != null && sku.getShelfLifeDays() != null
+                                                && sku.getShelfLifeDays() > 0) {
+                                        expiryDate = manufactureDate.plusDays(sku.getShelfLifeDays());
+                                        item.setExpiryDate(expiryDate);
+                                }
+
+                                // Save back to receiving item for record-keeping
+                                receivingItemRepo.save(item);
+
                                 GrnItemEntity grnItem = GrnItemEntity.builder()
                                                 .grn(savedGrn)
                                                 .skuId(skuId)
                                                 .quantity(finalPassQty)
-                                                .lotNumber(item.getLotNumber())
-                                                .manufactureDate(item.getManufactureDate())
-                                                .expiryDate(item.getExpiryDate())
+                                                .lotNumber(lotNumber)
+                                                .manufactureDate(manufactureDate)
+                                                .expiryDate(expiryDate)
                                                 .build();
                                 grnItemRepo.save(grnItem);
                                 validGrnItems.add(grnItem);
