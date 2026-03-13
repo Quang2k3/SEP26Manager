@@ -411,7 +411,7 @@ public class ScannerPageController {
                 "  if(inflight) return;\n" +
                 "  inflight=true;\n" +
                 "  setStatus('Đang gửi: '+barcode);\n" +
-                "  fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify({barcode:barcode,qty:qty,condition:currentCondition})})\n"
+                "  fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify({barcode:barcode,qty:qty,condition:currentCondition,receivingId:RECEIVING_ID})})\n"
                 +
                 "  .then(function(r){return r.text().then(function(txt){try{return JSON.parse(txt);}catch(e){return {success:false,message:'HTTP '+r.status+': '+txt.substring(0,140)};}});})\n"
                 +

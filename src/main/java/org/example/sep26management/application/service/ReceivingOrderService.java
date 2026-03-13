@@ -277,24 +277,26 @@ public class ReceivingOrderService {
                                 if (sessionLines != null && !sessionLines.isEmpty()) {
                                         log.info("Syncing {} lines from session {} into order {} before submit",
                                                         sessionLines.size(), activeSessionId.get(), id);
+
+                                        // Aggregate total qty per skuId (PASS + FAIL lines combined)
+                                        Map<Long, BigDecimal> skuTotalQty = new java.util.HashMap<>();
                                         for (ScanLineItem sLine : sessionLines) {
+                                                if (sLine.getSkuId() != null && sLine.getQty() != null) {
+                                                        skuTotalQty.merge(sLine.getSkuId(), sLine.getQty(),
+                                                                        BigDecimal::add);
+                                                }
+                                        }
+
+                                        for (Map.Entry<Long, BigDecimal> entry : skuTotalQty.entrySet()) {
                                                 receivingItemRepo
                                                                 .findByReceivingOrderReceivingIdAndSkuId(id,
-                                                                                sLine.getSkuId())
+                                                                                entry.getKey())
                                                                 .ifPresent(ri -> {
-                                                                        if (sLine.getQty() != null) {
-                                                                                ri.setReceivedQty(sLine.getQty());
-                                                                                ri.setCondition(sLine
-                                                                                                .getCondition() != null
-                                                                                                                ? sLine.getCondition()
-                                                                                                                : "PASS");
-                                                                                ri.setReasonCode(sLine.getReasonCode());
-                                                                                ri.setLotNumber(sLine.getLotNumber());
-                                                                                ri.setManufactureDate(sLine
-                                                                                                .getManufactureDate());
-                                                                                ri.setExpiryDate(sLine.getExpiryDate());
-                                                                                receivingItemRepo.save(ri);
-                                                                        }
+                                                                        ri.setReceivedQty(entry.getValue());
+                                                                        receivingItemRepo.save(ri);
+                                                                        log.info("Session sync: SKU {} → receivedQty={}",
+                                                                                        entry.getKey(),
+                                                                                        entry.getValue());
                                                                 });
                                         }
                                 }
