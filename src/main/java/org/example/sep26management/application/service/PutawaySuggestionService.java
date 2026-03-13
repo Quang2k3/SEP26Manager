@@ -3,10 +3,14 @@ package org.example.sep26management.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.response.PutawaySuggestion;
-import org.example.sep26management.infrastructure.persistence.entity.CategoryEntity;
-import org.example.sep26management.infrastructure.persistence.entity.LocationEntity;
+import org.example.sep26management.domain.putaway.suggestion.DefaultPutawaySuggestionEngine;
+import org.example.sep26management.domain.putaway.suggestion.PutawayBinSuggestionDto;
+import org.example.sep26management.domain.putaway.suggestion.PutawaySuggestionEngine;
+import org.example.sep26management.domain.putaway.suggestion.PutawaySuggestionLineResponse;
+import org.example.sep26management.domain.putaway.suggestion.PutawaySuggestionRequest;
 import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
 import org.example.sep26management.infrastructure.persistence.entity.ZoneEntity;
+import org.example.sep26management.infrastructure.persistence.repository.InventorySnapshotJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.LocationJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
@@ -38,110 +42,70 @@ public class PutawaySuggestionService {
     private final SkuJpaRepository skuRepo;
     private final ZoneJpaRepository zoneRepo;
     private final LocationJpaRepository locationRepo;
+    private final InventorySnapshotJpaRepository snapshotRepo;
+
+    private PutawaySuggestionEngine engine;
+
+    private PutawaySuggestionEngine engine() {
+        if (engine == null) {
+            engine = new DefaultPutawaySuggestionEngine(skuRepo, zoneRepo, locationRepo, snapshotRepo);
+        }
+        return engine;
+    }
 
     /**
-     * Gợi ý BIN location cho 1 SKU trong warehouse.
-     *
-     * @param warehouseId warehouse đang nhập hàng
-     * @param skuId       SKU cần putaway
-     * @param qty         số lượng cần putaway (dùng để check capacity)
-     * @return Optional<PutawaySuggestion> — empty nếu không tìm được zone/bin phù
-     *         hợp
+     * Gợi ý BIN location cho 1 SKU trong warehouse (API cũ, trả về 1 bin tốt nhất).
      */
     @Transactional(readOnly = true)
     public Optional<PutawaySuggestion> suggestLocation(Long warehouseId, Long skuId, BigDecimal qty) {
-        // 1. Lookup SKU → Category (eager fetch to avoid LazyInitializationException)
         SkuEntity sku = skuRepo.findByIdWithCategory(skuId).orElse(null);
-        if (sku == null || sku.getCategory() == null) {
-            log.warn("Putaway suggestion: SKU {} not found or has no category", skuId);
+        if (sku == null) {
+            log.warn("Putaway suggestion: SKU {} not found", skuId);
             return Optional.empty();
         }
 
-        CategoryEntity category = sku.getCategory();
-        String categoryCode = category.getCategoryCode();
+        PutawaySuggestionRequest req = new PutawaySuggestionRequest();
+        req.setWarehouseId(warehouseId);
+        req.setSkuId(skuId);
+        req.setSkuCode(sku.getSkuCode());
+        req.setQuantity(qty);
+        // cho phép split mặc định
+        req.setSplitAllowed(true);
+        req.setStrategyCode(null);
 
-        // 2. Convention: zone_code = "Z-" + category_code
-        String zoneCode = "Z-" + categoryCode;
-        Optional<ZoneEntity> zoneOpt = zoneRepo.findByWarehouseIdAndZoneCode(warehouseId, zoneCode);
-        if (zoneOpt.isEmpty() || !zoneOpt.get().getActive()) {
-            log.warn("Putaway suggestion: Zone {} not found or inactive in warehouse {}", zoneCode, warehouseId);
+        PutawaySuggestionLineResponse lineRes = engine().suggestForLine(req);
+        List<PutawayBinSuggestionDto> bins = lineRes.getBinSuggestions();
+        if (bins == null || bins.isEmpty()) {
             return Optional.empty();
         }
 
-        ZoneEntity zone = zoneOpt.get();
+        PutawayBinSuggestionDto top = bins.get(0);
 
-        // 3. Find all active BINs in the matched zone
-        List<LocationEntity> bins = locationRepo.findActiveBinsByZone(zone.getZoneId());
-        if (bins.isEmpty()) {
-            log.warn("Putaway suggestion: No active BINs in zone {} ({})", zoneCode, zone.getZoneId());
-            return Optional.empty();
+        // Lấy lại thông tin zone để mapping về DTO cũ
+        ZoneEntity zone = null;
+        if (top.getZoneId() != null) {
+            zone = zoneRepo.findById(top.getZoneId()).orElse(null);
         }
-
-        // 4. Find the best BIN: most available capacity, or first empty bin
-        LocationEntity bestBin = null;
-        BigDecimal bestAvailable = BigDecimal.ZERO;
-        BigDecimal bestCurrentQty = BigDecimal.ZERO;
-
-        for (LocationEntity bin : bins) {
-            BigDecimal currentQty = locationRepo.getCurrentOccupiedQty(bin.getLocationId());
-            BigDecimal maxCap = bin.getMaxWeightKg() != null ? bin.getMaxWeightKg() : new BigDecimal("999999");
-            BigDecimal available = maxCap.subtract(currentQty);
-
-            // Skip bins that don't have enough capacity for this qty
-            if (available.compareTo(qty) < 0) {
-                continue;
-            }
-
-            // Prefer bins with most available space
-            if (bestBin == null || available.compareTo(bestAvailable) > 0) {
-                bestBin = bin;
-                bestAvailable = available;
-                bestCurrentQty = currentQty;
-            }
-        }
-
-        if (bestBin == null) {
-            log.warn("Putaway suggestion: No BIN with sufficient capacity in zone {} for qty {}", zoneCode, qty);
-            return Optional.empty();
-        }
-
-        // 5. Resolve parent rack and aisle names
-        String rackName = null;
-        String aisleName = null;
-        if (bestBin.getParentLocationId() != null) {
-            LocationEntity rack = locationRepo.findById(bestBin.getParentLocationId()).orElse(null);
-            if (rack != null) {
-                rackName = rack.getLocationCode();
-                if (rack.getParentLocationId() != null) {
-                    LocationEntity aisle = locationRepo.findById(rack.getParentLocationId()).orElse(null);
-                    if (aisle != null) {
-                        aisleName = aisle.getLocationCode();
-                    }
-                }
-            }
-        }
-
-        BigDecimal maxCap = bestBin.getMaxWeightKg() != null ? bestBin.getMaxWeightKg() : new BigDecimal("999999");
 
         PutawaySuggestion suggestion = PutawaySuggestion.builder()
                 .skuId(skuId)
                 .skuCode(sku.getSkuCode())
-                .categoryCode(categoryCode)
-                .matchedZoneCode(zoneCode)
-                .matchedZoneId(zone.getZoneId())
-                .matchedZoneName(zone.getZoneName())
-                .suggestedLocationId(bestBin.getLocationId())
-                .suggestedLocationCode(bestBin.getLocationCode())
-                .aisleName(aisleName)
-                .rackName(rackName)
-                .currentQty(bestCurrentQty)
-                .maxCapacity(maxCap)
-                .availableCapacity(bestAvailable)
-                .reason("Zone " + zoneCode + " matched category " + categoryCode)
+                .categoryCode(sku.getCategory() != null ? sku.getCategory().getCategoryCode() : null)
+                .matchedZoneCode(zone != null ? zone.getZoneCode() : top.getZoneCode())
+                .matchedZoneId(zone != null ? zone.getZoneId() : null)
+                .matchedZoneName(zone != null ? zone.getZoneName() : null)
+                .suggestedLocationId(top.getBinId())
+                .suggestedLocationCode(top.getBinCode())
+                .aisleName(null)
+                .rackName(null)
+                .currentQty(top.getOccupiedQty())
+                .maxCapacity(top.getMaxCapacity())
+                .availableCapacity(top.getAvailableCapacity())
+                .reason(lineRes.getOverallExplanation())
                 .build();
 
-        log.info("Putaway suggestion: SKU {} (category {}) → zone {} → bin {} (available: {})",
-                sku.getSkuCode(), categoryCode, zoneCode, bestBin.getLocationCode(), bestAvailable);
+        log.info("Putaway suggestion (engine): SKU {} → bin {} (qty {}, score={})",
+                sku.getSkuCode(), top.getBinCode(), top.getSuggestedQuantity(), top.getScore());
 
         return Optional.of(suggestion);
     }
