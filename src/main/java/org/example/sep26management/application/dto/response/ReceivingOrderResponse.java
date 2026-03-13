@@ -56,6 +56,27 @@ public class ReceivingOrderResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
+    @Schema(description = "ID người duyệt (QC)", example = "5")
+    private Long approvedBy;
+
+    @Schema(description = "Tên người duyệt", example = "Nguyen Van A")
+    private String approvedByName;
+
+    @Schema(description = "Thời gian duyệt", example = "2026-03-08T14:30:00")
+    private LocalDateTime approvedAt;
+
+    @Schema(description = "ID người từ chối (QC)", example = "6")
+    private Long rejectedBy;
+
+    @Schema(description = "Tên người từ chối", example = "Tran Van B")
+    private String rejectedByName;
+
+    @Schema(description = "Thời gian từ chối", example = "2026-03-08T14:30:00")
+    private LocalDateTime rejectedAt;
+
+    @Schema(description = "Lý do từ chối", example = "Hàng lỗi phát hiện qua QC Scanner")
+    private String rejectReason;
+
     @Schema(description = "Tổng số DÒNG sản phẩm", example = "2")
     private Integer totalLines;
     @Schema(description = "TỔNG số lượng sản phẩm THỰC Nhận", example = "150.0")

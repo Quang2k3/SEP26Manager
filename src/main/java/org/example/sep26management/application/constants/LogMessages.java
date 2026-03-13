@@ -218,4 +218,11 @@ public final class LogMessages {
     public static final String SKU_ASSIGNING_CATEGORY = "Assigning category to SKU: skuId={}, categoryId={}";
     public static final String SKU_CATEGORY_ASSIGNED = "Category assigned to SKU: skuId={}, categoryId={}";
     public static final String SKU_FETCHING_DETAIL = "Fetching SKU detail for ID: {}";
+
+    // ============================================================
+    // RECEIVING ORDER
+    // ============================================================
+    public static final String RECEIVING_QC_APPROVED = "Receiving Order {} QC approved by userId={}";
+    public static final String RECEIVING_QC_REJECTED = "Receiving Order {} QC rejected (PENDING_INCIDENT) by userId={}";
+    public static final String RECEIVING_SUBMITTED_WITH_INCIDENT = "Receiving Order {} submitted with discrepancy by userId={}";
 }
