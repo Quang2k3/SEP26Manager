@@ -79,9 +79,21 @@ public class ReceivingOrderController {
 
     /** POST /v1/receiving-orders/{id}/submit — Keeper */
     @PostMapping("/{id}/submit")
-    @Operation(summary = "Trình duyệt phiếu nhập kho (Keeper)", description = "Keeper gửi phiếu yêu cầu Manager duyệt. Chuyển phiếu từ DRAFT thành SUBMITTED. \n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách hoặc kết quả API POST tạo bảng).")
+    @Operation(summary = "Trình duyệt phiếu nhập kho (Keeper)",
+            description = "Keeper gửi phiếu đã kiểm đếm. Hệ thống tự động đối chiếu `expectedQty` vs `receivedQty` cho từng SKU.\n\n"
+                    + "## 2 kết quả có thể xảy ra:\n\n"
+                    + "### ✅ Case A: Khớp 100%\n"
+                    + "- Status → `SUBMITTED`\n"
+                    + "- FE chuyển sang gọi `POST /v1/receiving-orders/{id}/qc-approve` (QC duyệt)\n\n"
+                    + "### ⚠️ Case B: Phát hiện thừa/thiếu\n"
+                    + "- Status → `PENDING_INCIDENT`\n"
+                    + "- Hệ thống TỰ ĐỘNG tạo Incident với danh sách items sai lệch\n"
+                    + "- FE hiện thông báo cho Manager, chuyển sang màn hình Incident: `GET /v1/incidents?status=OPEN&category=QUALITY`\n"
+                    + "- Manager resolve từng item: `POST /v1/incidents/{incidentId}/resolve-discrepancy`\n"
+                    + "- Sau khi resolve → Status trở lại `SUBMITTED` → QC duyệt tiếp\n\n"
+                    + "**Data yêu cầu:**\n"
+                    + "- `@PathVariable id`: Mã Phiếu (receivingId). LẤY TỪ: `GET /v1/receiving-orders` → `receivingId`\n"
+                    + "- Body: Không cần")
     public ApiResponse<ReceivingOrderResponse> submit(
             @PathVariable Long id,
             Authentication auth) {

@@ -29,9 +29,25 @@ public class IncidentController {
 
     /** POST /v1/incidents — Keeper tạo sự cố */
     @PostMapping
-    @Operation(summary = "Tạo báo cáo sự cố (Keeper)", description = "Keeper tạo báo cáo sự cố. \n"
-            + "- Nếu `category=GATE`: Báo cáo các vấn đề về Seal, thùng container (trước khi dỡ hàng).\n"
-            + "- Nếu `category=QUALITY`: Báo cáo thừa thiếu, hư hỏng sản phẩm (trong/sau khi dỡ hàng).")
+    @Operation(summary = "Tạo báo cáo sự cố (Keeper)",
+            description = "Keeper tạo báo cáo sự cố thủ công. Có 2 loại:\n\n"
+                    + "## category = GATE (Gate Check)\n"
+                    + "Phát hiện seal/container bị hỏng **trước khi dỡ hàng**.\n"
+                    + "→ Manager cần approve (cho dỡ) hoặc reject (không cho dỡ)\n\n"
+                    + "## category = QUALITY\n"
+                    + "Báo cáo hư hỏng sản phẩm **trong/sau khi dỡ hàng**.\n\n"
+                    + "**Ví dụ request body (Gate Check — seal bị hỏng):**\n"
+                    + "```json\n"
+                    + "{\n"
+                    + "  \"warehouseId\": 1,\n"
+                    + "  \"incidentType\": \"SEAL_BROKEN\",\n"
+                    + "  \"category\": \"GATE\",\n"
+                    + "  \"description\": \"Seal container bị rách, không nguyên vẹn\",\n"
+                    + "  \"receivingId\": 15\n"
+                    + "}\n"
+                    + "```\n\n"
+                    + "**incidentType values:**\n"
+                    + "- `DAMAGE`, `SHORTAGE`, `OVERAGE`, `SEAL_BROKEN`, `SEAL_MISMATCH`, `PACKAGING_DAMAGE`, `OTHER`")
     public ApiResponse<IncidentResponse> create(
             @Valid @RequestBody CreateIncidentRequest request,
             Authentication auth) {
@@ -40,15 +56,15 @@ public class IncidentController {
 
     /** GET /v1/incidents?status=OPEN&category=GATE */
     @GetMapping
-    @Operation(summary = "Danh sách báo cáo sự cố", description = "Lấy danh sách các báo cáo sự cố.\n\n"
-            + "**Hiển thị theo loại phiếu:** \n"
-            + "- Truyền `category=GATE` để lấy danh sách 'Phiếu báo cáo Gate Check' (Seal/Container).\n"
-            + "- Truyền `category=QUALITY` để lấy danh sách 'Phiếu báo cáo chất lượng' (Thừa thiếu/Hư hỏng SKU).\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `Query.status` (Tùy chọn): OPEN, APPROVED, REJECTED, RESOLVED.\n"
-            + "- `Query.category` (Tùy chọn): GATE, QUALITY.\n"
-            + "- `Query.page` (Tùy chọn): Trang mặc định 0.\n"
-            + "- `Query.size` (Tùy chọn): Kích thước mặc định 10.")
+    @Operation(summary = "Danh sách báo cáo sự cố",
+            description = "Lấy danh sách sự cố. Lọc theo `category` và `status`.\n\n"
+                    + "## Phân biệt 2 loại màn hình:\n\n"
+                    + "| Màn hình | Gọi API với |\n"
+                    + "|---|---|\n"
+                    + "| Gate Check (Seal/Cont) | `category=GATE` |\n"
+                    + "| Chất lượng (Thừa/Thiếu/Hỏng) | `category=QUALITY` |\n\n"
+                    + "**Status values:** `OPEN`, `APPROVED`, `REJECTED`, `RESOLVED`\n\n"
+                    + "👉 Lấy `incidentId` từ response → dùng cho approve/reject/resolve-discrepancy")
     public ApiResponse<PageResponse<IncidentResponse>> list(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) IncidentCategory category,
@@ -59,9 +75,15 @@ public class IncidentController {
 
     /** GET /v1/incidents/{id} */
     @GetMapping("/{id}")
-    @Operation(summary = "Chi tiết sự cố", description = "Xem chi tiết một sự cố (bao gồm link ảnh, ID người báo cáo, vv). \n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Sự cố (Incident ID). LẤY TỪ: attribute `id` trong mảng kết quả của API danh sách `GET /v1/incidents` hoặc kết quả trả về khi tạo mới sự cố.")
+    @Operation(summary = "Chi tiết sự cố",
+            description = "Xem chi tiết sự cố bao gồm danh sách items sai lệch.\n\n"
+                    + "**Data yêu cầu:**\n"
+                    + "- `@PathVariable id`: Incident ID. LẤY TỪ: `GET /v1/incidents` → `incidentId`\n\n"
+                    + "**Response chứa:**\n"
+                    + "- `items[].incidentItemId`: Dùng cho `resolve-discrepancy` API\n"
+                    + "- `items[].reasonCode`: `SHORTAGE` hoặc `OVERAGE` (dùng để hiện đúng action cho FE)\n"
+                    + "- `items[].expectedQty`, `items[].actualQty`: Để hiển thị bảng so sánh\n"
+                    + "- `items[].damagedQty`: Số lượng sai lệch (= |expected - actual|)")
     public ApiResponse<IncidentResponse> get(@PathVariable Long id) {
         return incidentService.getIncident(id);
     }
@@ -69,10 +91,14 @@ public class IncidentController {
     /** POST /v1/incidents/{id}/approve — Manager cho phép dỡ hàng */
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Duyệt sự cố - Cho phép dỡ hàng (Manager)", description = "Manager duyệt incident → cho phép Keeper bắt đầu dỡ hàng. "
-            + "Chỉ MANAGER mới được phép.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Sự cố (Incident ID). LẤY TỪ: attribute `id` của API danh sách sự cố.")
+    @Operation(summary = "Duyệt sự cố — Cho phép dỡ hàng (Manager)",
+            description = "**Chỉ dùng cho Gate Check (GATE category).**\n\n"
+                    + "Manager xem báo cáo seal/container → quyết định vẫn cho Keeper dỡ hàng.\n\n"
+                    + "**Data yêu cầu:**\n"
+                    + "- `@PathVariable id`: Incident ID. LẤY TỪ: `GET /v1/incidents?category=GATE&status=OPEN` → `incidentId`\n"
+                    + "- Body: Không cần\n\n"
+                    + "→ Status: `OPEN` → `APPROVED`\n"
+                    + "→ Keeper được phép bắt đầu dỡ hàng")
     public ApiResponse<IncidentResponse> approve(
             @PathVariable Long id,
             Authentication auth) {
@@ -82,10 +108,16 @@ public class IncidentController {
     /** POST /v1/incidents/{id}/reject — Manager từ chối nhận xe */
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Từ chối dỡ hàng (Manager)", description = "Manager từ chối incident → xe tải không được phép dỡ hàng. "
-            + "Yêu cầu cung cấp lý do.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Sự cố (Incident ID). LẤY TỪ: attribute `id` của API danh sách sự cố.")
+    @Operation(summary = "Từ chối dỡ hàng (Manager)",
+            description = "**Chỉ dùng cho Gate Check (GATE category).**\n\n"
+                    + "Manager từ chối → xe tải không được dỡ hàng.\n\n"
+                    + "**Data yêu cầu:**\n"
+                    + "- `@PathVariable id`: Incident ID. LẤY TỪ: `GET /v1/incidents?category=GATE&status=OPEN` → `incidentId`\n\n"
+                    + "**Ví dụ request body:**\n"
+                    + "```json\n"
+                    + "{ \"reason\": \"Seal container bị phá, nghi ngờ hàng bị đánh tráo\" }\n"
+                    + "```\n\n"
+                    + "→ Status: `OPEN` → `REJECTED`")
     public ApiResponse<IncidentResponse> reject(
             @PathVariable Long id,
             @RequestBody RejectRequest request,
@@ -96,10 +128,21 @@ public class IncidentController {
     /** POST /v1/incidents/{id}/resolve — Manager xử lý sự cố chất lượng */
     @PostMapping("/{id}/resolve")
     @PreAuthorize("hasRole('MANAGER')")
-    @Operation(summary = "Xử lý sự cố chất lượng (Manager)", description = "Manager xử lý sự cố chất lượng sau khi dỡ hàng, quyết định số lượng Pass, Return, Scrap cho từng item lỗi.\n\n"
-            + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Sự cố (Incident ID). LẤY TỪ: attribute `id` của API danh sách sự cố.\n"
-            + "- `ResolveIncidentRequest.resolutions[].incidentItemId`: LẤY TỪ: attribute `items[].incidentItemId` khi gọi chi tiết sự cố (`GET /v1/incidents/{id}`).")
+    @Operation(summary = "Xử lý sự cố chất lượng — hàng hỏng (Manager)",
+            description = "**Dùng cho QC damage (hàng hỏng vật lý)** — KHÔNG phải thừa/thiếu.\n\n"
+                    + "Manager quyết định số lượng PASS (nhập kho), RETURN (trả NCC), SCRAP (huỷ bỏ) cho từng item hỏng.\n\n"
+                    + "**Ví dụ request body:**\n"
+                    + "```json\n"
+                    + "{\n"
+                    + "  \"resolutions\": [\n"
+                    + "    { \"incidentItemId\": 5, \"action\": \"PASS\", \"quantity\": 3 },\n"
+                    + "    { \"incidentItemId\": 5, \"action\": \"RETURN\", \"quantity\": 2 }\n"
+                    + "  ],\n"
+                    + "  \"note\": \"3 thùng còn tốt, 2 thùng bị móp trả NCC\"\n"
+                    + "}\n"
+                    + "```\n\n"
+                    + "**Actions:** `PASS` (nhập kho), `RETURN` (trả NCC), `SCRAP` / `DOWNGRADE` (huỷ/hạ cấp)\n\n"
+                    + "→ Để xử lý **thừa/thiếu số lượng**, dùng `POST /v1/incidents/{id}/resolve-discrepancy` thay thế")
     public ApiResponse<IncidentResponse> resolve(
             @PathVariable Long id,
             @Valid @RequestBody ResolveIncidentRequest request,
