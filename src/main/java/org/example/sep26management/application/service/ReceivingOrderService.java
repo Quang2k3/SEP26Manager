@@ -365,14 +365,14 @@ public class ReceivingOrderService {
 
                         // Audit log: submitted with discrepancy
                         auditLogService.logAction(
-                                userId,
-                                "RECEIVING_SUBMITTED_WITH_INCIDENT",
-                                "RECEIVING_ORDER",
-                                order.getReceivingId(),
-                                "Receiving Order " + order.getReceivingCode()
-                                        + " submitted with discrepancy. Incident ID: "
-                                        + savedIncident.getIncidentId(),
-                                null, null);
+                                        userId,
+                                        "RECEIVING_SUBMITTED_WITH_INCIDENT",
+                                        "RECEIVING_ORDER",
+                                        order.getReceivingId(),
+                                        "Receiving Order " + order.getReceivingCode()
+                                                        + " submitted with discrepancy. Incident ID: "
+                                                        + savedIncident.getIncidentId(),
+                                        null, null);
 
                         log.info("GRN {} submitted with Discrepancy. Created Incident {} by userId={}",
                                         order.getReceivingCode(), savedIncident.getIncidentId(), userId);
@@ -402,12 +402,12 @@ public class ReceivingOrderService {
 
                 // Audit log: QC approved
                 auditLogService.logAction(
-                        qcUserId,
-                        "RECEIVING_QC_APPROVED",
-                        "RECEIVING_ORDER",
-                        order.getReceivingId(),
-                        "Receiving Order " + order.getReceivingCode() + " QC approved",
-                        null, null);
+                                qcUserId,
+                                "RECEIVING_QC_APPROVED",
+                                "RECEIVING_ORDER",
+                                order.getReceivingId(),
+                                "Receiving Order " + order.getReceivingCode() + " QC approved",
+                                null, null);
 
                 log.info("Receiving Order {} QC approved by userId={}", order.getReceivingCode(), qcUserId);
                 return ApiResponse.success("QC approved successfully", getOrder(id).getData());
@@ -485,6 +485,7 @@ public class ReceivingOrderService {
                         IncidentEntity incident = IncidentEntity.builder()
                                         .warehouseId(order.getWarehouseId())
                                         .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
+                                        .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
                                         .description("Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)")
                                         .receivingId(id)
                                         .status("OPEN")
@@ -502,20 +503,20 @@ public class ReceivingOrderService {
                         order.setRejectedBy(qcUserId);
                         order.setRejectedAt(LocalDateTime.now());
                         order.setRejectReason("Hàng lỗi phát hiện qua QC Scanner. Incident ID: "
-                                + savedIncident.getIncidentId());
+                                        + savedIncident.getIncidentId());
                         order.setUpdatedAt(LocalDateTime.now());
                         receivingOrderRepo.save(order);
 
                         // Audit log: QC rejected (fail items found)
                         auditLogService.logAction(
-                                qcUserId,
-                                "RECEIVING_QC_REJECTED",
-                                "RECEIVING_ORDER",
-                                order.getReceivingId(),
-                                "Receiving Order " + order.getReceivingCode()
-                                        + " QC rejected — fail items detected. Incident ID: "
-                                        + savedIncident.getIncidentId(),
-                                null, null);
+                                        qcUserId,
+                                        "RECEIVING_QC_REJECTED",
+                                        "RECEIVING_ORDER",
+                                        order.getReceivingId(),
+                                        "Receiving Order " + order.getReceivingCode()
+                                                        + " QC rejected — fail items detected. Incident ID: "
+                                                        + savedIncident.getIncidentId(),
+                                        null, null);
 
                         log.info("QC scan completed with errors for GRN {}. Created Incident {}.",
                                         order.getReceivingCode(), savedIncident.getIncidentId());
@@ -529,13 +530,13 @@ public class ReceivingOrderService {
 
                         // Audit log: QC approved (100% pass)
                         auditLogService.logAction(
-                                qcUserId,
-                                "RECEIVING_QC_APPROVED",
-                                "RECEIVING_ORDER",
-                                order.getReceivingId(),
-                                "Receiving Order " + order.getReceivingCode()
-                                        + " QC scan 100% PASS — auto approved",
-                                null, null);
+                                        qcUserId,
+                                        "RECEIVING_QC_APPROVED",
+                                        "RECEIVING_ORDER",
+                                        order.getReceivingId(),
+                                        "Receiving Order " + order.getReceivingCode()
+                                                        + " QC scan 100% PASS — auto approved",
+                                        null, null);
 
                         log.info("QC scan completed 100% PASS for GRN {}.", order.getReceivingCode());
                 }
