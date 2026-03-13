@@ -54,13 +54,13 @@ public class ReceivingOrderController {
     @PostMapping
     @Operation(summary = "Tạo phiếu nhập kho nháp (Keeper)", description = "Keeper tạo phiếu nhập kho DRAFT dựa trên chứng từ với các mặt hàng và số lượng dự kiến. \n\n"
             + "**Data yêu cầu:** \n"
-            + "- `ReceivingOrderRequest`: Gồm type, supplier, list của `skuCode` và `expectedQty`.\n"
+            + "- `ReceivingOrderRequest`: Gồm `warehouseId` (kho user chọn), type, supplier, list của `skuCode` và `expectedQty`.\n"
             + "👉 **Kết quả:** Trả về Phiếu với trạng thái DRAFT. FE lưu lại mã `receivingId` (hoặc `receivingCode`) để gọi tiếp các API cập nhật số lượng.")
     public ApiResponse<ReceivingOrderResponse> createDraftOrder(
             @Valid @RequestBody ReceivingOrderRequest request,
             Authentication auth) {
         Long userId = extractUserId(auth);
-        Long warehouseId = extractWarehouseId(auth);
+        Long warehouseId = request.getWarehouseId();
         return receivingOrderService.createDraftOrder(request, warehouseId, userId);
     }
 

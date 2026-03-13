@@ -239,7 +239,6 @@ public class GrnService {
                 .receivingId(grn.getReceivingId())
                 .warehouseId(grn.getWarehouseId())
                 .sourceType(grn.getSourceType())
-                .sourceWarehouseId(grn.getSourceWarehouseId())
                 .supplierId(grn.getSupplierId())
                 .sourceReferenceCode(grn.getSourceReferenceCode())
                 .status(grn.getStatus())

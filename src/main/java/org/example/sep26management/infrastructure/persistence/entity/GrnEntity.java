@@ -28,9 +28,6 @@ public class GrnEntity {
     @Column(name = "source_type", length = 50)
     private String sourceType;
 
-    @Column(name = "source_warehouse_id")
-    private Long sourceWarehouseId;
-
     @Column(name = "supplier_id")
     private Long supplierId;
 
