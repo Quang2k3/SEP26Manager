@@ -39,8 +39,10 @@ public class PutawayTaskController {
             @RequestParam(required = false) Long assignedTo,
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        return putawayTaskService.listTasks(assignedTo, status, page, size);
+            @RequestParam(defaultValue = "10") int size,
+            Authentication auth) {
+        Long warehouseId = extractWarehouseId(auth);
+        return putawayTaskService.listTasks(warehouseId, assignedTo, status, page, size);
     }
 
     @GetMapping("/{id}")
@@ -126,6 +128,21 @@ public class PutawayTaskController {
     }
 
     // ─── Helper ──────────────────────────────────────────────────────────────────
+
+    @SuppressWarnings("unchecked")
+    private Long extractWarehouseId(Authentication auth) {
+        if (auth != null && auth.getDetails() instanceof Map) {
+            Object raw = ((Map<?, ?>) auth.getDetails()).get("warehouseIds");
+            if (raw instanceof java.util.List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long) return (Long) first;
+                if (first instanceof Integer) return ((Integer) first).longValue();
+                if (first instanceof Number) return ((Number) first).longValue();
+                if (first != null) return Long.parseLong(first.toString());
+            }
+        }
+        throw new RuntimeException("Cannot extract warehouseId from token");
+    }
 
     @SuppressWarnings("unchecked")
     private Long extractUserId(Authentication auth) {
