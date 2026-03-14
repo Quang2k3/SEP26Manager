@@ -57,11 +57,14 @@ public class ScanEventService {
         ScanSessionData session = sessionRedis.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("Scan session expired or not found: " + sessionId));
 
-        // 3. Lookup SKU by barcode
+        // 3. Lookup SKU by barcode, fallback to skuCode (for manual input)
         Optional<SkuEntity> skuOpt = skuRepository.findActiveByBarcodeWithCategory(request.getBarcode());
         if (skuOpt.isEmpty()) {
-            log.warn("Scan event: no active SKU found for barcode={}", request.getBarcode());
-            return ApiResponse.error("SKU not found for barcode: " + request.getBarcode());
+            skuOpt = skuRepository.findActiveBySkuCodeWithCategory(request.getBarcode());
+        }
+        if (skuOpt.isEmpty()) {
+            log.warn("Scan event: no active SKU found for barcode/skuCode={}", request.getBarcode());
+            return ApiResponse.error("SKU not found: " + request.getBarcode());
         }
         SkuEntity sku = skuOpt.get();
 
@@ -164,7 +167,7 @@ public class ScanEventService {
      * @param condition PASS or FAIL — must match exactly
      */
     public ApiResponse<Map<String, Object>> removeScanItem(String sessionId, Long skuId, String condition,
-            BigDecimal qtyToRemove) {
+                                                           BigDecimal qtyToRemove) {
         ScanSessionData session = sessionRedis.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("Scan session expired or not found: " + sessionId));
 
