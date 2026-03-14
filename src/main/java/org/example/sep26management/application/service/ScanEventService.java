@@ -74,42 +74,40 @@ public class ScanEventService {
             return ApiResponse.error("Invalid condition. Must be PASS or FAIL.");
         }
 
-        // 4.1 Optional: apply scan directly to a Receiving Order line (carton = 1 qty)
-        // This enables "scan -> map to initial receiving slip -> progress
-        // expected/received/remaining".
+        // 4.1 Optional: update ReceivingItem directly if receivingId provided
+        // Wrapped in try-catch so scan session is always updated even if order update fails
         if (request.getReceivingId() != null) {
-            Long receivingId = Objects.requireNonNull(request.getReceivingId());
-            ReceivingOrderEntity order = receivingOrderRepo.findById(receivingId)
-                    .orElseThrow(() -> new RuntimeException("Receiving order not found: " + receivingId));
+            try {
+                Long receivingId = request.getReceivingId();
+                ReceivingOrderEntity order = receivingOrderRepo.findById(receivingId)
+                        .orElseThrow(() -> new RuntimeException("Receiving order not found: " + receivingId));
 
-            String orderStatus = order.getStatus() != null ? order.getStatus().toUpperCase() : "DRAFT";
-            if (!"PENDING_COUNT".equals(orderStatus)) {
-                return ApiResponse.error(
-                        "Can only scan when order status is PENDING_COUNT. Current status: " + orderStatus);
-            }
+                String orderStatus = order.getStatus() != null ? order.getStatus().toUpperCase() : "DRAFT";
+                if (!("POSTED".equals(orderStatus) || "PUTAWAY_DONE".equals(orderStatus)
+                        || "CANCELLED".equals(orderStatus) || "REJECTED".equals(orderStatus))) {
 
-            ReceivingItemEntity item = receivingItemRepo
-                    .findByReceivingOrderReceivingIdAndSkuId(receivingId, sku.getSkuId())
-                    .orElseThrow(() -> new RuntimeException(
-                            "SKU " + sku.getSkuCode() + " is not in receiving order: " + receivingId));
-
-            BigDecimal inc = request.getQty() != null ? request.getQty() : BigDecimal.ONE;
-            BigDecimal current = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
-            BigDecimal newReceived = current.add(inc);
-            item.setReceivedQty(newReceived);
-
-            // If QC marks FAIL, keep reason on the line and flag QC required.
-            if ("FAIL".equals(condition)) {
-                item.setCondition("FAIL");
-                item.setQcRequired(true);
-                if (request.getReasonCode() != null && !request.getReasonCode().isBlank()) {
-                    item.setReasonCode(request.getReasonCode());
+                    receivingItemRepo
+                            .findByReceivingOrderReceivingIdAndSkuId(receivingId, sku.getSkuId())
+                            .ifPresent(item -> {
+                                BigDecimal inc = request.getQty() != null ? request.getQty() : BigDecimal.ONE;
+                                BigDecimal current = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
+                                item.setReceivedQty(current.add(inc));
+                                if ("FAIL".equals(condition)) {
+                                    item.setCondition("FAIL");
+                                    item.setQcRequired(true);
+                                    if (request.getReasonCode() != null && !request.getReasonCode().isBlank()) {
+                                        item.setReasonCode(request.getReasonCode());
+                                    }
+                                }
+                                receivingItemRepo.save(item);
+                                log.info("Updated ReceivingItem for order {}: SKU={}", receivingId, sku.getSkuCode());
+                            });
                 }
+            } catch (Exception e) {
+                // Log warning but continue — session must always be updated
+                log.warn("Could not update ReceivingItem for receivingId={}, skuCode={}: {}",
+                        request.getReceivingId(), sku.getSkuCode(), e.getMessage());
             }
-
-            receivingItemRepo.save(item);
-            log.info("Directly updated ReceivingItem for order {}: SKU={} receivedQty={}",
-                    receivingId, sku.getSkuCode(), newReceived);
         }
 
         // 5. INCR qty — keyed by (skuId + condition)
