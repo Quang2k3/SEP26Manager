@@ -110,6 +110,9 @@ public class ScannerPageController {
                 ".btn.success:disabled{opacity:.5;cursor:not-allowed}" +
                 ".btn-minus{background:#ef4444;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:800;cursor:pointer;min-width:32px}" +
                 ".btn-minus:active{background:#dc2626}" +
+                ".cond-badge{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:800;letter-spacing:.03em}" +
+                ".cond-pass{background:rgba(34,197,94,.15);color:#22c55e}" +
+                ".cond-fail{background:rgba(239,68,68,.15);color:#ef4444}" +
 
                 "table{width:100%;border-collapse:collapse;font-size:13px}" +
                 "th{text-align:left;color:#475569;padding:5px 4px;font-size:11px;font-weight:600}" +
@@ -228,7 +231,7 @@ public class ScannerPageController {
 
                 "<div class='card'>" +
                 "<div class='card-title'>Đã scan (phiên hiện tại)</div>" +
-                "<table><thead><tr><th>SKU</th><th>Tên sản phẩm</th><th style='text-align:right'>Qty</th><th style='text-align:center;width:40px'></th></tr></thead>"
+                "<table><thead><tr><th>SKU</th><th>Tên sản phẩm</th><th style='text-align:center'>TT</th><th style='text-align:right'>Qty</th><th style='text-align:center;width:40px'></th></tr></thead>"
                 +
                 "<tbody id='lines'></tbody></table>" +
                 "</div>" +
@@ -286,14 +289,18 @@ public class ScannerPageController {
                 "function setStatus(msg){document.getElementById('cam-status').textContent=msg;} \n" +
 
                 "function updateTable(d){\n" +
-                "  lineData[d.skuCode]={name:d.skuName||'',qty:d.newQty,skuId:d.skuId};\n" +
+                "  var cond=d.condition||'PASS';\n" +
+                "  var key=d.skuCode+'_'+cond;\n" +
+                "  lineData[key]={name:d.skuName||'',qty:d.newQty,skuId:d.skuId,skuCode:d.skuCode,condition:cond};\n" +
                 "  renderScanTable();\n" +
                 "} \n" +
                 "function renderScanTable(){\n" +
                 "  var rows='';\n" +
                 "  for(var k in lineData){\n" +
-                "    if(lineData[k].qty<=0) { delete lineData[k]; continue; }\n" +
-                "    rows+='<tr><td class=\"sc\">'+k+'</td><td>'+lineData[k].name+'</td><td class=\"qc\">'+lineData[k].qty+'</td>';\n" +
+                "    var it=lineData[k];\n" +
+                "    if(it.qty<=0) { delete lineData[k]; continue; }\n" +
+                "    var condBadge=it.condition==='FAIL'?'<span class=\"cond-badge cond-fail\">✗ FAIL</span>':'<span class=\"cond-badge cond-pass\">✓ PASS</span>';\n" +
+                "    rows+='<tr><td class=\"sc\">'+it.skuCode+'</td><td>'+it.name+'</td><td style=\"text-align:center\">'+condBadge+'</td><td class=\"qc\">'+it.qty+'</td>';\n" +
                 "    rows+='<td style=\"text-align:center\"><button class=\"btn-minus\" onclick=\"decrementItem(\\''+k+'\\')\" title=\"Giảm 1\">−1</button></td></tr>';\n" +
                 "  }\n" +
                 "  document.getElementById('lines').innerHTML=rows;\n" +
@@ -340,7 +347,7 @@ public class ScannerPageController {
                 "    var sku=item.skuCode||'';\n" +
                 "    var name=item.skuName||'';\n" +
                 "    var expected=parseFloat(item.expectedQty)||0;\n" +
-                "    var scanned=(lineData[sku])?parseFloat(lineData[sku].qty)||0:0;\n" +
+                "    var scanned=0; for(var lk in lineData){ if(lineData[lk].skuCode===sku) scanned+=parseFloat(lineData[lk].qty)||0; }\n" +
                 "    var statusCls='status-pending', statusTxt='⏳';\n" +
                 "    if(scanned>0){\n" +
                 "      if(scanned===expected){statusCls='status-match';statusTxt='✓';matchCount++;}\n" +
@@ -435,21 +442,21 @@ public class ScannerPageController {
                 "  .finally(function(){setTimeout(function(){inflight=false;},600);});\n" +
                 "} \n" +
                 
-                "function decrementItem(skuCode){\n" +
+                "function decrementItem(lineKey){\n" +
                 "  if(inflight) return;\n" +
-                "  var item=lineData[skuCode];\n" +
-                "  if(!item || !item.skuId){toast('Không tìm thấy SKU: '+skuCode,true);return;}\n" +
+                "  var item=lineData[lineKey];\n" +
+                "  if(!item || !item.skuId){toast('Không tìm thấy: '+lineKey,true);return;}\n" +
                 "  inflight=true;\n" +
-                "  var delUrl=window.location.origin+'/v1/scan-events?sessionId='+SESSION_ID+'&skuId='+item.skuId+'&condition='+currentCondition+'&qty=1';\n" +
+                "  var delUrl=window.location.origin+'/v1/scan-events?sessionId='+SESSION_ID+'&skuId='+item.skuId+'&condition='+(item.condition||'PASS')+'&qty=1';\n" +
                 "  if(RECEIVING_ID) delUrl+='&receivingId='+RECEIVING_ID;\n" +
                 "  fetch(delUrl,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}})\n" +
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
                 "    if(d && d.success){\n" +
                 "      item.qty=parseFloat(item.qty)-1;\n" +
-                "      if(item.qty<=0){ delete lineData[skuCode]; }\n" +
+                "      if(item.qty<=0){ delete lineData[lineKey]; }\n" +
                 "      renderScanTable();\n" +
-                "      toast('−1 '+skuCode+' (còn '+(item.qty>0?item.qty:0)+')');\n" +
+                "      toast('−1 '+item.skuCode+' ['+(item.condition||'PASS')+'] (còn '+(item.qty>0?item.qty:0)+')');\n" +
                 "    } else { toast((d&&d.message)?d.message:'Lỗi xóa',true); }\n" +
                 "  })\n" +
                 "  .catch(function(e){toast('Lỗi kết nối: '+e,true);})\n" +
