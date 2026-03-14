@@ -138,6 +138,7 @@ public class GrnService {
         PutawayTaskEntity task = PutawayTaskEntity.builder()
                 .warehouseId(grn.getWarehouseId())
                 .receivingId(grn.getReceivingId())
+                .grnId(grn.getGrnId())
                 .fromLocationId(stagingLocationId)
                 .status("PENDING")
                 .createdBy(userId)

@@ -56,13 +56,13 @@ public class PutawayTaskController {
         return putawayTaskService.getTask(id);
     }
 
-    /** GET /v1/putaway-tasks/receiving/{receivingId} — get by receiving GRN */
-    @GetMapping("/receiving/{receivingId}")
-    @Operation(summary = "Lấy putaway task theo phiếu nhập", description = "Lấy Putaway Task được sinh ra tự động từ phiếu nhập dự kiến (Receiving Order).\n\n"
+    /** GET /v1/putaway-tasks/grn/{grnId} — get by GRN */
+    @GetMapping("/grn/{grnId}")
+    @Operation(summary = "Lấy putaway task theo GRN", description = "Lấy Putaway Task được sinh ra tự động từ Phiếu nhập kho (GRN).\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable receivingId`: Mã phiếu nhập Receiving Order ID. LẤY TỪ: attribute `receivingId` của API GET danh sách Receiving Orders.")
-    public ApiResponse<PutawayTaskResponse> getByReceivingId(@PathVariable Long receivingId) {
-        return putawayTaskService.getTaskByReceivingId(receivingId);
+            + "- `@PathVariable grnId`: Mã GRN ID. LẤY TỪ: attribute `grnId` của API `GET /v1/grns` hoặc response `POST /v1/grns/{id}/post`.")
+    public ApiResponse<PutawayTaskResponse> getByGrnId(@PathVariable Long grnId) {
+        return putawayTaskService.getTaskByGrnId(grnId);
     }
 
     /**

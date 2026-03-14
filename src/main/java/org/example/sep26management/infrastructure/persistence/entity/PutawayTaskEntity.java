@@ -27,6 +27,9 @@ public class PutawayTaskEntity {
     @Column(name = "receiving_id", nullable = false)
     private Long receivingId;
 
+    @Column(name = "grn_id")
+    private Long grnId;
+
     @Column(name = "status", nullable = false, length = 50)
     private String status;
 

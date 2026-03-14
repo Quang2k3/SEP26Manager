@@ -18,8 +18,8 @@ public class PutawayTaskResponse {
     private Long putawayTaskId;
     private Long warehouseId;
 
-    @Schema(description = "Thuộc Phiếu nhập số", example = "5")
-    private Long receivingId;
+    @Schema(description = "Thuộc GRN số", example = "3")
+    private Long grnId;
 
     @Schema(description = "Trạng thái (PENDING, IN_PROGRESS, COMPLETED, CANCELLED)", example = "PENDING")
     private String status;

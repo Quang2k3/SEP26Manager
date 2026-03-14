@@ -94,7 +94,7 @@ public class GrnController {
                     + "**Sau khi post thành công:**\n"
                     + "- Hệ thống tạo Putaway Task tự động\n"
                     + "- FE chuyển sang màn hình Putaway: `GET /v1/putaway-tasks?status=OPEN`\n"
-                    + "- Hoặc lấy task theo phiếu: `GET /v1/putaway-tasks/receiving/{receivingId}`")
+                    + "- Hoặc lấy task theo GRN: `GET /v1/putaway-tasks/grn/{grnId}`")
     public ApiResponse<GrnResponse> post(@PathVariable Long id, Authentication auth) {
         return grnService.post(id, extractUserId(auth));
     }

@@ -1439,3 +1439,7 @@ ALTER TABLE grns ALTER COLUMN created_by SET NOT NULL;
 ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS lot_number VARCHAR(100);
 ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS manufacture_date DATE;
 ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS expiry_date DATE;
+
+-- 9) MIGRATION: Thêm grn_id vào putaway_tasks để lookup theo GRN
+ALTER TABLE putaway_tasks ADD COLUMN IF NOT EXISTS grn_id BIGINT REFERENCES grns(grn_id);
+CREATE INDEX IF NOT EXISTS idx_putaway_task_grn ON putaway_tasks(grn_id);

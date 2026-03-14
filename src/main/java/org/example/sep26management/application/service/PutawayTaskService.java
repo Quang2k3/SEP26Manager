@@ -84,9 +84,9 @@ public class PutawayTaskService {
     }
 
     @Transactional(readOnly = true)
-    public ApiResponse<PutawayTaskResponse> getTaskByReceivingId(Long receivingId) {
-        PutawayTaskEntity task = putawayTaskRepo.findByReceivingId(receivingId)
-                .orElseThrow(() -> new RuntimeException("No putaway task found for GRN: " + receivingId));
+    public ApiResponse<PutawayTaskResponse> getTaskByGrnId(Long grnId) {
+        PutawayTaskEntity task = putawayTaskRepo.findByGrnId(grnId)
+                .orElseThrow(() -> new RuntimeException("No putaway task found for GRN: " + grnId));
         return getTask(task.getPutawayTaskId());
     }
 
@@ -206,7 +206,7 @@ public class PutawayTaskService {
         return PutawayTaskResponse.builder()
                 .putawayTaskId(t.getPutawayTaskId())
                 .warehouseId(t.getWarehouseId())
-                .receivingId(t.getReceivingId())
+                .grnId(t.getGrnId())
                 .status(t.getStatus())
                 .fromLocationId(t.getFromLocationId())
                 .assignedTo(t.getAssignedTo())

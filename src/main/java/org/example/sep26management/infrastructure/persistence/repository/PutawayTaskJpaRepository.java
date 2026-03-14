@@ -20,4 +20,6 @@ public interface PutawayTaskJpaRepository extends JpaRepository<PutawayTaskEntit
     Page<PutawayTaskEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
     Optional<PutawayTaskEntity> findByReceivingId(Long receivingId);
+
+    Optional<PutawayTaskEntity> findByGrnId(Long grnId);
 }
