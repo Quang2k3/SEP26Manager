@@ -347,28 +347,42 @@ public class ScannerPageController {
                 "} \n" +
 
                 // ── Confirm and submit to QC ──
+                // Luồng đúng: /submit (DRAFT→PENDING_COUNT) → /finalize-count (PENDING_COUNT→SUBMITTED)
                 "function confirmAndSubmit(){\n" +
                 "  if(!RECEIVING_ID){toast('Không có ID phiếu!',true);return;}\n" +
                 "  if(!confirm('Xác nhận kiểm đếm xong?\\nPhiếu sẽ được gửi cho QC kiểm tra chất lượng.')) return;\n" +
                 "  var btn=document.getElementById('confirmBtn');\n" +
                 "  btn.disabled=true;btn.textContent='Đang gửi...';\n" +
-                "  fetch(ORDER_API+'/'+RECEIVING_ID+'/submit',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n"
-                +
+                // Bước 1: submit DRAFT → PENDING_COUNT
+                "  fetch(ORDER_API+'/'+RECEIVING_ID+'/submit',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n" +
                 "  .then(function(r){return r.json();})\n" +
-                "  .then(function(d){\n" +
-                "    if(d && d.success){\n" +
-                "      toast('✅ Đã gửi QC kiểm tra!');\n" +
-                "      btn.textContent='✅ Đã gửi QC';\n" +
-                "      btn.style.background='#475569';\n" +
-                "      if(document.getElementById('oi-status')){document.getElementById('oi-status').textContent='SUBMITTED';}\n"
-                +
-                "    } else {\n" +
-                "      toast((d&&d.message)?d.message:'Lỗi submit',true);\n" +
-                "      btn.disabled=false;btn.textContent='✅ Xác nhận kiểm đếm — Gửi QC';\n" +
+                "  .then(function(d1){\n" +
+                "    if(!d1 || !d1.success){\n" +
+                // Nếu đơn đã ở PENDING_COUNT (submit trước đó rồi) thì vẫn cho phép đi tiếp finalize
+                "      var alreadyPending = d1 && d1.message && d1.message.indexOf('PENDING_COUNT') !== -1;\n" +
+                "      if(!alreadyPending){\n" +
+                "        toast((d1&&d1.message)?d1.message:'Lỗi submit',true);\n" +
+                "        btn.disabled=false;btn.textContent='✅ Xác nhận kiểm đếm — Gửi QC';\n" +
+                "        return;\n" +
+                "      }\n" +
                 "    }\n" +
+                "    btn.textContent='Đang chốt kiểm đếm...';\n" +
+                // Bước 2: finalize-count PENDING_COUNT → SUBMITTED
+                "    return fetch(ORDER_API+'/'+RECEIVING_ID+'/finalize-count',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "      .then(function(r2){return r2.json();})\n" +
+                "      .then(function(d2){\n" +
+                "        if(d2 && d2.success){\n" +
+                "          toast('Đã gửi QC kiểm tra!');\n" +
+                "          btn.textContent='Đã gửi QC';\n" +
+                "          btn.style.background='#475569';\n" +
+                "          if(document.getElementById('oi-status')){document.getElementById('oi-status').textContent='SUBMITTED';}\n" +
+                "        } else {\n" +
+                "          toast((d2&&d2.message)?d2.message:'Lỗi chốt kiểm đếm',true);\n" +
+                "          btn.disabled=false;btn.textContent=' Xác nhận kiểm đếm — Gửi QC';\n" +
+                "        }\n" +
+                "      });\n" +
                 "  })\n" +
-                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent='✅ Xác nhận kiểm đếm — Gửi QC';});\n"
-                +
+                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent='✅ Xác nhận kiểm đếm — Gửi QC';});\n" +
                 "} \n" +
 
                 // ── QC Submit Session ──
