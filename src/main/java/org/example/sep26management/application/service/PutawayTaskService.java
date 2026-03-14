@@ -206,6 +206,21 @@ public class PutawayTaskService {
 
         List<PutawayTaskItemEntity> taskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
 
+        // Validate: tất cả items phải được phân bổ hết mới cho confirm
+        for (PutawayTaskItemEntity item : taskItems) {
+            BigDecimal allocated = allocationRepo.sumReservedQtyByTaskAndSku(taskId, item.getSkuId());
+            BigDecimal remaining = item.getQuantity().subtract(item.getPutawayQty()).subtract(allocated);
+            if (remaining.compareTo(BigDecimal.ZERO) > 0) {
+                String skuInfo = "SKU " + item.getSkuId();
+                skuRepo.findById(item.getSkuId()).ifPresent(sku -> {
+                    throw new RuntimeException("Chưa phân bổ hết hàng! " + sku.getSkuCode()
+                            + " còn " + remaining + " units chưa được allocate. Hãy allocate hết rồi mới confirm.");
+                });
+                throw new RuntimeException("Chưa phân bổ hết hàng! " + skuInfo
+                        + " còn " + remaining + " units chưa được allocate.");
+            }
+        }
+
         for (PutawayAllocationEntity alloc : reservations) {
             PutawayTaskItemEntity item = taskItems.stream()
                     .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()))
