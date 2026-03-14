@@ -20,11 +20,11 @@ public class ScannerPageController {
             + "- `receivingId` *(Tùy chọn)*: ID Phiếu Nhận Hàng (GRN), lấy từ response của `POST /v1/receiving-sessions/{sessionId}/create-grn` (field `receivingId`). "
             + "Nếu truyền vào, trang scan sẽ **tự động hiển thị** ID phiếu nhận mà không cần nhập tay.")
     public String getScanUrl(@RequestParam("token") String token,
-                             @RequestParam(value = "receivingId", required = false) Long receivingId,
-                             HttpServletRequest request) {
+            @RequestParam(value = "receivingId", required = false) Long receivingId,
+            HttpServletRequest request) {
         String base = request.getScheme() + "://" + request.getServerName()
                 + (request.getServerPort() == 80 || request.getServerPort() == 443 ? ""
-                : ":" + request.getServerPort());
+                        : ":" + request.getServerPort());
         String url = base + "/v1/scan?token=" + token + "&v=qr3";
         if (receivingId != null) {
             url += "&receivingId=" + receivingId;
@@ -39,7 +39,7 @@ public class ScannerPageController {
             + "- `receivingId` *(Tùy chọn)*: Nếu được truyền qua URL (do FE nhúng từ bước `create-grn`), "
             + "trường **PHIẾU NHẬN HÀNG** trên trang sẽ **tự động điền sẵn** — người dùng không cần nhập tay nữa.")
     public ResponseEntity<String> scannerPage(@RequestParam("token") String token,
-                                              @RequestParam(value = "receivingId", required = false) Long receivingId) {
+            @RequestParam(value = "receivingId", required = false) Long receivingId) {
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 .header("Pragma", "no-cache")
@@ -105,8 +105,6 @@ public class ScannerPageController {
                 +
                 ".btn.full{width:100%}" +
                 ".btn.danger{background:#ef4444;width:100%}" +
-                ".btn.undo{background:transparent;border:1.5px solid #ef4444;color:#ef4444;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;min-width:36px}" +
-                ".btn.undo:active{background:#ef4444;color:#fff}" +
                 ".btn.success{background:linear-gradient(135deg,#22c55e,#16a34a);width:100%;font-size:17px;padding:14px 18px;margin-top:10px}"
                 +
                 ".btn.success:disabled{opacity:.5;cursor:not-allowed}" +
@@ -227,7 +225,7 @@ public class ScannerPageController {
 
                 "<div class='card'>" +
                 "<div class='card-title'>Đã scan (phiên hiện tại)</div>" +
-                "<table><thead><tr><th>SKU</th><th>Tên sản phẩm</th><th style='text-align:right'>Qty</th><th></th></tr></thead>"
+                "<table><thead><tr><th>SKU</th><th>Tên sản phẩm</th><th style='text-align:right'>Qty</th></tr></thead>"
                 +
                 "<tbody id='lines'></tbody></table>" +
                 "</div>" +
@@ -285,9 +283,9 @@ public class ScannerPageController {
                 "function setStatus(msg){document.getElementById('cam-status').textContent=msg;} \n" +
 
                 "function updateTable(d){\n" +
-                "  lineData[d.skuCode]={name:d.skuName||'',qty:d.newQty,skuId:d.skuId};\n" +
+                "  lineData[d.skuCode]={name:d.skuName||'',qty:d.newQty};\n" +
                 "  var rows='';\n" +
-                "  for(var k in lineData){rows+='<tr><td class=\"sc\">'+k+'</td><td>'+lineData[k].name+'</td><td class=\"qc\">'+lineData[k].qty+'</td><td><button class=\"btn undo\" onclick=\"undoScan(\''+k+'\',1)\">&minus;1</button></td></tr>';}\n"
+                "  for(var k in lineData){rows+='<tr><td class=\"sc\">'+k+'</td><td>'+lineData[k].name+'</td><td class=\"qc\">'+lineData[k].qty+'</td></tr>';}\n"
                 +
                 "  document.getElementById('lines').innerHTML=rows;\n" +
                 "  document.getElementById('cnt').textContent=Object.keys(lineData).length+' dòng';\n" +
@@ -354,7 +352,7 @@ public class ScannerPageController {
                 "  if(!confirm('Xác nhận kiểm đếm xong?\\nPhiếu sẽ được gửi cho QC kiểm tra chất lượng.')) return;\n" +
                 "  var btn=document.getElementById('confirmBtn');\n" +
                 "  btn.disabled=true;btn.textContent='Đang gửi...';\n" +
-                "  fetch(ORDER_API+'/'+RECEIVING_ID+'/finalize-count',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n"
+                "  fetch(ORDER_API+'/'+RECEIVING_ID+'/submit',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n"
                 +
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
@@ -433,30 +431,6 @@ public class ScannerPageController {
                 "  if(!b){toast('Nhập mã SKU!',true);return;}\n" +
                 "  document.getElementById('last').textContent=b;\n" +
                 "  sendBarcode(b,q);\n" +
-                "} \n" +
-
-                "function undoScan(skuCode,qty){\n" +
-                "  if(!SESSION_ID){toast('Không tìm thấy session',true);return;}\n" +
-                "  var skuId=lineData[skuCode]?lineData[skuCode].skuId:null;\n" +
-                "  if(!skuId){toast('Không tìm thấy SKU',true);return;}\n" +
-                "  var url=API+'?sessionId='+SESSION_ID+'&skuId='+skuId+'&condition=PASS&qty='+qty;\n" +
-                "  if(RECEIVING_ID) url+='&receivingId='+RECEIVING_ID;\n" +
-                "  fetch(url,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}})\n" +
-                "  .then(function(r){return r.json();})\n" +
-                "  .then(function(d){\n" +
-                "    if(d&&d.success){\n" +
-                "      var ld=lineData[skuCode];\n" +
-                "      if(ld){ld.qty=Math.max(0,ld.qty-qty);if(ld.qty<=0)delete lineData[skuCode];}\n" +
-                "      var rows='';\n" +
-                "      for(var k in lineData){rows+='<tr><td class=\"sc\">'+k+'</td><td>'+lineData[k].name+'</td><td class=\"qc\">'+lineData[k].qty+'</td><td><button class=\"btn undo\" onclick=\"undoScan(\''+k+'\',1)\">&minus;1</button></td></tr>';}\n" +
-                "      document.getElementById('lines').innerHTML=rows;\n" +
-                "      document.getElementById('cnt').textContent=Object.keys(lineData).length+' dòng';\n" +
-                "      updateComparisonTable();\n" +
-                "      toast('Đã xóa -'+qty+' '+skuCode);\n" +
-                "      if(navigator.vibrate)navigator.vibrate([30,30,30]);\n" +
-                "    }else{toast((d&&d.message)?d.message:'Lỗi xóa',true);}\n" +
-                "  })\n" +
-                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);});\n" +
                 "} \n" +
 
                 "function closeScan(){\n" +
