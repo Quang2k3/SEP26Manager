@@ -62,21 +62,21 @@ public class ReceivingOrderService {
                 Pageable pageable = PageRequest.of(page, size);
 
                 Page<ReceivingOrderEntity> ordersPage = status != null && !status.isBlank()
-                                ? receivingOrderRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
-                                : receivingOrderRepo.findAllByOrderByCreatedAtDesc(pageable);
+                        ? receivingOrderRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
+                        : receivingOrderRepo.findAllByOrderByCreatedAtDesc(pageable);
 
                 List<ReceivingOrderResponse> content = ordersPage.getContent().stream()
-                                .map(o -> toSummaryResponse(o))
-                                .collect(Collectors.toList());
+                        .map(o -> toSummaryResponse(o))
+                        .collect(Collectors.toList());
 
                 PageResponse<ReceivingOrderResponse> pageResponse = PageResponse.<ReceivingOrderResponse>builder()
-                                .content(content)
-                                .page(ordersPage.getNumber())
-                                .size(ordersPage.getSize())
-                                .totalElements(ordersPage.getTotalElements())
-                                .totalPages(ordersPage.getTotalPages())
-                                .last(ordersPage.isLast())
-                                .build();
+                        .content(content)
+                        .page(ordersPage.getNumber())
+                        .size(ordersPage.getSize())
+                        .totalElements(ordersPage.getTotalElements())
+                        .totalPages(ordersPage.getTotalPages())
+                        .last(ordersPage.isLast())
+                        .build();
 
                 return ApiResponse.success("OK", pageResponse);
         }
@@ -85,48 +85,48 @@ public class ReceivingOrderService {
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> createDraftOrder(
-                        org.example.sep26management.application.dto.request.ReceivingOrderRequest request,
-                        Long warehouseId, Long userId) {
+                org.example.sep26management.application.dto.request.ReceivingOrderRequest request,
+                Long warehouseId, Long userId) {
 
                 Long supplierId = null;
                 if (request.getSupplierCode() != null && !request.getSupplierCode().isBlank()) {
                         supplierId = supplierRepo.findBySupplierCode(request.getSupplierCode())
-                                        .map(SupplierEntity::getSupplierId)
-                                        .orElseThrow(() -> new RuntimeException(
-                                                        "Supplier not found: " + request.getSupplierCode()));
+                                .map(SupplierEntity::getSupplierId)
+                                .orElseThrow(() -> new RuntimeException(
+                                        "Supplier not found: " + request.getSupplierCode()));
                 }
 
                 String receivingCode = "GRN-" + System.currentTimeMillis();
 
                 ReceivingOrderEntity order = ReceivingOrderEntity.builder()
-                                .warehouseId(warehouseId)
-                                .sourceType(request.getSourceType())
-                                .sourceReferenceCode(request.getSourceReferenceCode())
-                                .supplierId(supplierId)
-                                .note(request.getNote())
-                                .status("DRAFT")
-                                .createdBy(userId)
-                                .receivingCode(receivingCode)
-                                .build();
+                        .warehouseId(warehouseId)
+                        .sourceType(request.getSourceType())
+                        .sourceReferenceCode(request.getSourceReferenceCode())
+                        .supplierId(supplierId)
+                        .note(request.getNote())
+                        .status("DRAFT")
+                        .createdBy(userId)
+                        .receivingCode(receivingCode)
+                        .build();
 
                 ReceivingOrderEntity savedOrder = receivingOrderRepo.save(order);
 
                 if (request.getItems() != null && !request.getItems().isEmpty()) {
                         for (var itemReq : request.getItems()) {
                                 SkuEntity sku = skuRepo.findBySkuCode(itemReq.getSkuCode())
-                                                .orElseThrow(() -> new RuntimeException(
-                                                                "SKU not found for code: " + itemReq.getSkuCode()));
+                                        .orElseThrow(() -> new RuntimeException(
+                                                "SKU not found for code: " + itemReq.getSkuCode()));
 
                                 ReceivingItemEntity item = ReceivingItemEntity.builder()
-                                                .receivingOrder(savedOrder)
-                                                .skuId(sku.getSkuId())
-                                                .expectedQty(itemReq.getExpectedQty() != null ? itemReq.getExpectedQty()
-                                                                : BigDecimal.ZERO)
-                                                .receivedQty(BigDecimal.ZERO)
-                                                .lotNumber(itemReq.getLotNumber())
-                                                .manufactureDate(itemReq.getManufactureDate())
-                                                .expiryDate(itemReq.getExpiryDate())
-                                                .build();
+                                        .receivingOrder(savedOrder)
+                                        .skuId(sku.getSkuId())
+                                        .expectedQty(itemReq.getExpectedQty() != null ? itemReq.getExpectedQty()
+                                                : BigDecimal.ZERO)
+                                        .receivedQty(BigDecimal.ZERO)
+                                        .lotNumber(itemReq.getLotNumber())
+                                        .manufactureDate(itemReq.getManufactureDate())
+                                        .expiryDate(itemReq.getExpiryDate())
+                                        .build();
                                 receivingItemRepo.save(item);
                         }
                 }
@@ -139,26 +139,26 @@ public class ReceivingOrderService {
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> updateLines(Long id,
-                        org.example.sep26management.application.dto.request.UpdateReceivingLinesRequest request,
-                        Long userId) {
+                                                               org.example.sep26management.application.dto.request.UpdateReceivingLinesRequest request,
+                                                               Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
 
                 if (!"DRAFT".equals(order.getStatus()) && !"RECEIVED".equals(order.getStatus())
-                                && !"VERIFIED".equals(order.getStatus())
-                                && !"PENDING_INCIDENT".equals(order.getStatus())) {
+                        && !"VERIFIED".equals(order.getStatus())
+                        && !"PENDING_INCIDENT".equals(order.getStatus())) {
                         throw new RuntimeException("Cannot update lines for GRN in status '" + order.getStatus() + "'");
                 }
 
                 if (request.getLines() != null) {
                         for (var line : request.getLines()) {
                                 ReceivingItemEntity item = receivingItemRepo.findById(line.getReceivingItemId())
-                                                .orElseThrow(() -> new RuntimeException(
-                                                                "Item not found: " + line.getReceivingItemId()));
+                                        .orElseThrow(() -> new RuntimeException(
+                                                "Item not found: " + line.getReceivingItemId()));
 
                                 if (!item.getReceivingOrder().getReceivingId().equals(id)) {
                                         throw new RuntimeException(
-                                                        "Item " + line.getReceivingItemId() + " does not belong to GRN "
-                                                                        + id);
+                                                "Item " + line.getReceivingItemId() + " does not belong to GRN "
+                                                        + id);
                                 }
 
                                 if (line.getReceivedQty() != null)
@@ -193,71 +193,71 @@ public class ReceivingOrderService {
                 // Batch-load SKUs để tránh N+1 query
                 List<Long> skuIds = items.stream().map(ReceivingItemEntity::getSkuId).collect(Collectors.toList());
                 Map<Long, SkuEntity> skuMap = skuRepo.findAllById(skuIds).stream()
-                                .collect(Collectors.toMap(SkuEntity::getSkuId, s -> s));
+                        .collect(Collectors.toMap(SkuEntity::getSkuId, s -> s));
 
                 // Lookup từ repo — KHÔNG query thẳng trong service
                 String warehouseName = warehouseRepo.findById(order.getWarehouseId())
-                                .map(WarehouseEntity::getWarehouseName).orElse(null);
+                        .map(WarehouseEntity::getWarehouseName).orElse(null);
 
                 String supplierName = order.getSupplierId() != null
-                                ? supplierRepo.findById(order.getSupplierId()).map(SupplierEntity::getSupplierName)
-                                                .orElse(null)
-                                : null;
+                        ? supplierRepo.findById(order.getSupplierId()).map(SupplierEntity::getSupplierName)
+                        .orElse(null)
+                        : null;
 
                 String createdByName = order.getCreatedBy() != null
-                                ? userRepo.findById(order.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
-                                : null;
+                        ? userRepo.findById(order.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
+                        : null;
 
                 // Map items
                 List<ReceivingItemResponse> itemResponses = items.stream()
-                                .map(item -> toItemResponse(item, skuMap))
-                                .collect(Collectors.toList());
+                        .map(item -> toItemResponse(item, skuMap))
+                        .collect(Collectors.toList());
 
                 int totalLines = itemResponses.size();
                 BigDecimal totalExpectedQty = items.stream()
-                                .map(ReceivingItemEntity::getExpectedQty)
-                                .filter(qty -> qty != null)
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        .map(ReceivingItemEntity::getExpectedQty)
+                        .filter(qty -> qty != null)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
                 BigDecimal totalQty = items.stream()
-                                .map(ReceivingItemEntity::getReceivedQty)
-                                .filter(qty -> qty != null)
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        .map(ReceivingItemEntity::getReceivedQty)
+                        .filter(qty -> qty != null)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
 
                 String approvedByName = order.getApprovedBy() != null
-                                ? userRepo.findById(order.getApprovedBy()).map(UserEntity::getFullName).orElse(null)
-                                : null;
+                        ? userRepo.findById(order.getApprovedBy()).map(UserEntity::getFullName).orElse(null)
+                        : null;
 
                 String rejectedByName = order.getRejectedBy() != null
-                                ? userRepo.findById(order.getRejectedBy()).map(UserEntity::getFullName).orElse(null)
-                                : null;
+                        ? userRepo.findById(order.getRejectedBy()).map(UserEntity::getFullName).orElse(null)
+                        : null;
 
                 ReceivingOrderResponse response = ReceivingOrderResponse.builder()
-                                .receivingId(order.getReceivingId())
-                                .receivingCode(order.getReceivingCode())
-                                .status(order.getStatus())
-                                .warehouseId(order.getWarehouseId())
-                                .warehouseName(warehouseName)
-                                .supplierId(order.getSupplierId())
-                                .supplierName(supplierName)
-                                .sourceType(order.getSourceType())
-                                .sourceReferenceCode(order.getSourceReferenceCode())
-                                .note(order.getNote())
-                                .createdBy(order.getCreatedBy())
-                                .createdByName(createdByName)
-                                .createdAt(order.getCreatedAt())
-                                .updatedAt(order.getUpdatedAt())
-                                .approvedBy(order.getApprovedBy())
-                                .approvedByName(approvedByName)
-                                .approvedAt(order.getApprovedAt())
-                                .rejectedBy(order.getRejectedBy())
-                                .rejectedByName(rejectedByName)
-                                .rejectedAt(order.getRejectedAt())
-                                .rejectReason(order.getRejectReason())
-                                .totalLines(totalLines)
-                                .totalQty(totalQty)
-                                .totalExpectedQty(totalExpectedQty)
-                                .items(itemResponses)
-                                .build();
+                        .receivingId(order.getReceivingId())
+                        .receivingCode(order.getReceivingCode())
+                        .status(order.getStatus())
+                        .warehouseId(order.getWarehouseId())
+                        .warehouseName(warehouseName)
+                        .supplierId(order.getSupplierId())
+                        .supplierName(supplierName)
+                        .sourceType(order.getSourceType())
+                        .sourceReferenceCode(order.getSourceReferenceCode())
+                        .note(order.getNote())
+                        .createdBy(order.getCreatedBy())
+                        .createdByName(createdByName)
+                        .createdAt(order.getCreatedAt())
+                        .updatedAt(order.getUpdatedAt())
+                        .approvedBy(order.getApprovedBy())
+                        .approvedByName(approvedByName)
+                        .approvedAt(order.getApprovedAt())
+                        .rejectedBy(order.getRejectedBy())
+                        .rejectedByName(rejectedByName)
+                        .rejectedAt(order.getRejectedAt())
+                        .rejectReason(order.getRejectReason())
+                        .totalLines(totalLines)
+                        .totalQty(totalQty)
+                        .totalExpectedQty(totalExpectedQty)
+                        .items(itemResponses)
+                        .build();
 
                 return ApiResponse.success("OK", response);
         }
@@ -276,34 +276,42 @@ public class ReceivingOrderService {
                                 List<ScanLineItem> sessionLines = sessionData.getLines();
                                 if (sessionLines != null && !sessionLines.isEmpty()) {
                                         log.info("Syncing {} lines from session {} into order {} before submit",
-                                                        sessionLines.size(), activeSessionId.get(), id);
+                                                sessionLines.size(), activeSessionId.get(), id);
 
                                         // Aggregate total qty per skuId (PASS + FAIL lines combined)
                                         Map<Long, BigDecimal> skuTotalQty = new java.util.HashMap<>();
                                         for (ScanLineItem sLine : sessionLines) {
                                                 if (sLine.getSkuId() != null && sLine.getQty() != null) {
                                                         skuTotalQty.merge(sLine.getSkuId(), sLine.getQty(),
-                                                                        BigDecimal::add);
+                                                                BigDecimal::add);
                                                 }
                                         }
 
                                         for (Map.Entry<Long, BigDecimal> entry : skuTotalQty.entrySet()) {
                                                 receivingItemRepo
-                                                                .findByReceivingOrderReceivingIdAndSkuId(id,
-                                                                                entry.getKey())
-                                                                .ifPresent(ri -> {
-                                                                        ri.setReceivedQty(entry.getValue());
-                                                                        receivingItemRepo.save(ri);
-                                                                        log.info("Session sync: SKU {} → receivedQty={}",
-                                                                                        entry.getKey(),
-                                                                                        entry.getValue());
-                                                                });
+                                                        .findByReceivingOrderReceivingIdAndSkuId(id,
+                                                                entry.getKey())
+                                                        .ifPresent(ri -> {
+                                                                ri.setReceivedQty(entry.getValue());
+                                                                receivingItemRepo.save(ri);
+                                                                log.info("Session sync: SKU {} → receivedQty={}",
+                                                                        entry.getKey(),
+                                                                        entry.getValue());
+                                                        });
                                         }
                                 }
                         });
                 }
                 // ----------------------------------------------------------------------
 
+                // Keeper submit = gửi toàn bộ thông tin scan lên, luôn SUBMITTED
+                // Việc đối chiếu expectedQty vs receivedQty là của QC ở bước sau
+                order.setStatus("SUBMITTED");
+                order.setUpdatedAt(LocalDateTime.now());
+                receivingOrderRepo.save(order);
+                log.info("Receiving Order {} submitted by userId={}", order.getReceivingCode(), userId);
+                return ApiResponse.success("Submitted successfully", getOrder(id).getData());
+                /*
                 List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
                 boolean hasDiscrepancy = false;
                 List<IncidentItemEntity> incidentItems = new ArrayList<>();
@@ -340,7 +348,6 @@ public class ReceivingOrderService {
                 }
 
                 if (hasDiscrepancy) {
-                        // Determine main incident type: SHORTAGE if any item is short, else OVERAGE
                         boolean hasShortage = incidentItems.stream()
                                         .anyMatch(i -> "SHORTAGE".equals(i.getReasonCode()));
                         org.example.sep26management.application.enums.IncidentType mainType = hasShortage
@@ -352,42 +359,30 @@ public class ReceivingOrderService {
                                         .incidentType(mainType)
                                         .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
                                         .incidentCode("INC-QC-" + System.currentTimeMillis() % 10000)
-                                        .description("Hệ thống tự động tạo sự cố do phát hiện sai lệch số lượng (Thiếu/Thừa) khi Keeper trình duyệt.")
+                                        .description("Tự động tạo sự cố do phát hiện sai lệch số lượng khi Keeper trình duyệt.")
                                         .receivingId(id)
                                         .status("OPEN")
                                         .reportedBy(userId)
                                         .build();
 
                         IncidentEntity savedIncident = incidentRepo.save(incident);
-
                         for (IncidentItemEntity incItem : incidentItems) {
                                 incItem.setIncident(savedIncident);
                                 incidentItemRepo.save(incItem);
                         }
                         order.setStatus("PENDING_INCIDENT");
-
-                        // Audit log: submitted with discrepancy
-                        auditLogService.logAction(
-                                        userId,
-                                        "RECEIVING_SUBMITTED_WITH_INCIDENT",
-                                        "RECEIVING_ORDER",
-                                        order.getReceivingId(),
-                                        "Receiving Order " + order.getReceivingCode()
-                                                        + " submitted with discrepancy. Incident ID: "
-                                                        + savedIncident.getIncidentId(),
-                                        null, null);
-
-                        log.info("GRN {} submitted with Discrepancy. Created Incident {} by userId={}",
-                                        order.getReceivingCode(), savedIncident.getIncidentId(), userId);
+                        log.info("GRN {} submitted with discrepancy → PENDING_INCIDENT by userId={}",
+                                        order.getReceivingCode(), userId);
                 } else {
                         order.setStatus("SUBMITTED");
-                        log.info("GRN {} submitted (Full received) by userId={}", order.getReceivingCode(), userId);
+                        log.info("GRN {} submitted OK → SUBMITTED by userId={}", order.getReceivingCode(), userId);
                 }
 
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
 
                 return ApiResponse.success("GRN submitted successfully", getOrder(id).getData());
+                */
         }
 
         // ─── QC Approve ──────────────────────────────────────────────────────────
@@ -405,12 +400,12 @@ public class ReceivingOrderService {
 
                 // Audit log: QC approved
                 auditLogService.logAction(
-                                qcUserId,
-                                "RECEIVING_QC_APPROVED",
-                                "RECEIVING_ORDER",
-                                order.getReceivingId(),
-                                "Receiving Order " + order.getReceivingCode() + " QC approved",
-                                null, null);
+                        qcUserId,
+                        "RECEIVING_QC_APPROVED",
+                        "RECEIVING_ORDER",
+                        order.getReceivingId(),
+                        "Receiving Order " + order.getReceivingCode() + " QC approved",
+                        null, null);
 
                 log.info("Receiving Order {} QC approved by userId={}", order.getReceivingCode(), qcUserId);
                 return ApiResponse.success("QC approved successfully", getOrder(id).getData());
@@ -424,7 +419,7 @@ public class ReceivingOrderService {
                 validateStatus(order, "qc-submit-session", "SUBMITTED", "PENDING_INCIDENT");
 
                 ScanSessionData session = sessionRedis.findById(sessionId)
-                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
 
                 List<ScanLineItem> lines = session.getLines();
                 if (lines == null || lines.isEmpty()) {
@@ -433,16 +428,16 @@ public class ReceivingOrderService {
 
                 // Map để gộp số lượng scan theo (skuId, condition)
                 Map<Long, Map<String, BigDecimal>> scannedData = lines.stream()
-                                .collect(Collectors.groupingBy(ScanLineItem::getSkuId,
-                                                Collectors.groupingBy(
-                                                                item -> item.getCondition() != null
-                                                                                ? item.getCondition()
-                                                                                : "PASS",
-                                                                Collectors.reducing(BigDecimal.ZERO,
-                                                                                item -> item.getQty() != null
-                                                                                                ? item.getQty()
-                                                                                                : BigDecimal.ZERO,
-                                                                                BigDecimal::add))));
+                        .collect(Collectors.groupingBy(ScanLineItem::getSkuId,
+                                Collectors.groupingBy(
+                                        item -> item.getCondition() != null
+                                                ? item.getCondition()
+                                                : "PASS",
+                                        Collectors.reducing(BigDecimal.ZERO,
+                                                item -> item.getQty() != null
+                                                        ? item.getQty()
+                                                        : BigDecimal.ZERO,
+                                                BigDecimal::add))));
 
                 List<ReceivingItemEntity> dbItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
 
@@ -463,16 +458,16 @@ public class ReceivingOrderService {
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                 hasFailItems = true;
                                 IncidentItemEntity incidentItem = IncidentItemEntity.builder()
-                                                // incident reference will be set later
-                                                .skuId(skuId)
-                                                .damagedQty(failQty) // Hàng lỗi QC
-                                                .expectedQty(totalScanned) // Tổng QC quét
-                                                .actualQty(passQty) // Số lượng đạt
-                                                .note("Báo cáo từ QC Scanner")
-                                                .actionPassQty(BigDecimal.ZERO)
-                                                .actionReturnQty(BigDecimal.ZERO)
-                                                .actionScrapQty(BigDecimal.ZERO)
-                                                .build();
+                                        // incident reference will be set later
+                                        .skuId(skuId)
+                                        .damagedQty(failQty) // Hàng lỗi QC
+                                        .expectedQty(totalScanned) // Tổng QC quét
+                                        .actualQty(passQty) // Số lượng đạt
+                                        .note("Báo cáo từ QC Scanner")
+                                        .actionPassQty(BigDecimal.ZERO)
+                                        .actionReturnQty(BigDecimal.ZERO)
+                                        .actionScrapQty(BigDecimal.ZERO)
+                                        .build();
                                 incidentItems.add(incidentItem);
 
                                 dbItem.setCondition("FAIL");
@@ -486,14 +481,14 @@ public class ReceivingOrderService {
                 if (hasFailItems) {
                         // Tạo Quality Incident
                         IncidentEntity incident = IncidentEntity.builder()
-                                        .warehouseId(order.getWarehouseId())
-                                        .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
-                                        .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
-                                        .description("Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)")
-                                        .receivingId(id)
-                                        .status("OPEN")
-                                        .reportedBy(qcUserId)
-                                        .build();
+                                .warehouseId(order.getWarehouseId())
+                                .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
+                                .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
+                                .description("Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)")
+                                .receivingId(id)
+                                .status("OPEN")
+                                .reportedBy(qcUserId)
+                                .build();
 
                         IncidentEntity savedIncident = incidentRepo.save(incident);
 
@@ -506,23 +501,23 @@ public class ReceivingOrderService {
                         order.setRejectedBy(qcUserId);
                         order.setRejectedAt(LocalDateTime.now());
                         order.setRejectReason("Hàng lỗi phát hiện qua QC Scanner. Incident ID: "
-                                        + savedIncident.getIncidentId());
+                                + savedIncident.getIncidentId());
                         order.setUpdatedAt(LocalDateTime.now());
                         receivingOrderRepo.save(order);
 
                         // Audit log: QC rejected (fail items found)
                         auditLogService.logAction(
-                                        qcUserId,
-                                        "RECEIVING_QC_REJECTED",
-                                        "RECEIVING_ORDER",
-                                        order.getReceivingId(),
-                                        "Receiving Order " + order.getReceivingCode()
-                                                        + " QC rejected — fail items detected. Incident ID: "
-                                                        + savedIncident.getIncidentId(),
-                                        null, null);
+                                qcUserId,
+                                "RECEIVING_QC_REJECTED",
+                                "RECEIVING_ORDER",
+                                order.getReceivingId(),
+                                "Receiving Order " + order.getReceivingCode()
+                                        + " QC rejected — fail items detected. Incident ID: "
+                                        + savedIncident.getIncidentId(),
+                                null, null);
 
                         log.info("QC scan completed with errors for GRN {}. Created Incident {}.",
-                                        order.getReceivingCode(), savedIncident.getIncidentId());
+                                order.getReceivingCode(), savedIncident.getIncidentId());
                 } else {
                         // Toàn bộ PASS
                         order.setStatus("QC_APPROVED");
@@ -533,13 +528,13 @@ public class ReceivingOrderService {
 
                         // Audit log: QC approved (100% pass)
                         auditLogService.logAction(
-                                        qcUserId,
-                                        "RECEIVING_QC_APPROVED",
-                                        "RECEIVING_ORDER",
-                                        order.getReceivingId(),
-                                        "Receiving Order " + order.getReceivingCode()
-                                                        + " QC scan 100% PASS — auto approved",
-                                        null, null);
+                                qcUserId,
+                                "RECEIVING_QC_APPROVED",
+                                "RECEIVING_ORDER",
+                                order.getReceivingId(),
+                                "Receiving Order " + order.getReceivingCode()
+                                        + " QC scan 100% PASS — auto approved",
+                                null, null);
 
                         log.info("QC scan completed 100% PASS for GRN {}.", order.getReceivingCode());
                 }
@@ -550,9 +545,9 @@ public class ReceivingOrderService {
                 sseRegistry.remove(sessionId);
 
                 return ApiResponse.success("QC scan session submitted successfully", Map.of(
-                                "receivingId", order.getReceivingId(),
-                                "status", order.getStatus(),
-                                "hasFailItems", hasFailItems));
+                        "receivingId", order.getReceivingId(),
+                        "status", order.getStatus(),
+                        "hasFailItems", hasFailItems));
         }
 
         // ─── Approve ───────────────────────────────────────────────────────────────
@@ -573,22 +568,22 @@ public class ReceivingOrderService {
 
         @Transactional
         public ApiResponse<org.example.sep26management.application.dto.response.GrnResponse> generateGrn(Long id,
-                        Long userId) {
+                                                                                                         Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
 
                 if (!"QC_APPROVED".equals(order.getStatus())) {
                         throw new org.example.sep26management.infrastructure.exception.BusinessException(
-                                        "Can only generate GRN from QC_APPROVED Receiving Order. Current status: "
-                                                        + order.getStatus());
+                                "Can only generate GRN from QC_APPROVED Receiving Order. Current status: "
+                                        + order.getStatus());
                 }
 
                 // Kiểm tra xem có Incident nào chưa RESOLVED không
                 List<IncidentEntity> incidents = incidentRepo.findByReceivingIdOrderByCreatedAtDesc(id);
                 boolean hasUnsettled = incidents.stream()
-                                .anyMatch(i -> "OPEN".equals(i.getStatus()) || "APPROVED".equals(i.getStatus()));
+                        .anyMatch(i -> "OPEN".equals(i.getStatus()) || "APPROVED".equals(i.getStatus()));
                 if (hasUnsettled) {
                         throw new org.example.sep26management.infrastructure.exception.BusinessException(
-                                        "Cannot generate GRN: there are unsettled incidents.");
+                                "Cannot generate GRN: there are unsettled incidents.");
                 }
 
                 // Tính toán số lượng GRN (Pass/Nhập kho) cho từng SKU
@@ -600,52 +595,52 @@ public class ReceivingOrderService {
                 List<IncidentItemEntity> qcDamageItems = new ArrayList<>();
                 for (IncidentEntity inc : incidents) {
                         if ("RESOLVED".equals(inc.getStatus())
-                                        && inc.getIncidentType() != null
-                                        && !org.example.sep26management.application.enums.IncidentType.SHORTAGE
-                                                        .equals(inc.getIncidentType())
-                                        && !org.example.sep26management.application.enums.IncidentType.OVERAGE
-                                                        .equals(inc.getIncidentType())) {
+                                && inc.getIncidentType() != null
+                                && !org.example.sep26management.application.enums.IncidentType.SHORTAGE
+                                .equals(inc.getIncidentType())
+                                && !org.example.sep26management.application.enums.IncidentType.OVERAGE
+                                .equals(inc.getIncidentType())) {
                                 qcDamageItems
-                                                .addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
+                                        .addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
                         }
                 }
 
                 // Map skuId -> total actual damage from QC (not discrepancy)
                 Map<Long, BigDecimal> skuDamagedMap = qcDamageItems.stream()
-                                .collect(Collectors.groupingBy(IncidentItemEntity::getSkuId,
-                                                Collectors.reducing(BigDecimal.ZERO,
-                                                                i -> i.getDamagedQty() != null ? i.getDamagedQty()
-                                                                                : BigDecimal.ZERO,
-                                                                BigDecimal::add)));
+                        .collect(Collectors.groupingBy(IncidentItemEntity::getSkuId,
+                                Collectors.reducing(BigDecimal.ZERO,
+                                        i -> i.getDamagedQty() != null ? i.getDamagedQty()
+                                                : BigDecimal.ZERO,
+                                        BigDecimal::add)));
 
                 Map<Long, BigDecimal> skuManagerPassMap = qcDamageItems.stream()
-                                .collect(Collectors.groupingBy(IncidentItemEntity::getSkuId,
-                                                Collectors.reducing(BigDecimal.ZERO,
-                                                                i -> i.getActionPassQty() != null
-                                                                                ? i.getActionPassQty()
-                                                                                : BigDecimal.ZERO,
-                                                                BigDecimal::add)));
+                        .collect(Collectors.groupingBy(IncidentItemEntity::getSkuId,
+                                Collectors.reducing(BigDecimal.ZERO,
+                                        i -> i.getActionPassQty() != null
+                                                ? i.getActionPassQty()
+                                                : BigDecimal.ZERO,
+                                        BigDecimal::add)));
 
                 List<GrnItemEntity> validGrnItems = new ArrayList<>();
 
                 String grnCode = "GRN-" + System.currentTimeMillis();
                 GrnEntity grn = GrnEntity.builder()
-                                .receivingId(id)
-                                .grnCode(grnCode)
-                                .warehouseId(order.getWarehouseId())
-                                .sourceType(order.getSourceType())
-                                .supplierId(order.getSupplierId())
-                                .sourceReferenceCode(order.getSourceReferenceCode())
-                                .status("PENDING_APPROVAL")
-                                .createdBy(userId)
-                                .build();
+                        .receivingId(id)
+                        .grnCode(grnCode)
+                        .warehouseId(order.getWarehouseId())
+                        .sourceType(order.getSourceType())
+                        .supplierId(order.getSupplierId())
+                        .sourceReferenceCode(order.getSourceReferenceCode())
+                        .status("PENDING_APPROVAL")
+                        .createdBy(userId)
+                        .build();
                 GrnEntity savedGrn = grnRepo.save(grn);
 
                 for (ReceivingItemEntity item : items) {
                         Long skuId = item.getSkuId();
                         // receivedQty already reflects Manager's decision from resolveDiscrepancy()
                         BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
-                                        : BigDecimal.ZERO;
+                                : BigDecimal.ZERO;
                         // Only subtract actual QC damage, not discrepancy amounts
                         BigDecimal damagedQty = skuDamagedMap.getOrDefault(skuId, BigDecimal.ZERO);
                         BigDecimal managerPassQty = skuManagerPassMap.getOrDefault(skuId, BigDecimal.ZERO);
@@ -676,7 +671,7 @@ public class ReceivingOrderService {
                                 }
 
                                 if (expiryDate == null && sku != null && sku.getShelfLifeDays() != null
-                                                && sku.getShelfLifeDays() > 0) {
+                                        && sku.getShelfLifeDays() > 0) {
                                         expiryDate = manufactureDate.plusDays(sku.getShelfLifeDays());
                                         item.setExpiryDate(expiryDate);
                                 }
@@ -685,13 +680,13 @@ public class ReceivingOrderService {
                                 receivingItemRepo.save(item);
 
                                 GrnItemEntity grnItem = GrnItemEntity.builder()
-                                                .grn(savedGrn)
-                                                .skuId(skuId)
-                                                .quantity(finalPassQty)
-                                                .lotNumber(lotNumber)
-                                                .manufactureDate(manufactureDate)
-                                                .expiryDate(expiryDate)
-                                                .build();
+                                        .grn(savedGrn)
+                                        .skuId(skuId)
+                                        .quantity(finalPassQty)
+                                        .lotNumber(lotNumber)
+                                        .manufactureDate(manufactureDate)
+                                        .expiryDate(expiryDate)
+                                        .build();
                                 grnItemRepo.save(grnItem);
                                 validGrnItems.add(grnItem);
                         }
@@ -702,46 +697,46 @@ public class ReceivingOrderService {
 
                 // DTO mapping for response
                 List<org.example.sep26management.application.dto.response.GrnItemResponse> itemResponses = validGrnItems
-                                .stream()
-                                .map(gi -> {
-                                        String skuCode = null;
-                                        String skuName = null;
-                                        SkuEntity sku = skuRepo.findById(gi.getSkuId()).orElse(null);
-                                        if (sku != null) {
-                                                skuCode = sku.getSkuCode();
-                                                skuName = sku.getSkuName();
-                                        }
-                                        return org.example.sep26management.application.dto.response.GrnItemResponse
-                                                        .builder()
-                                                        .grnItemId(gi.getGrnItemId())
-                                                        .skuId(gi.getSkuId())
-                                                        .skuCode(skuCode)
-                                                        .skuName(skuName)
-                                                        .quantity(gi.getQuantity())
-                                                        .lotNumber(gi.getLotNumber())
-                                                        .manufactureDate(gi.getManufactureDate())
-                                                        .expiryDate(gi.getExpiryDate())
-                                                        .build();
-                                }).collect(Collectors.toList());
+                        .stream()
+                        .map(gi -> {
+                                String skuCode = null;
+                                String skuName = null;
+                                SkuEntity sku = skuRepo.findById(gi.getSkuId()).orElse(null);
+                                if (sku != null) {
+                                        skuCode = sku.getSkuCode();
+                                        skuName = sku.getSkuName();
+                                }
+                                return org.example.sep26management.application.dto.response.GrnItemResponse
+                                        .builder()
+                                        .grnItemId(gi.getGrnItemId())
+                                        .skuId(gi.getSkuId())
+                                        .skuCode(skuCode)
+                                        .skuName(skuName)
+                                        .quantity(gi.getQuantity())
+                                        .lotNumber(gi.getLotNumber())
+                                        .manufactureDate(gi.getManufactureDate())
+                                        .expiryDate(gi.getExpiryDate())
+                                        .build();
+                        }).collect(Collectors.toList());
 
                 org.example.sep26management.application.dto.response.GrnResponse grnResponse = org.example.sep26management.application.dto.response.GrnResponse
-                                .builder()
-                                .grnId(savedGrn.getGrnId())
-                                .grnCode(savedGrn.getGrnCode())
-                                .receivingId(savedGrn.getReceivingId())
-                                .warehouseId(savedGrn.getWarehouseId())
-                                .sourceType(savedGrn.getSourceType())
-                                .supplierId(savedGrn.getSupplierId())
-                                .sourceReferenceCode(savedGrn.getSourceReferenceCode())
-                                .status(savedGrn.getStatus())
-                                .createdBy(savedGrn.getCreatedBy())
-                                .createdAt(savedGrn.getCreatedAt())
-                                .updatedAt(savedGrn.getUpdatedAt())
-                                .items(itemResponses)
-                                .build();
+                        .builder()
+                        .grnId(savedGrn.getGrnId())
+                        .grnCode(savedGrn.getGrnCode())
+                        .receivingId(savedGrn.getReceivingId())
+                        .warehouseId(savedGrn.getWarehouseId())
+                        .sourceType(savedGrn.getSourceType())
+                        .supplierId(savedGrn.getSupplierId())
+                        .sourceReferenceCode(savedGrn.getSourceReferenceCode())
+                        .status(savedGrn.getStatus())
+                        .createdBy(savedGrn.getCreatedBy())
+                        .createdAt(savedGrn.getCreatedAt())
+                        .updatedAt(savedGrn.getUpdatedAt())
+                        .items(itemResponses)
+                        .build();
 
                 return ApiResponse.success("GRN generated successfully. Pending Manager approval.",
-                                grnResponse);
+                        grnResponse);
         }
 
         // ─── Post ──────────────────────────────────────────────────────────────────
@@ -755,8 +750,8 @@ public class ReceivingOrderService {
 
         private ReceivingOrderEntity findOrder(Long id) {
                 return receivingOrderRepo.findById(id)
-                                .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.BusinessException(
-                                                "Receiving order not found: " + id));
+                        .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.BusinessException(
+                                "Receiving order not found: " + id));
         }
 
         private void validateStatus(ReceivingOrderEntity order, String action, String... expectedStatuses) {
@@ -770,20 +765,20 @@ public class ReceivingOrderService {
 
                 if (!isValid) {
                         throw new org.example.sep26management.infrastructure.exception.BusinessException(
-                                        "Cannot " + action + " in status '" + order.getStatus() + "'. Expected one of: "
-                                                        + String.join(", ", expectedStatuses));
+                                "Cannot " + action + " in status '" + order.getStatus() + "'. Expected one of: "
+                                        + String.join(", ", expectedStatuses));
                 }
         }
 
         private Long getFirstStagingLocation(Long warehouseId) {
                 try {
                         return jdbcTemplate.queryForObject(
-                                        "SELECT location_id FROM locations WHERE warehouse_id = ? AND is_staging = TRUE AND active = TRUE LIMIT 1",
-                                        Long.class, warehouseId);
+                                "SELECT location_id FROM locations WHERE warehouse_id = ? AND is_staging = TRUE AND active = TRUE LIMIT 1",
+                                Long.class, warehouseId);
                 } catch (Exception e) {
                         return jdbcTemplate.queryForObject(
-                                        "SELECT location_id FROM locations WHERE warehouse_id = ? AND active = TRUE LIMIT 1",
-                                        Long.class, warehouseId);
+                                "SELECT location_id FROM locations WHERE warehouse_id = ? AND active = TRUE LIMIT 1",
+                                Long.class, warehouseId);
                 }
         }
 
@@ -793,46 +788,46 @@ public class ReceivingOrderService {
          */
         private ReceivingOrderResponse toSummaryResponse(ReceivingOrderEntity o) {
                 String createdByName = o.getCreatedBy() != null
-                                ? userRepo.findById(o.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
-                                : null;
+                        ? userRepo.findById(o.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
+                        : null;
 
                 return ReceivingOrderResponse.builder()
-                                .receivingId(o.getReceivingId())
-                                .receivingCode(o.getReceivingCode())
-                                .status(o.getStatus())
-                                .warehouseId(o.getWarehouseId())
-                                .supplierId(o.getSupplierId())
-                                .sourceType(o.getSourceType())
-                                .sourceReferenceCode(o.getSourceReferenceCode())
-                                .note(o.getNote())
-                                .createdBy(o.getCreatedBy())
-                                .createdByName(createdByName)
-                                .createdAt(o.getCreatedAt())
-                                .updatedAt(o.getUpdatedAt())
-                                .approvedBy(o.getApprovedBy())
-                                .approvedAt(o.getApprovedAt())
-                                .rejectedBy(o.getRejectedBy())
-                                .rejectedAt(o.getRejectedAt())
-                                .rejectReason(o.getRejectReason())
-                                .build();
+                        .receivingId(o.getReceivingId())
+                        .receivingCode(o.getReceivingCode())
+                        .status(o.getStatus())
+                        .warehouseId(o.getWarehouseId())
+                        .supplierId(o.getSupplierId())
+                        .sourceType(o.getSourceType())
+                        .sourceReferenceCode(o.getSourceReferenceCode())
+                        .note(o.getNote())
+                        .createdBy(o.getCreatedBy())
+                        .createdByName(createdByName)
+                        .createdAt(o.getCreatedAt())
+                        .updatedAt(o.getUpdatedAt())
+                        .approvedBy(o.getApprovedBy())
+                        .approvedAt(o.getApprovedAt())
+                        .rejectedBy(o.getRejectedBy())
+                        .rejectedAt(o.getRejectedAt())
+                        .rejectReason(o.getRejectReason())
+                        .build();
         }
 
         private ReceivingItemResponse toItemResponse(ReceivingItemEntity item, Map<Long, SkuEntity> skuMap) {
                 SkuEntity sku = skuMap.get(item.getSkuId());
                 return ReceivingItemResponse.builder()
-                                .receivingItemId(item.getReceivingItemId())
-                                .skuId(item.getSkuId())
-                                .skuCode(sku != null ? sku.getSkuCode() : null)
-                                .skuName(sku != null ? sku.getSkuName() : null)
-                                .unit(sku != null ? sku.getUnit() : null)
-                                .expectedQty(item.getExpectedQty())
-                                .receivedQty(item.getReceivedQty())
-                                .lotNumber(item.getLotNumber())
-                                .expiryDate(item.getExpiryDate())
-                                .manufactureDate(item.getManufactureDate())
-                                .note(item.getNote())
-                                .condition(item.getCondition())
-                                .reasonCode(item.getReasonCode())
-                                .build();
+                        .receivingItemId(item.getReceivingItemId())
+                        .skuId(item.getSkuId())
+                        .skuCode(sku != null ? sku.getSkuCode() : null)
+                        .skuName(sku != null ? sku.getSkuName() : null)
+                        .unit(sku != null ? sku.getUnit() : null)
+                        .expectedQty(item.getExpectedQty())
+                        .receivedQty(item.getReceivedQty())
+                        .lotNumber(item.getLotNumber())
+                        .expiryDate(item.getExpiryDate())
+                        .manufactureDate(item.getManufactureDate())
+                        .note(item.getNote())
+                        .condition(item.getCondition())
+                        .reasonCode(item.getReasonCode())
+                        .build();
         }
 }
