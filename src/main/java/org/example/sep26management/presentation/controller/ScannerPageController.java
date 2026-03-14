@@ -433,6 +433,25 @@ public class ScannerPageController {
                 "  sendBarcode(b,q);\n" +
                 "} \n" +
 
+                "function loadSessionData(){\n" +
+                "  if(!SESSION_ID) return;\n" +
+                "  fetch(window.location.origin+'/v1/receiving-sessions/'+SESSION_ID,{headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "  .then(function(r){return r.json();})\n" +
+                "  .then(function(resp){\n" +
+                "    if(!resp||!resp.success||!resp.data||!resp.data.lines) return;\n" +
+                "    var ls=resp.data.lines;\n" +
+                "    for(var i=0;i<ls.length;i++){\n" +
+                "      var l=ls[i];\n" +
+                "      if(l.skuCode) lineData[l.skuCode]={name:l.skuName||l.skuCode,qty:l.qty};\n" +
+                "    }\n" +
+                "    var rows='';\n" +
+                "    for(var k in lineData){rows+='<tr><td class=\"sc\">'+k+'</td><td>'+lineData[k].name+'</td><td class=\"qc\">'+lineData[k].qty+'</td></tr>';}\n" +
+                "    document.getElementById('lines').innerHTML=rows;\n" +
+                "    document.getElementById('cnt').textContent=Object.keys(lineData).length+' dòng';\n" +
+                "    updateComparisonTable();\n" +
+                "  }).catch(function(e){console.warn('loadSessionData error:',e);});\n" +
+                "} \n" +
+
                 "function closeScan(){\n" +
                 "  if(!SESSION_ID){toast('Không tìm thấy session',true);return;}\n" +
                 "  if(!confirm('Kết thúc phiên scan?')) return;\n" +
@@ -555,10 +574,12 @@ public class ScannerPageController {
                 "    document.getElementById('recv-display').style.display='block';\n" +
                 "    document.getElementById('recv-manual').style.display='none';\n" +
                 "    loadOrderDetails();\n" +
+                "    loadSessionData();\n" +
                 "    document.getElementById('confirm-card').style.display='block';\n" +
                 "  } else {\n" +
                 "    document.getElementById('recv-display').style.display='none';\n" +
                 "    document.getElementById('recv-manual').style.display='block';\n" +
+                "    loadSessionData();\n" +
                 "  }\n" +
                 "  document.getElementById('manualBtn').addEventListener('click', submitManual);\n" +
                 "  document.getElementById('closeBtn').addEventListener('click', closeScan);\n" +
