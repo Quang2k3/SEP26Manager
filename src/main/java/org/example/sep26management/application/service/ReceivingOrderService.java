@@ -143,10 +143,9 @@ public class ReceivingOrderService {
                                                                Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
 
-                if (!"DRAFT".equals(order.getStatus()) && !"RECEIVED".equals(order.getStatus())
-                        && !"VERIFIED".equals(order.getStatus())
-                        && !"PENDING_INCIDENT".equals(order.getStatus())) {
-                        throw new RuntimeException("Cannot update lines for GRN in status '" + order.getStatus() + "'");
+                if (!"DRAFT".equals(order.getStatus())) {
+                        throw new RuntimeException(
+                                "Cannot update lines: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
                 }
 
                 if (request.getLines() != null) {
@@ -262,23 +261,40 @@ public class ReceivingOrderService {
                 return ApiResponse.success("OK", response);
         }
 
-        // ─── Submit ────────────────────────────────────────────────────────────────
+        // ─── Submit (DRAFT → PENDING_COUNT) ─────────────────────────────────────
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> submit(Long id, Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
                 validateStatus(order, "submit", "DRAFT");
 
-                // --- Sync from active session if exists (Failsafe for mobile scans) ---
+                order.setStatus("PENDING_COUNT");
+                order.setUpdatedAt(LocalDateTime.now());
+                receivingOrderRepo.save(order);
+
+                log.info("Receiving Order {} submitted (DRAFT → PENDING_COUNT) by userId={}",
+                        order.getReceivingCode(), userId);
+                return ApiResponse.success("Submitted successfully. Status: PENDING_COUNT. Keeper can now start scanning.",
+                        getOrder(id).getData());
+        }
+
+        // ─── Finalize Count (PENDING_COUNT → SUBMITTED) ─────────────────────────
+
+        @Transactional
+        public ApiResponse<ReceivingOrderResponse> finalizeCount(Long id, Long userId) {
+                ReceivingOrderEntity order = findOrder(id);
+                validateStatus(order, "finalize-count", "PENDING_COUNT");
+
+                // --- Sync from active scan session if exists ---
                 Optional<String> activeSessionId = sessionRedis.findActiveSession(order.getWarehouseId(), userId);
                 if (activeSessionId.isPresent()) {
                         sessionRedis.findById(activeSessionId.get()).ifPresent(sessionData -> {
                                 List<ScanLineItem> sessionLines = sessionData.getLines();
                                 if (sessionLines != null && !sessionLines.isEmpty()) {
-                                        log.info("Syncing {} lines from session {} into order {} before submit",
+                                        log.info("Syncing {} lines from session {} into order {} before finalize",
                                                 sessionLines.size(), activeSessionId.get(), id);
 
-                                        // Aggregate total qty per skuId (PASS + FAIL lines combined)
+                                        // Aggregate total qty per skuId
                                         Map<Long, BigDecimal> skuTotalQty = new java.util.HashMap<>();
                                         for (ScanLineItem sLine : sessionLines) {
                                                 if (sLine.getSkuId() != null && sLine.getQty() != null) {
@@ -302,87 +318,15 @@ public class ReceivingOrderService {
                                 }
                         });
                 }
-                // ----------------------------------------------------------------------
 
-                // Keeper submit = gửi toàn bộ thông tin scan lên, luôn SUBMITTED
-                // Việc đối chiếu expectedQty vs receivedQty là của QC ở bước sau
                 order.setStatus("SUBMITTED");
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
-                log.info("Receiving Order {} submitted by userId={}", order.getReceivingCode(), userId);
-                return ApiResponse.success("Submitted successfully", getOrder(id).getData());
-                /*
-                List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
-                boolean hasDiscrepancy = false;
-                List<IncidentItemEntity> incidentItems = new ArrayList<>();
 
-                for (ReceivingItemEntity item : items) {
-                        BigDecimal expectedQty = item.getExpectedQty() != null ? item.getExpectedQty()
-                                        : BigDecimal.ZERO;
-                        BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
-                                        : BigDecimal.ZERO;
-
-                        if (expectedQty.compareTo(receivedQty) != 0) {
-                                hasDiscrepancy = true;
-                                BigDecimal diffQty = expectedQty.subtract(receivedQty).abs();
-                                String typeStr = expectedQty.compareTo(receivedQty) > 0 ? "SHORTAGE" : "OVERAGE";
-
-                                log.warn("Discrepancy detected for SKU {}: Expected={}, Received={}, Type={}",
-                                                item.getSkuId(), expectedQty, receivedQty, typeStr);
-
-                                IncidentItemEntity incItem = IncidentItemEntity.builder()
-                                                .skuId(item.getSkuId())
-                                                .damagedQty(diffQty)
-                                                .expectedQty(expectedQty)
-                                                .actualQty(receivedQty)
-                                                .note("Hệ thống tự động ghi nhận "
-                                                                + (typeStr.equals("SHORTAGE") ? "thiếu" : "thừa")
-                                                                + " hàng khi Keeper trình duyệt")
-                                                .actionPassQty(BigDecimal.ZERO)
-                                                .actionReturnQty(BigDecimal.ZERO)
-                                                .actionScrapQty(BigDecimal.ZERO)
-                                                .reasonCode(typeStr)
-                                                .build();
-                                incidentItems.add(incItem);
-                        }
-                }
-
-                if (hasDiscrepancy) {
-                        boolean hasShortage = incidentItems.stream()
-                                        .anyMatch(i -> "SHORTAGE".equals(i.getReasonCode()));
-                        org.example.sep26management.application.enums.IncidentType mainType = hasShortage
-                                        ? org.example.sep26management.application.enums.IncidentType.SHORTAGE
-                                        : org.example.sep26management.application.enums.IncidentType.OVERAGE;
-
-                        IncidentEntity incident = IncidentEntity.builder()
-                                        .warehouseId(order.getWarehouseId())
-                                        .incidentType(mainType)
-                                        .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
-                                        .incidentCode("INC-QC-" + System.currentTimeMillis() % 10000)
-                                        .description("Tự động tạo sự cố do phát hiện sai lệch số lượng khi Keeper trình duyệt.")
-                                        .receivingId(id)
-                                        .status("OPEN")
-                                        .reportedBy(userId)
-                                        .build();
-
-                        IncidentEntity savedIncident = incidentRepo.save(incident);
-                        for (IncidentItemEntity incItem : incidentItems) {
-                                incItem.setIncident(savedIncident);
-                                incidentItemRepo.save(incItem);
-                        }
-                        order.setStatus("PENDING_INCIDENT");
-                        log.info("GRN {} submitted with discrepancy → PENDING_INCIDENT by userId={}",
-                                        order.getReceivingCode(), userId);
-                } else {
-                        order.setStatus("SUBMITTED");
-                        log.info("GRN {} submitted OK → SUBMITTED by userId={}", order.getReceivingCode(), userId);
-                }
-
-                order.setUpdatedAt(LocalDateTime.now());
-                receivingOrderRepo.save(order);
-
-                return ApiResponse.success("GRN submitted successfully", getOrder(id).getData());
-                */
+                log.info("Receiving Order {} finalized (PENDING_COUNT → SUBMITTED) by userId={}",
+                        order.getReceivingCode(), userId);
+                return ApiResponse.success("Count finalized. Status: SUBMITTED. Ready for QC review.",
+                        getOrder(id).getData());
         }
 
         // ─── QC Approve ──────────────────────────────────────────────────────────

@@ -83,9 +83,9 @@ public class ScanEventService {
                     .orElseThrow(() -> new RuntimeException("Receiving order not found: " + receivingId));
 
             String orderStatus = order.getStatus() != null ? order.getStatus().toUpperCase() : "DRAFT";
-            if ("POSTED".equals(orderStatus) || "PUTAWAY_DONE".equals(orderStatus) || "CANCELLED".equals(orderStatus)
-                    || "REJECTED".equals(orderStatus)) {
-                return ApiResponse.error("Cannot scan into receiving order in status: " + orderStatus);
+            if (!"PENDING_COUNT".equals(orderStatus)) {
+                return ApiResponse.error(
+                        "Can only scan when order status is PENDING_COUNT. Current status: " + orderStatus);
             }
 
             ReceivingItemEntity item = receivingItemRepo
