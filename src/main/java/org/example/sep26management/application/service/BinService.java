@@ -31,6 +31,7 @@ public class BinService {
         private final PutawayTaskItemJpaRepository putawayTaskItemRepository;
         private final PickingTaskItemJpaRepository pickingTaskItemRepository;
         private final AuditLogService auditLogService;
+        private final PutawayAllocationJpaRepository putawayAllocationRepository;
 
         // ─────────────────────────────────────────────────────────────
         // SCRUM-277: UC-LOC-06 View Bin Occupancy
@@ -66,6 +67,9 @@ public class BinService {
                                 .sumQuantityByLocationIds(locationIds);
                 Map<Long, BigDecimal> reservedMap = snapshotRepository
                                 .sumReservedByLocationIds(locationIds);
+                // Putaway allocations (RESERVED) — bin capacity đã bị lock
+                Map<Long, BigDecimal> putawayAllocMap = putawayAllocationRepository
+                                .sumReservedByLocationIds(locationIds);
 
                 // Resolve zone codes and parent codes (batch)
                 Set<Long> zoneIds = binPage.getContent().stream()
@@ -87,12 +91,14 @@ public class BinService {
                                                         BigDecimal.ZERO);
                                         BigDecimal reserved = reservedMap.getOrDefault(bin.getLocationId(),
                                                         BigDecimal.ZERO);
+                                        BigDecimal putawayAlloc = putawayAllocMap.getOrDefault(bin.getLocationId(),
+                                                        BigDecimal.ZERO);
                                         // BR-LOC-21: use maxWeightKg as primary capacity metric
                                         OccupancyStatus status = OccupancyStatus.of(occupied, bin.getMaxWeightKg());
 
                                         BigDecimal available = null;
                                         if (bin.getMaxWeightKg() != null) {
-                                                available = bin.getMaxWeightKg().subtract(occupied).subtract(reserved);
+                                                available = bin.getMaxWeightKg().subtract(occupied).subtract(reserved).subtract(putawayAlloc);
                                                 if (available.compareTo(BigDecimal.ZERO) < 0)
                                                         available = BigDecimal.ZERO;
                                         }
@@ -166,11 +172,12 @@ public class BinService {
 
                 BigDecimal occupied = snapshotRepository.sumQuantityByLocationId(locationId);
                 BigDecimal reserved = snapshotRepository.sumReservedByLocationId(locationId);
+                BigDecimal putawayAlloc = putawayAllocationRepository.sumReservedQtyByLocation(locationId);
                 OccupancyStatus status = OccupancyStatus.of(occupied, bin.getMaxWeightKg());
 
                 BigDecimal available = null;
                 if (bin.getMaxWeightKg() != null) {
-                        available = bin.getMaxWeightKg().subtract(occupied).subtract(reserved);
+                        available = bin.getMaxWeightKg().subtract(occupied).subtract(reserved).subtract(putawayAlloc);
                         if (available.compareTo(BigDecimal.ZERO) < 0)
                                 available = BigDecimal.ZERO;
                 }
@@ -248,6 +255,7 @@ public class BinService {
                 List<Long> binIds = allBins.stream().map(LocationEntity::getLocationId).toList();
                 Map<Long, BigDecimal> occupiedMap = snapshotRepository.sumQuantityByLocationIds(binIds);
                 Map<Long, BigDecimal> reservedMap = snapshotRepository.sumReservedByLocationIds(binIds);
+                Map<Long, BigDecimal> putawayAllocMap = putawayAllocationRepository.sumReservedByLocationIds(binIds);
 
                 // Resolve zone codes
                 Set<Long> zoneIds = allBins.stream().map(LocationEntity::getZoneId)
@@ -267,9 +275,11 @@ public class BinService {
                                                         BigDecimal.ZERO);
                                         BigDecimal reserved = reservedMap.getOrDefault(bin.getLocationId(),
                                                         BigDecimal.ZERO);
+                                        BigDecimal putawayAlloc = putawayAllocMap.getOrDefault(bin.getLocationId(),
+                                                        BigDecimal.ZERO);
 
                                         BigDecimal availableWeight = bin.getMaxWeightKg() != null
-                                                        ? bin.getMaxWeightKg().subtract(occupied).subtract(reserved)
+                                                        ? bin.getMaxWeightKg().subtract(occupied).subtract(reserved).subtract(putawayAlloc)
                                                         : null;
                                         BigDecimal availableVolume = bin.getMaxVolumeM3() != null
                                                         ? bin.getMaxVolumeM3().subtract(reserved) // volume reserved
