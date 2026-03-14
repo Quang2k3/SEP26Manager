@@ -40,7 +40,6 @@ public class ScanEventService {
      * Process a barcode scan event sent from the iPhone/Tablet.
      * Now supports condition (PASS/FAIL) to separate good and damaged items.
      */
-    @Transactional
     public ApiResponse<Map<String, Object>> processScan(String scanToken, ScanEventRequest request) {
         // 1. Extract sessionId
         String sessionId;
