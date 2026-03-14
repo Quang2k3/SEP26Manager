@@ -791,12 +791,34 @@ public class ReceivingOrderService {
                         ? userRepo.findById(o.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
                         : null;
 
+                // Lookup warehouseName
+                String warehouseName = o.getWarehouseId() != null
+                        ? warehouseRepo.findById(o.getWarehouseId())
+                        .map(w -> w.getWarehouseName()).orElse(null)
+                        : null;
+
+                // Lookup supplierName
+                String supplierName = o.getSupplierId() != null
+                        ? supplierRepo.findById(o.getSupplierId())
+                        .map(s -> s.getSupplierName()).orElse(null)
+                        : null;
+
+                // Sum expectedQty from items
+                List<ReceivingItemEntity> items = receivingItemRepo
+                        .findByReceivingOrderReceivingId(o.getReceivingId());
+                java.math.BigDecimal totalExpectedQty = items.stream()
+                        .map(ReceivingItemEntity::getExpectedQty)
+                        .filter(q -> q != null)
+                        .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+
                 return ReceivingOrderResponse.builder()
                         .receivingId(o.getReceivingId())
                         .receivingCode(o.getReceivingCode())
                         .status(o.getStatus())
                         .warehouseId(o.getWarehouseId())
+                        .warehouseName(warehouseName)
                         .supplierId(o.getSupplierId())
+                        .supplierName(supplierName)
                         .sourceType(o.getSourceType())
                         .sourceReferenceCode(o.getSourceReferenceCode())
                         .note(o.getNote())
@@ -809,6 +831,8 @@ public class ReceivingOrderService {
                         .rejectedBy(o.getRejectedBy())
                         .rejectedAt(o.getRejectedAt())
                         .rejectReason(o.getRejectReason())
+                        .totalExpectedQty(totalExpectedQty)
+                        .totalLines(items.size())
                         .build();
         }
 
