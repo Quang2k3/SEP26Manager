@@ -76,6 +76,7 @@ public class SecurityConfig {
                                 "/v1/scanner/**",
                                 "/v1/scan", // iPhone scanner HTML page (token in URL param)
                                 "/v1/scan/url", // returns scan URL for QR generation
+                                "/uploads/**", // static uploaded files (avatars, etc.)
                                 "/js/**", // static JS files (html5-qrcode, etc.)
                                 "/actuator/**",
                                 "/api/actuator/**",
