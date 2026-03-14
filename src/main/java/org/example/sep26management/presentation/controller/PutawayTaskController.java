@@ -4,9 +4,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.example.sep26management.application.dto.request.PutawayConfirmRequest;
+import org.example.sep26management.application.dto.request.PutawayAllocateRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
+import org.example.sep26management.application.dto.response.PutawayAllocationResponse;
 import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
 import org.example.sep26management.application.service.PutawayTaskService;
@@ -20,17 +21,13 @@ import java.util.Map;
 @RequestMapping("/v1/putaway-tasks")
 @RequiredArgsConstructor
 @Tag(name = "Putaway Tasks", description = "Quản lý nhiệm vụ xếp hàng lên kệ (Putaway). "
-        + "Putaway task được tự động tạo khi GRN posted. Mỗi task chứa danh sách items cần xếp, "
-        + "kèm gợi ý vị trí (suggested location) dựa trên zone-category matching. "
-        + "Keeper xem gợi ý → quét kệ → xác nhận putaway.")
+        + "Flow: Xem task detail → Allocate (đặt chỗ) items vào bins → Confirm (xác nhận thực tế).")
 public class PutawayTaskController {
 
     private final PutawayTaskService putawayTaskService;
 
-    /**
-     * GET /v1/putaway-tasks?assignedTo=me&status=OPEN
-     * Keeper fetches their task list.
-     */
+    // ─── CRUD ────────────────────────────────────────────────────────────────────
+
     @GetMapping
     @Operation(summary = "Danh sách putaway tasks", description = "Lấy danh sách putaway tasks. Lọc theo assignedTo (userId) và/hoặc status (OPEN, IN_PROGRESS, DONE).\n\n"
             + "**Data yêu cầu:** \n"
@@ -46,56 +43,89 @@ public class PutawayTaskController {
         return putawayTaskService.listTasks(assignedTo, status, page, size);
     }
 
-    /** GET /v1/putaway-tasks/{id} — detail with items */
     @GetMapping("/{id}")
-    @Operation(summary = "Chi tiết putaway task", description = "Bóc tách xem bên trong Task này yêu cầu bốc những món hàng nào đi cất.\n\n"
+    @Operation(summary = "Chi tiết putaway task", description = "Xem chi tiết task: danh sách items với `quantity` (tổng), `putawayQty` (đã cất), `allocatedQty` (đã đặt chỗ), `remainingQty` (còn lại chưa phân bổ).\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã **Putaway Task ID**. LẤY TỪ: attribute `id` của API danh sách `/v1/putaway-tasks` phía trên hoặc kết quả API tự động sinh.\n\n"
-            + "*(Ghi chú: Response có sẵn luôn `suggestedLocationCode` để FE biết luôn món hàng này hệ thống AI khuyên cất vào kệ nào)*.")
+            + "- `@PathVariable id`: Mã **Putaway Task ID**.")
     public ApiResponse<PutawayTaskResponse> get(@PathVariable Long id) {
         return putawayTaskService.getTask(id);
     }
 
-    /** GET /v1/putaway-tasks/grn/{grnId} — get by GRN */
     @GetMapping("/grn/{grnId}")
-    @Operation(summary = "Lấy putaway task theo GRN", description = "Lấy Putaway Task được sinh ra tự động từ Phiếu nhập kho (GRN).\n\n"
+    @Operation(summary = "Lấy putaway task theo GRN", description = "Lấy Putaway Task được sinh tự động từ GRN.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable grnId`: Mã GRN ID. LẤY TỪ: attribute `grnId` của API `GET /v1/grns` hoặc response `POST /v1/grns/{id}/post`.")
+            + "- `@PathVariable grnId`: Mã GRN ID.")
     public ApiResponse<PutawayTaskResponse> getByGrnId(@PathVariable Long grnId) {
         return putawayTaskService.getTaskByGrnId(grnId);
     }
 
-    /**
-     * GET /v1/putaway-tasks/{id}/suggestions
-     * Get putaway suggestions for all items in a task (zone-category matching).
-     */
     @GetMapping("/{id}/suggestions")
-    @Operation(summary = "Xem Gợi ý Vị trí Cất Hàng", description = "Nếu FE muốn xem màn hình chi tiết gợi ý AI của riêng lô hàng này, thì gọi API này.\n\n"
+    @Operation(summary = "Gợi ý vị trí cất hàng (AI)", description = "Xem AI suggestions cho tất cả items trong task.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã **Putaway Task ID**. LẤY TỪ: attribute `id` của API danh sách Putaway tasks. \n\n"
-            + "**Kết quả:** Tách riêng danh sách AI Suggestions: `matchedZoneCode`, `suggestedLocationCode`, sức chứa tối đa, chỗ trống còn lại trên kệ để thủ kho quyết định có nghe theo gợi ý hay không.")
+            + "- `@PathVariable id`: Putaway Task ID.")
     public ApiResponse<List<PutawaySuggestion>> getSuggestions(@PathVariable Long id) {
         return putawayTaskService.getSuggestions(id);
     }
 
-    /**
-     * POST /v1/putaway-tasks/{id}/confirm
-     * Keeper scans shelf and assigns actual location + qty for each item.
-     */
-    @PostMapping("/{id}/confirm")
-    @Operation(summary = "Xác nhận cất hàng lên Kệ (Keeper)", description = "Sau khi khuân đồ ra kệ, keeper lấy súng quét mã vạch trên kệ để chốt lại việc dọn đồ.\n\n"
+    // ─── Allocate (Reserve) ──────────────────────────────────────────────────────
+
+    @PostMapping("/{id}/allocate")
+    @Operation(summary = "Đặt chỗ hàng vào bin (Reserve)", description = "Keeper chọn bin và phân bổ hàng vào đó. "
+            + "Hệ thống lock capacity của bin → keeper khác sẽ không chiếm được.\n\n"
+            + "**Flow:**\n"
+            + "1. `GET /v1/bins/occupancy?zoneId=X` → xem bin nào còn trống\n"
+            + "2. `POST /v1/putaway-tasks/{id}/allocate` → đặt chỗ\n"
+            + "3. Lặp lại cho đến khi `remainingQty = 0`\n\n"
+            + "**Validation:**\n"
+            + "- Không được allocate quá số lượng cần cất (`quantity - putawayQty - allocatedQty`)\n"
+            + "- Không được allocate quá sức chứa bin (occupied + reserved + qty ≤ maxCapacity)")
+    public ApiResponse<List<PutawayAllocationResponse>> allocate(
+            @PathVariable Long id,
+            @Valid @RequestBody PutawayAllocateRequest request,
+            Authentication auth) {
+        return putawayTaskService.allocate(id, request, extractUserId(auth));
+    }
+
+    // ─── Get allocations ─────────────────────────────────────────────────────────
+
+    @GetMapping("/{id}/allocations")
+    @Operation(summary = "Xem danh sách phân bổ", description = "Xem tất cả allocations (RESERVED, CONFIRMED, CANCELLED) cho 1 putaway task.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã **Putaway Task ID**. LẤY TỪ: attribute `id` của API danh sách Putaway tasks.\n"
-            + "- `Body.items`: Là một mảng (List) do FE ghép truyền lên. Mỗi item chứa:\n"
-            + "  - `skuId`: Mã **SKU ID** hệ thống. LẤY TỪ: attribute `items[].skuId` của API trả về chi tiết Putaway task.\n"
-            + "  - `putawayQty`: Số lượng thực tế đã ném lên kệ (thường thủ kho nhập số trên điện thoại).\n"
-            + "  - `locationId`: ID của vị trí kệ hàng. LẤY TỪ: attribute `id` của bảng `Location` (hoặc FE có chức năng quét mã vạch kệ -> gọi API lấy locationId đắp vào).")
+            + "- `@PathVariable id`: Putaway Task ID.")
+    public ApiResponse<List<PutawayAllocationResponse>> getAllocations(@PathVariable Long id) {
+        return putawayTaskService.getAllocations(id);
+    }
+
+    // ─── Cancel allocation ───────────────────────────────────────────────────────
+
+    @DeleteMapping("/{id}/allocations/{allocationId}")
+    @Operation(summary = "Hủy 1 phân bổ", description = "Hủy 1 allocation RESERVED → giải phóng capacity bin.\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Putaway Task ID.\n"
+            + "- `@PathVariable allocationId`: ID phân bổ cần hủy.")
+    public ApiResponse<Void> cancelAllocation(
+            @PathVariable Long id,
+            @PathVariable Long allocationId) {
+        return putawayTaskService.cancelAllocation(id, allocationId);
+    }
+
+    // ─── Confirm all ─────────────────────────────────────────────────────────────
+
+    @PostMapping("/{id}/confirm")
+    @Operation(summary = "Xác nhận cất hàng (Confirm all)", description = "Confirm tất cả allocations đã RESERVED:\n"
+            + "- Di chuyển inventory từ staging → bin đích\n"
+            + "- Ghi transaction PUTAWAY\n"
+            + "- Auto-complete task nếu tất cả items done\n\n"
+            + "**Data yêu cầu:** \n"
+            + "- `@PathVariable id`: Putaway Task ID.\n"
+            + "- Không cần body request.")
     public ApiResponse<PutawayTaskResponse> confirm(
             @PathVariable Long id,
-            @Valid @RequestBody PutawayConfirmRequest request,
             Authentication auth) {
-        return putawayTaskService.confirm(id, request, extractUserId(auth));
+        return putawayTaskService.confirmAll(id, extractUserId(auth));
     }
+
+    // ─── Helper ──────────────────────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
     private Long extractUserId(Authentication auth) {

@@ -1443,3 +1443,19 @@ ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS expiry_date DATE;
 -- 9) MIGRATION: Thêm grn_id vào putaway_tasks để lookup theo GRN
 ALTER TABLE putaway_tasks ADD COLUMN IF NOT EXISTS grn_id BIGINT REFERENCES grns(grn_id);
 CREATE INDEX IF NOT EXISTS idx_putaway_task_grn ON putaway_tasks(grn_id);
+
+-- 10) MIGRATION: Bảng putaway_allocations (đặt chỗ hàng vào bin)
+CREATE TABLE IF NOT EXISTS putaway_allocations (
+    allocation_id BIGSERIAL PRIMARY KEY,
+    putaway_task_id BIGINT NOT NULL REFERENCES putaway_tasks(putaway_task_id) ON DELETE CASCADE,
+    sku_id BIGINT NOT NULL REFERENCES skus(sku_id),
+    lot_id BIGINT REFERENCES inventory_lots(lot_id),
+    location_id BIGINT NOT NULL REFERENCES locations(location_id),
+    allocated_qty NUMERIC(12,2) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'RESERVED',
+    allocated_by BIGINT NOT NULL REFERENCES users(user_id),
+    allocated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_putaway_alloc_task ON putaway_allocations(putaway_task_id, status);
+CREATE INDEX IF NOT EXISTS idx_putaway_alloc_location ON putaway_allocations(location_id, status);

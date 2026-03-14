@@ -2,15 +2,19 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.example.sep26management.application.dto.request.PutawayConfirmRequest;
+import org.example.sep26management.application.dto.request.PutawayAllocateRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
+import org.example.sep26management.application.dto.response.PutawayAllocationResponse;
 import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
+import org.example.sep26management.infrastructure.persistence.entity.LocationEntity;
+import org.example.sep26management.infrastructure.persistence.entity.PutawayAllocationEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskItemEntity;
 import org.example.sep26management.infrastructure.persistence.repository.InventorySnapshotJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.LocationJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.PutawayAllocationJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
@@ -42,6 +46,7 @@ public class PutawayTaskService {
     private final InventorySnapshotJpaRepository inventorySnapshotRepo;
     private final PutawaySuggestionService putawaySuggestionService;
     private final SkuJpaRepository skuRepo;
+    private final PutawayAllocationJpaRepository allocationRepo;
 
     // ─── List tasks ────────────────────────────────────────────────────────────
 
@@ -121,83 +126,171 @@ public class PutawayTaskService {
         return ApiResponse.success("OK", suggestions);
     }
 
-    // ─── Confirm putaway ───────────────────────────────────────────────────────
+    // ─── Allocate (Reserve) ────────────────────────────────────────────────────
 
     @Transactional
-    public ApiResponse<PutawayTaskResponse> confirm(Long taskId, PutawayConfirmRequest request, Long userId) {
+    public ApiResponse<List<PutawayAllocationResponse>> allocate(Long taskId, PutawayAllocateRequest request, Long userId) {
         PutawayTaskEntity task = findTask(taskId);
+        validateTaskStatus(task);
 
-        if (!"PENDING".equals(task.getStatus()) && !"OPEN".equals(task.getStatus())
-                && !"IN_PROGRESS".equals(task.getStatus())) {
-            throw new RuntimeException("Putaway task " + taskId + " is in invalid status: " + task.getStatus());
+        List<PutawayTaskItemEntity> taskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
+        List<PutawayAllocationResponse> results = new ArrayList<>();
+
+        for (PutawayAllocateRequest.AllocateItem alloc : request.getItems()) {
+            // Find matching task item by skuId
+            PutawayTaskItemEntity taskItem = taskItems.stream()
+                    .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("SKU " + alloc.getSkuId() + " not found in putaway task " + taskId));
+
+            // Check: allocated + putawayQty + newQty <= totalQty
+            BigDecimal alreadyAllocated = allocationRepo.sumReservedQtyByTaskAndSku(taskId, alloc.getSkuId());
+            BigDecimal totalUsed = taskItem.getPutawayQty().add(alreadyAllocated).add(alloc.getQty());
+            if (totalUsed.compareTo(taskItem.getQuantity()) > 0) {
+                BigDecimal remaining = taskItem.getQuantity().subtract(taskItem.getPutawayQty()).subtract(alreadyAllocated);
+                throw new RuntimeException("Cannot allocate " + alloc.getQty() + " units of SKU " + alloc.getSkuId()
+                        + ". Remaining to allocate: " + remaining);
+            }
+
+            // Check: bin capacity (occupied + putaway_reserved + newQty <= maxCapacity)
+            LocationEntity bin = locationRepo.findById(alloc.getLocationId())
+                    .orElseThrow(() -> new RuntimeException("Location not found: " + alloc.getLocationId()));
+            if (bin.getMaxWeightKg() != null) {
+                BigDecimal occupied = inventorySnapshotRepo.sumQuantityByLocationId(alloc.getLocationId());
+                BigDecimal binReserved = allocationRepo.sumReservedQtyByLocation(alloc.getLocationId());
+                BigDecimal totalInBin = occupied.add(binReserved).add(alloc.getQty());
+                if (totalInBin.compareTo(bin.getMaxWeightKg()) > 0) {
+                    BigDecimal binAvailable = bin.getMaxWeightKg().subtract(occupied).subtract(binReserved);
+                    throw new RuntimeException("Bin " + bin.getLocationCode() + " does not have enough capacity. Available: " + binAvailable);
+                }
+            }
+
+            // Create allocation
+            PutawayAllocationEntity allocation = PutawayAllocationEntity.builder()
+                    .putawayTaskId(taskId)
+                    .skuId(alloc.getSkuId())
+                    .lotId(taskItem.getLotId())
+                    .locationId(alloc.getLocationId())
+                    .allocatedQty(alloc.getQty())
+                    .status("RESERVED")
+                    .allocatedBy(userId)
+                    .build();
+            allocationRepo.save(allocation);
+
+            results.add(toAllocationResponse(allocation));
         }
 
-        task.setStatus("IN_PROGRESS");
-        task.setAssignedTo(userId);
-        task.setStartedAt(LocalDateTime.now());
+        // Update task status
+        if ("PENDING".equals(task.getStatus()) || "OPEN".equals(task.getStatus())) {
+            task.setStatus("IN_PROGRESS");
+            task.setAssignedTo(userId);
+            task.setStartedAt(LocalDateTime.now());
+            putawayTaskRepo.save(task);
+        }
 
-        for (PutawayConfirmRequest.PutawayItemConfirm confirm : request.getItems()) {
-            PutawayTaskItemEntity item = putawayTaskItemRepo.findById(confirm.getPutawayTaskItemId())
-                    .orElseThrow(
-                            () -> new RuntimeException("PutawayTaskItem not found: " + confirm.getPutawayTaskItemId()));
+        log.info("Putaway task {} allocated {} items by userId={}", taskId, results.size(), userId);
+        return ApiResponse.success("Allocated " + results.size() + " items successfully.", results);
+    }
+
+    // ─── Confirm all allocations ──────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<PutawayTaskResponse> confirmAll(Long taskId, Long userId) {
+        PutawayTaskEntity task = findTask(taskId);
+        validateTaskStatus(task);
+
+        List<PutawayAllocationEntity> reservations = allocationRepo.findByPutawayTaskIdAndStatus(taskId, "RESERVED");
+        if (reservations.isEmpty()) {
+            throw new RuntimeException("No RESERVED allocations to confirm for task " + taskId);
+        }
+
+        List<PutawayTaskItemEntity> taskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
+
+        for (PutawayAllocationEntity alloc : reservations) {
+            PutawayTaskItemEntity item = taskItems.stream()
+                    .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Task item not found for SKU: " + alloc.getSkuId()));
 
             Long fromLocationId = task.getFromLocationId();
-            Long toLocationId = confirm.getLocationId();
-            BigDecimal qty = confirm.getQty();
+            BigDecimal qty = alloc.getAllocatedQty();
 
-            // Validation: Prevent over-putaway
-            BigDecimal remaining = item.getQuantity().subtract(item.getPutawayQty());
-            if (qty.compareTo(remaining) > 0) {
-                throw new RuntimeException(
-                        "Cannot putaway " + qty + " units. Remaining for this item is only " + remaining);
-            }
-
-            // Decrease from staging location (Use Repository)
+            // Decrease from staging
             if (fromLocationId != null) {
                 inventorySnapshotRepo.decrementQuantity(
-                        task.getWarehouseId(),
-                        item.getSkuId(),
-                        item.getLotId(),
-                        fromLocationId,
-                        qty);
+                        task.getWarehouseId(), item.getSkuId(), item.getLotId(), fromLocationId, qty);
             }
 
-            // Upsert to target location (Use Repository for safety)
+            // Upsert to target bin
             inventorySnapshotRepo.upsertInventory(
-                    task.getWarehouseId(),
-                    item.getSkuId(),
-                    item.getLotId(),
-                    toLocationId,
-                    qty);
+                    task.getWarehouseId(), item.getSkuId(), item.getLotId(), alloc.getLocationId(), qty);
 
             // Record PUTAWAY transaction
             jdbcTemplate.update(
                     "INSERT INTO inventory_transactions (warehouse_id, sku_id, lot_id, location_id, quantity, txn_type, reference_table, reference_id, created_by) "
-                            +
-                            "VALUES (?, ?, ?, ?, ?, 'PUTAWAY', 'putaway_tasks', ?, ?)",
-                    task.getWarehouseId(), item.getSkuId(), item.getLotId(), toLocationId, qty, taskId, userId);
+                            + "VALUES (?, ?, ?, ?, ?, 'PUTAWAY', 'putaway_tasks', ?, ?)",
+                    task.getWarehouseId(), item.getSkuId(), item.getLotId(), alloc.getLocationId(), qty, taskId, userId);
 
             // Update putaway item
             item.setPutawayQty(item.getPutawayQty().add(qty));
-            item.setActualLocationId(toLocationId);
+            item.setActualLocationId(alloc.getLocationId());
             putawayTaskItemRepo.save(item);
+
+            // Mark allocation as CONFIRMED
+            alloc.setStatus("CONFIRMED");
+            allocationRepo.save(alloc);
         }
 
         // Check if all items are done
-        List<PutawayTaskItemEntity> allItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
-        boolean allDone = allItems.stream().allMatch(i -> i.getPutawayQty().compareTo(i.getQuantity()) >= 0);
+        boolean allDone = taskItems.stream().allMatch(i -> i.getPutawayQty().compareTo(i.getQuantity()) >= 0);
         if (allDone) {
             task.setStatus("DONE");
             task.setCompletedAt(LocalDateTime.now());
         }
 
         putawayTaskRepo.save(task);
-        log.info("Putaway task {} confirmed by userId={}, status={}", taskId, userId, task.getStatus());
+        log.info("Putaway task {} confirmed all allocations by userId={}, status={}", taskId, userId, task.getStatus());
 
         return ApiResponse.success("Putaway confirmed. Status: " + task.getStatus(), toResponse(task));
     }
 
+    // ─── Cancel allocation ────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<Void> cancelAllocation(Long taskId, Long allocationId) {
+        PutawayAllocationEntity alloc = allocationRepo.findById(allocationId)
+                .orElseThrow(() -> new RuntimeException("Allocation not found: " + allocationId));
+        if (!alloc.getPutawayTaskId().equals(taskId)) {
+            throw new RuntimeException("Allocation " + allocationId + " does not belong to task " + taskId);
+        }
+        if (!"RESERVED".equals(alloc.getStatus())) {
+            throw new RuntimeException("Cannot cancel allocation in status: " + alloc.getStatus());
+        }
+        alloc.setStatus("CANCELLED");
+        allocationRepo.save(alloc);
+        log.info("Cancelled allocation {} for task {}", allocationId, taskId);
+        return ApiResponse.success("Allocation cancelled.", null);
+    }
+
+    // ─── Get allocations ──────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public ApiResponse<List<PutawayAllocationResponse>> getAllocations(Long taskId) {
+        List<PutawayAllocationEntity> allocations = allocationRepo.findByPutawayTaskId(taskId);
+        List<PutawayAllocationResponse> results = allocations.stream()
+                .map(this::toAllocationResponse)
+                .collect(Collectors.toList());
+        return ApiResponse.success("OK", results);
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────────────
+
+    private void validateTaskStatus(PutawayTaskEntity task) {
+        if (!"PENDING".equals(task.getStatus()) && !"OPEN".equals(task.getStatus())
+                && !"IN_PROGRESS".equals(task.getStatus())) {
+            throw new RuntimeException("Putaway task " + task.getPutawayTaskId() + " is in invalid status: " + task.getStatus());
+        }
+    }
 
     private PutawayTaskEntity findTask(Long id) {
         return putawayTaskRepo.findById(id)
@@ -218,11 +311,13 @@ public class PutawayTaskService {
                 .build();
     }
 
-    /**
-     * Enriched item DTO: resolves suggestedLocationId → location code, zone, aisle,
-     * rack, capacity.
-     */
     private PutawayTaskResponse.PutawayTaskItemDto toItemDtoEnriched(PutawayTaskItemEntity i) {
+        // Calculate allocated (RESERVED) and remaining
+        BigDecimal allocatedQty = allocationRepo.sumReservedQtyByTaskAndSku(
+                i.getPutawayTask().getPutawayTaskId(), i.getSkuId());
+        BigDecimal remainingQty = i.getQuantity().subtract(i.getPutawayQty()).subtract(allocatedQty);
+        if (remainingQty.compareTo(BigDecimal.ZERO) < 0) remainingQty = BigDecimal.ZERO;
+
         PutawayTaskResponse.PutawayTaskItemDto.PutawayTaskItemDtoBuilder builder = PutawayTaskResponse.PutawayTaskItemDto
                 .builder()
                 .putawayTaskItemId(i.getPutawayTaskItemId())
@@ -230,6 +325,8 @@ public class PutawayTaskService {
                 .lotId(i.getLotId())
                 .quantity(i.getQuantity())
                 .putawayQty(i.getPutawayQty())
+                .allocatedQty(allocatedQty)
+                .remainingQty(remainingQty)
                 .suggestedLocationId(i.getSuggestedLocationId())
                 .actualLocationId(i.getActualLocationId());
 
@@ -239,38 +336,28 @@ public class PutawayTaskService {
             builder.skuName(sku.getSkuName());
         });
 
-        // Enrich suggestion details from location hierarchy
-        if (i.getSuggestedLocationId() != null) {
-            locationRepo.findById(i.getSuggestedLocationId()).ifPresent(loc -> {
-                builder.suggestedLocationCode(loc.getLocationCode());
+        return builder.build();
+    }
 
-                // Resolve parent rack → aisle
-                if (loc.getParentLocationId() != null) {
-                    locationRepo.findById(loc.getParentLocationId()).ifPresent(rack -> {
-                        builder.suggestedRack(rack.getLocationCode());
-                        if (rack.getParentLocationId() != null) {
-                            locationRepo.findById(rack.getParentLocationId()).ifPresent(aisle -> {
-                                builder.suggestedAisle(aisle.getLocationCode());
-                            });
-                        }
-                    });
-                }
+    private PutawayAllocationResponse toAllocationResponse(PutawayAllocationEntity a) {
+        PutawayAllocationResponse.PutawayAllocationResponseBuilder builder = PutawayAllocationResponse.builder()
+                .allocationId(a.getAllocationId())
+                .putawayTaskId(a.getPutawayTaskId())
+                .skuId(a.getSkuId())
+                .lotId(a.getLotId())
+                .locationId(a.getLocationId())
+                .allocatedQty(a.getAllocatedQty())
+                .status(a.getStatus())
+                .allocatedBy(a.getAllocatedBy())
+                .allocatedAt(a.getAllocatedAt());
 
-                // Resolve zone code
-                if (loc.getZoneId() != null) {
-                    zoneRepo.findById(loc.getZoneId()).ifPresent(zone -> {
-                        builder.suggestedZoneCode(zone.getZoneCode());
-                    });
-                }
-
-                // Capacity info
-                BigDecimal currentQty = locationRepo.getCurrentOccupiedQty(loc.getLocationId());
-                BigDecimal maxCap = loc.getMaxWeightKg() != null ? loc.getMaxWeightKg() : BigDecimal.ZERO;
-                builder.binCurrentQty(currentQty);
-                builder.binMaxCapacity(maxCap);
-                builder.binAvailableCapacity(maxCap.subtract(currentQty));
-            });
-        }
+        skuRepo.findById(a.getSkuId()).ifPresent(sku -> {
+            builder.skuCode(sku.getSkuCode());
+            builder.skuName(sku.getSkuName());
+        });
+        locationRepo.findById(a.getLocationId()).ifPresent(loc -> {
+            builder.locationCode(loc.getLocationCode());
+        });
 
         return builder.build();
     }

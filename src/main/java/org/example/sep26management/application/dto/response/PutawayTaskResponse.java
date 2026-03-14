@@ -60,8 +60,14 @@ public class PutawayTaskResponse {
         @Schema(description = "SỐ LƯỢNG YÊU CẦU CẤT", example = "10.0")
         private BigDecimal quantity;
 
-        @Schema(description = "Số lượng THỰC TẾ cất vào (sẽ được nhân viên điền)", example = "10.0")
+        @Schema(description = "Số lượng THỰC TẾ đã cất xong (confirmed)", example = "10.0")
         private BigDecimal putawayQty;
+
+        @Schema(description = "Số lượng đã đặt chỗ (RESERVED, chưa confirm)", example = "40.0")
+        private BigDecimal allocatedQty;
+
+        @Schema(description = "Số lượng còn lại chưa phân bổ", example = "50.0")
+        private BigDecimal remainingQty;
 
         @Schema(description = "Gợi ý: ID Vị Trí (Bin)", example = "2")
         private Long suggestedLocationId;
