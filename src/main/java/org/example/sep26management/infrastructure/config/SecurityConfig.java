@@ -90,11 +90,15 @@ public class SecurityConfig {
                         .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasAnyRole("KEEPER", "QC")
                         // Manager only endpoints
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
+                        // Zones: KEEPER cần GET để chọn zone khi làm putaway
+                        .requestMatchers(HttpMethod.GET, "/v1/zones/**").hasAnyRole("MANAGER", "KEEPER")
                         .requestMatchers("/v1/zones/**").hasRole("MANAGER")
                         .requestMatchers("/v1/category-zone-mappings/**").hasRole("MANAGER") // Zone Management
                         .requestMatchers("/v1/categories/**").hasAnyRole("MANAGER")
                         .requestMatchers("/v1/skus/**").authenticated()
-                        .requestMatchers("/v1/locations/**").hasAnyRole("MANAGER")
+                        // Locations: KEEPER cần GET để load parent AISLE/RACK trong putaway
+                        .requestMatchers(HttpMethod.GET, "/v1/locations/**").hasAnyRole("MANAGER", "KEEPER")
+                        .requestMatchers("/v1/locations/**").hasRole("MANAGER")
                         // Authenticated endpoints
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

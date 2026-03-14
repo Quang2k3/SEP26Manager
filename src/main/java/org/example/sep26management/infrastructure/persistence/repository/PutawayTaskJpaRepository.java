@@ -12,12 +12,15 @@ import java.util.Optional;
 public interface PutawayTaskJpaRepository extends JpaRepository<PutawayTaskEntity, Long> {
 
     Page<PutawayTaskEntity> findByAssignedToAndStatusOrderByCreatedAtDesc(Long userId, String status,
-            Pageable pageable);
+                                                                          Pageable pageable);
 
     Page<PutawayTaskEntity> findByWarehouseIdAndStatusOrderByCreatedAtDesc(Long warehouseId, String status,
-            Pageable pageable);
+                                                                           Pageable pageable);
 
     Page<PutawayTaskEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    // Lấy tất cả tasks theo warehouse (dùng khi không filter status)
+    Page<PutawayTaskEntity> findByWarehouseIdOrderByCreatedAtDesc(Long warehouseId, Pageable pageable);
 
     Optional<PutawayTaskEntity> findByReceivingId(Long receivingId);
 

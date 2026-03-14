@@ -51,16 +51,17 @@ public class PutawayTaskService {
     // ─── List tasks ────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public ApiResponse<PageResponse<PutawayTaskResponse>> listTasks(Long assignedTo, String status, int page,
-            int size) {
+    public ApiResponse<PageResponse<PutawayTaskResponse>> listTasks(Long warehouseId, Long assignedTo, String status, int page,
+                                                                    int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<PutawayTaskEntity> tasksPage;
         if (assignedTo != null && status != null) {
             tasksPage = putawayTaskRepo.findByAssignedToAndStatusOrderByCreatedAtDesc(assignedTo, status, pageable);
         } else if (status != null) {
-            tasksPage = putawayTaskRepo.findByWarehouseIdAndStatusOrderByCreatedAtDesc(null, status, pageable);
+            tasksPage = putawayTaskRepo.findByWarehouseIdAndStatusOrderByCreatedAtDesc(warehouseId, status, pageable);
         } else {
-            tasksPage = putawayTaskRepo.findAllByOrderByCreatedAtDesc(pageable);
+            // Luôn filter theo warehouseId của user đang login
+            tasksPage = putawayTaskRepo.findByWarehouseIdOrderByCreatedAtDesc(warehouseId, pageable);
         }
 
         List<PutawayTaskResponse> content = tasksPage.getContent().stream()
