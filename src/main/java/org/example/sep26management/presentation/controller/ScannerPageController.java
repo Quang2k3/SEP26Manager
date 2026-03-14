@@ -416,7 +416,6 @@ public class ScannerPageController {
                 "  .then(function(r){return r.text().then(function(txt){try{return JSON.parse(txt);}catch(e){return {success:false,message:'HTTP '+r.status+': '+txt.substring(0,140)};}});})\n"
                 +
                 "  .then(function(d){\n" +
-                "    console.log(\'Scan resp:\', JSON.stringify(d));\\n" +
                 "    if(d && d.success){toast('✓ '+d.data.skuCode+' — qty:'+d.data.newQty);updateTable(d.data);document.getElementById('bc').value='';if(navigator.vibrate)navigator.vibrate(60);} \n"
                 +
                 "    else{toast((d&&d.message)?d.message:'Lỗi không xác định',true);} \n" +
