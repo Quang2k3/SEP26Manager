@@ -352,7 +352,7 @@ public class ScannerPageController {
                 "  if(!confirm('Xác nhận kiểm đếm xong?\\nPhiếu sẽ được gửi cho QC kiểm tra chất lượng.')) return;\n" +
                 "  var btn=document.getElementById('confirmBtn');\n" +
                 "  btn.disabled=true;btn.textContent='Đang gửi...';\n" +
-                "  fetch(ORDER_API+'/'+RECEIVING_ID+'/submit',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n"
+                "  fetch(ORDER_API+'/'+RECEIVING_ID+'/finalize-count',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n"
                 +
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
