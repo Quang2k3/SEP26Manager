@@ -117,7 +117,7 @@ public class LocationController {
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasAnyRole('MANAGER', 'KEEPER')")   // KEEPER cần đọc locations để xem bin map
     @Operation(summary = "Danh sách locations", description = "Lấy danh sách locations với filter: zoneId, locationType (AISLE/RACK/BIN/STAGING), active, keyword. Phân trang. ")
     public ResponseEntity<ApiResponse<PageResponse<LocationResponse>>> listLocations(
             @RequestParam(required = false) Long zoneId, // ← bỏ @RequestParam Long warehouseId
@@ -138,7 +138,7 @@ public class LocationController {
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping("/{locationId}")
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasAnyRole('MANAGER', 'KEEPER')")   // KEEPER cần đọc detail location
     @Operation(summary = "Chi tiết location", description = "Xem chi tiết 1 location: code, type, zone, parent, capacity, active status.\n\n"
             + "**Data yêu cầu:**\n"
             + "- `@PathVariable locationId`: Mã Vị trí (Location ID). LẤY TỪ: attribute `id` của API danh sách Location.")

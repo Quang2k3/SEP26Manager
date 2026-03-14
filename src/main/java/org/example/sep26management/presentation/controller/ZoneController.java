@@ -75,7 +75,7 @@ public class ZoneController {
     // ─────────────────────────────────────────────────────────────
 
     @GetMapping
-    @PreAuthorize("hasRole('MANAGER')")
+    @PreAuthorize("hasAnyRole('MANAGER', 'KEEPER')")   // KEEPER cần đọc zones cho putaway
     @Operation(summary = "Danh sách zones", description = "Lấy danh sách zones trong warehouse. Có thể lọc chỉ zone active.\n\n"
             + "**Data yêu cầu:** \n"
             + "- `Query.warehouseId` (Bắt buộc): ID của kho.\n"
