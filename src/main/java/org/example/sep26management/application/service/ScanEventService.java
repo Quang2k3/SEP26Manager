@@ -167,7 +167,7 @@ public class ScanEventService {
      * @param condition PASS or FAIL — must match exactly
      */
     public ApiResponse<Map<String, Object>> removeScanItem(String sessionId, Long skuId, String condition,
-                                                           BigDecimal qtyToRemove) {
+                                                           BigDecimal qtyToRemove, Long receivingId) {
         ScanSessionData session = sessionRedis.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("Scan session expired or not found: " + sessionId));
 
@@ -204,6 +204,25 @@ public class ScanEventService {
 
         sessionRedis.save(sessionId, session);
         sseRegistry.send(sessionId, session);
+
+        // Also decrement receivingItem.receivedQty if receivingId was provided
+        if (receivingId != null) {
+            try {
+                BigDecimal decrement = qtyToRemove != null && qtyToRemove.compareTo(BigDecimal.ZERO) > 0
+                        ? qtyToRemove : line.getQty();
+                receivingItemRepo.findByReceivingOrderReceivingIdAndSkuId(receivingId, skuId)
+                        .ifPresent(item -> {
+                            BigDecimal current = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
+                            BigDecimal newQty = current.subtract(decrement);
+                            item.setReceivedQty(newQty.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : newQty);
+                            receivingItemRepo.save(item);
+                            log.info("Decremented ReceivingItem for order {}: SKU={}, -={}",
+                                    receivingId, skuId, decrement);
+                        });
+            } catch (Exception e) {
+                log.warn("Could not decrement ReceivingItem: {}", e.getMessage());
+            }
+        }
 
         return ApiResponse.success("Item updated/removed from scan session", Map.of(
                 "skuId", skuId,

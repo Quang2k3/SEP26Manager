@@ -43,21 +43,24 @@ public class ScanEventController {
 
     /**
      * DELETE /v1/scan-events
-     * Remove a specific scan line item (e.g. Keeper scanned wrong item).
+     * Remove or decrement a specific scan line item (e.g. Keeper scanned wrong item).
      */
     @DeleteMapping
-    @Operation(summary = "Xoá dòng quét nhầm", description = "Xoá một dòng/sản phẩm đã lỡ quét sai khỏi session. \n\n"
+    @Operation(summary = "Xoá/giảm dòng quét nhầm", description = "Xoá hoặc giảm số lượng sản phẩm đã quét sai.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `Query.sessionId`: Chuỗi UUID của phiên làm việc hiện tại.\n"
-            + "- `Query.skuId`: ID của sản phẩm (lấy từ dữ liệu stream SSE đang hiển thị trên web).\n"
-            + "- `Query.condition`: Trạng thái quét lúc nãy (PASS/FAIL).")
+            + "- `Query.sessionId`: UUID phiên scan.\n"
+            + "- `Query.skuId`: ID sản phẩm cần xoá/giảm.\n"
+            + "- `Query.condition`: PASS hoặc FAIL.\n"
+            + "- `Query.qty`: Số lượng cần trừ (không truyền = xóa hết dòng đó).\n"
+            + "- `Query.receivingId`: (Optional) Mã phiếu nhập — nếu có sẽ trừ luôn receivedQty trên phiếu.")
     public ApiResponse<Map<String, Object>> removeScanItem(
             @RequestParam String sessionId,
             @RequestParam Long skuId,
             @RequestParam(defaultValue = "PASS") String condition,
-            @RequestParam(required = false) java.math.BigDecimal qty) {
+            @RequestParam(required = false) java.math.BigDecimal qty,
+            @RequestParam(required = false) Long receivingId) {
 
-        return scanEventService.removeScanItem(sessionId, skuId, condition, qty);
+        return scanEventService.removeScanItem(sessionId, skuId, condition, qty, receivingId);
     }
 
     private String extractToken(HttpServletRequest request) {
