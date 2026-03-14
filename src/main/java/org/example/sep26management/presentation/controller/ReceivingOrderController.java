@@ -21,8 +21,7 @@ import java.util.Map;
 
 @RequiredArgsConstructor
 @Tag(name = "Receiving Orders (GRN)", description = "Quản lý phiếu nhập kho (Goods Receipt Note). "
-        + "Quy trình: Tạo GRN từ scan session → SUBMITTED → APPROVED (Manager) → POSTED (QC, tự động tạo Putaway Task). "
-        + "Khi POST, hệ thống tự động gợi ý vị trí putaway dựa trên zone-category matching.")
+        + "Quy trình: Tạo DRAFT → Submit (PENDING_COUNT) → Keeper quét barcode → Finalize Count (SUBMITTED) → QC duyệt → GRN.")
 public class ReceivingOrderController {
 
     private final ReceivingOrderService receivingOrderService;
@@ -64,12 +63,39 @@ public class ReceivingOrderController {
         return receivingOrderService.createDraftOrder(request, warehouseId, userId);
     }
 
-    /** PUT /v1/receiving-orders/{id}/lines — Keeper Update Numbers */
+    /** PUT /v1/receiving-orders/{id} — Keeper updates DRAFT order */
+    @PutMapping("/{id}")
+    @Operation(summary = "Cập nhật phiếu nhập kho nháp (Keeper)", description = "Cập nhật thông tin phiếu nhập kho khi còn ở trạng thái DRAFT.\\n\\n"
+            + "⚠️ **CHỈ cho phép khi status = DRAFT.** Sau khi submit, phiếu bị khóa chỉnh sửa.\\n\\n"
+            + "**Data yêu cầu:** \\n"
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng.\\n"
+            + "- `ReceivingOrderRequest`: Có thể cập nhật `sourceType`, `supplierCode`, `note`, `sourceReferenceCode`, `items`.\\n"
+            + "- Nếu truyền `items`, danh sách items cũ sẽ bị **thay thế hoàn toàn** bằng items mới.")
+    public ApiResponse<ReceivingOrderResponse> updateDraftOrder(
+            @PathVariable Long id,
+            @Valid @RequestBody ReceivingOrderRequest request,
+            Authentication auth) {
+        return receivingOrderService.updateDraftOrder(id, request, extractUserId(auth));
+    }
+
+    /** DELETE /v1/receiving-orders/{id} — Keeper deletes DRAFT order */
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Xóa phiếu nhập kho nháp (Keeper)", description = "Xóa phiếu nhập kho khi còn ở trạng thái DRAFT.\\n\\n"
+            + "⚠️ **CHỈ cho phép khi status = DRAFT.** Phiếu đã submit không thể xóa.\\n\\n"
+            + "**Data yêu cầu:** \\n"
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng cần xóa.")
+    public ApiResponse<Void> deleteDraftOrder(
+            @PathVariable Long id,
+            Authentication auth) {
+        return receivingOrderService.deleteDraftOrder(id, extractUserId(auth));
+    }
+
     @PutMapping("/{id}/lines")
-    @Operation(summary = "Cập nhật số liệu kiểm đếm (Keeper)", description = "Lưu thông tin số lượng thực nhận (nhập kho mộc) do Keeper đếm được.\n\n"
+    @Operation(summary = "Cập nhật số liệu dự kiến (Keeper)", description = "Chỉnh sửa thông tin items trên phiếu nhập kho.\n\n"
+            + "⚠️ **CHỈ cho phép khi status = DRAFT.** Sau khi submit (PENDING_COUNT), phiếu sẽ bị khóa chỉnh sửa.\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách hoặc kết quả API POST tạo bảng).\n"
-            + "- `UpdateReceivingLinesRequest`: Danh sách các items với số liệu `receivedQty`, `note`.")
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng.\n"
+            + "- `UpdateReceivingLinesRequest`: Danh sách items với `receivedQty`, `note`.")
     public ApiResponse<ReceivingOrderResponse> updateLines(
             @PathVariable Long id,
             @Valid @RequestBody org.example.sep26management.application.dto.request.UpdateReceivingLinesRequest request,
@@ -77,27 +103,34 @@ public class ReceivingOrderController {
         return receivingOrderService.updateLines(id, request, extractUserId(auth));
     }
 
-    /** POST /v1/receiving-orders/{id}/submit — Keeper */
+    /** POST /v1/receiving-orders/{id}/submit — Keeper: DRAFT → PENDING_COUNT */
     @PostMapping("/{id}/submit")
-    @Operation(summary = "Trình duyệt phiếu nhập kho (Keeper)",
-            description = "Keeper gửi phiếu đã kiểm đếm. Hệ thống tự động đối chiếu `expectedQty` vs `receivedQty` cho từng SKU.\n\n"
-                    + "## 2 kết quả có thể xảy ra:\n\n"
-                    + "### ✅ Case A: Khớp 100%\n"
-                    + "- Status → `SUBMITTED`\n"
-                    + "- FE chuyển sang gọi `POST /v1/receiving-orders/{id}/qc-approve` (QC duyệt)\n\n"
-                    + "### ⚠️ Case B: Phát hiện thừa/thiếu\n"
-                    + "- Status → `PENDING_INCIDENT`\n"
-                    + "- Hệ thống TỰ ĐỘNG tạo Incident với danh sách items sai lệch\n"
-                    + "- FE hiện thông báo cho Manager, chuyển sang màn hình Incident: `GET /v1/incidents?status=OPEN&category=QUALITY`\n"
-                    + "- Manager resolve từng item: `POST /v1/incidents/{incidentId}/resolve-discrepancy`\n"
-                    + "- Sau khi resolve → Status trở lại `SUBMITTED` → QC duyệt tiếp\n\n"
-                    + "**Data yêu cầu:**\n"
-                    + "- `@PathVariable id`: Mã Phiếu (receivingId). LẤY TỪ: `GET /v1/receiving-orders` → `receivingId`\n"
-                    + "- Body: Không cần")
+    @Operation(summary = "Trình duyệt phiếu nhập kho (Keeper)", description = "Keeper submit phiếu. Trạng thái chuyển từ **DRAFT → PENDING_COUNT**.\n\n"
+            + "Sau khi submit, phiếu bị **khóa chỉnh sửa** (không thể gọi updateLines nữa). "
+            + "Keeper bắt đầu quét barcode để kiểm đếm thực tế.\n\n"
+            + "👉 **Bước tiếp theo:** Quét barcode xong → gọi `POST /{id}/finalize-count` để chốt số lượng.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable id`: Mã Phiếu (receivingId).\n"
+            + "- Body: Không cần")
     public ApiResponse<ReceivingOrderResponse> submit(
             @PathVariable Long id,
             Authentication auth) {
         return receivingOrderService.submit(id, extractUserId(auth));
+    }
+
+    /** POST /v1/receiving-orders/{id}/finalize-count — Keeper: PENDING_COUNT → SUBMITTED */
+    @PostMapping("/{id}/finalize-count")
+    @Operation(summary = "Chốt kiểm đếm (Keeper)", description = "Keeper hoàn tất quét barcode, chốt số lượng thực nhận.\n\n"
+            + "Trạng thái chuyển từ **PENDING_COUNT → SUBMITTED**. "
+            + "Hệ thống tự động sync dữ liệu từ scan session (nếu có) vào phiếu.\n\n"
+            + "👉 **Bước tiếp theo:** QC kiểm tra chất lượng (`POST /{id}/qc-approve` hoặc `POST /{id}/qc-submit-session`).\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable id`: Mã Phiếu (receivingId).\n"
+            + "- Body: Không cần")
+    public ApiResponse<ReceivingOrderResponse> finalizeCount(
+            @PathVariable Long id,
+            Authentication auth) {
+        return receivingOrderService.finalizeCount(id, extractUserId(auth));
     }
 
     /** POST /v1/receiving-orders/{id}/qc-approve — QC */
