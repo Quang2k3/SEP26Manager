@@ -13,6 +13,7 @@ import org.example.sep26management.infrastructure.persistence.repository.Invento
 import org.example.sep26management.infrastructure.persistence.repository.LocationJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -40,6 +41,7 @@ public class PutawayTaskService {
     private final ZoneJpaRepository zoneRepo;
     private final InventorySnapshotJpaRepository inventorySnapshotRepo;
     private final PutawaySuggestionService putawaySuggestionService;
+    private final SkuJpaRepository skuRepo;
 
     // ─── List tasks ────────────────────────────────────────────────────────────
 
@@ -230,6 +232,12 @@ public class PutawayTaskService {
                 .putawayQty(i.getPutawayQty())
                 .suggestedLocationId(i.getSuggestedLocationId())
                 .actualLocationId(i.getActualLocationId());
+
+        // Resolve SKU code & name
+        skuRepo.findById(i.getSkuId()).ifPresent(sku -> {
+            builder.skuCode(sku.getSkuCode());
+            builder.skuName(sku.getSkuName());
+        });
 
         // Enrich suggestion details from location hierarchy
         if (i.getSuggestedLocationId() != null) {
