@@ -63,23 +63,24 @@ services:
       # SPRING_DATASOURCE_URL: jdbc:postgresql://host.docker.internal:5432/${POSTGRES_DB:-SEP26WMS}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-123}
-      
+
       # Redis Configuration
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      
+
       # Gmail SMTP (for OTP emails)
       SPRING_MAIL_USERNAME: ${GMAIL_USERNAME}
       SPRING_MAIL_PASSWORD: ${GMAIL_APP_PASSWORD}
-      
+
       # JWT Configuration
       JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
-      
+
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
       - ./backend/logs:/app/logs
+      - avatar_data:/home/spring/warehouse-uploads
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
       interval: 30s
@@ -93,6 +94,8 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  avatar_data:
     driver: local
 
 networks:
