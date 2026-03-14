@@ -20,11 +20,11 @@ public class ScannerPageController {
             + "- `receivingId` *(Tùy chọn)*: ID Phiếu Nhận Hàng (GRN), lấy từ response của `POST /v1/receiving-sessions/{sessionId}/create-grn` (field `receivingId`). "
             + "Nếu truyền vào, trang scan sẽ **tự động hiển thị** ID phiếu nhận mà không cần nhập tay.")
     public String getScanUrl(@RequestParam("token") String token,
-            @RequestParam(value = "receivingId", required = false) Long receivingId,
-            HttpServletRequest request) {
+                             @RequestParam(value = "receivingId", required = false) Long receivingId,
+                             HttpServletRequest request) {
         String base = request.getScheme() + "://" + request.getServerName()
                 + (request.getServerPort() == 80 || request.getServerPort() == 443 ? ""
-                        : ":" + request.getServerPort());
+                : ":" + request.getServerPort());
         String url = base + "/v1/scan?token=" + token + "&v=qr3";
         if (receivingId != null) {
             url += "&receivingId=" + receivingId;
@@ -39,7 +39,7 @@ public class ScannerPageController {
             + "- `receivingId` *(Tùy chọn)*: Nếu được truyền qua URL (do FE nhúng từ bước `create-grn`), "
             + "trường **PHIẾU NHẬN HÀNG** trên trang sẽ **tự động điền sẵn** — người dùng không cần nhập tay nữa.")
     public ResponseEntity<String> scannerPage(@RequestParam("token") String token,
-            @RequestParam(value = "receivingId", required = false) Long receivingId) {
+                                              @RequestParam(value = "receivingId", required = false) Long receivingId) {
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 .header("Pragma", "no-cache")
@@ -416,6 +416,7 @@ public class ScannerPageController {
                 "  .then(function(r){return r.text().then(function(txt){try{return JSON.parse(txt);}catch(e){return {success:false,message:'HTTP '+r.status+': '+txt.substring(0,140)};}});})\n"
                 +
                 "  .then(function(d){\n" +
+                "    console.log(\'Scan resp:\', JSON.stringify(d));\\n" +
                 "    if(d && d.success){toast('✓ '+d.data.skuCode+' — qty:'+d.data.newQty);updateTable(d.data);document.getElementById('bc').value='';if(navigator.vibrate)navigator.vibrate(60);} \n"
                 +
                 "    else{toast((d&&d.message)?d.message:'Lỗi không xác định',true);} \n" +
