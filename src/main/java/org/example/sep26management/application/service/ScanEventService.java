@@ -147,13 +147,16 @@ public class ScanEventService {
         log.info("Scan event: sessionId={} barcode={} skuCode={} condition={} qty+{} → totalQty={}",
                 sessionId, request.getBarcode(), sku.getSkuCode(), condition, request.getQty(), newQty);
 
-        return ApiResponse.success("Scanned", Map.of(
-                "skuId", sku.getSkuId(),
-                "skuCode", sku.getSkuCode(),
-                "skuName", sku.getSkuName(),
-                "barcode", sku.getBarcode(),
-                "condition", condition,
-                "newQty", newQty));
+        // Map.of() throws NullPointerException if any value is null
+        // Use HashMap instead to safely handle null barcode
+        java.util.Map<String, Object> resultData = new java.util.HashMap<>();
+        resultData.put("skuId", sku.getSkuId());
+        resultData.put("skuCode", sku.getSkuCode());
+        resultData.put("skuName", sku.getSkuName() != null ? sku.getSkuName() : "");
+        resultData.put("barcode", sku.getBarcode() != null ? sku.getBarcode() : "");
+        resultData.put("condition", condition);
+        resultData.put("newQty", newQty);
+        return ApiResponse.success("Scanned", resultData);
     }
 
     /**
