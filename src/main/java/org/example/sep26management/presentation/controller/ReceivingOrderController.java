@@ -63,7 +63,33 @@ public class ReceivingOrderController {
         return receivingOrderService.createDraftOrder(request, warehouseId, userId);
     }
 
-    /** PUT /v1/receiving-orders/{id}/lines — Keeper Update Numbers (DRAFT only) */
+    /** PUT /v1/receiving-orders/{id} — Keeper updates DRAFT order */
+    @PutMapping("/{id}")
+    @Operation(summary = "Cập nhật phiếu nhập kho nháp (Keeper)", description = "Cập nhật thông tin phiếu nhập kho khi còn ở trạng thái DRAFT.\\n\\n"
+            + "⚠️ **CHỈ cho phép khi status = DRAFT.** Sau khi submit, phiếu bị khóa chỉnh sửa.\\n\\n"
+            + "**Data yêu cầu:** \\n"
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng.\\n"
+            + "- `ReceivingOrderRequest`: Có thể cập nhật `sourceType`, `supplierCode`, `note`, `sourceReferenceCode`, `items`.\\n"
+            + "- Nếu truyền `items`, danh sách items cũ sẽ bị **thay thế hoàn toàn** bằng items mới.")
+    public ApiResponse<ReceivingOrderResponse> updateDraftOrder(
+            @PathVariable Long id,
+            @Valid @RequestBody ReceivingOrderRequest request,
+            Authentication auth) {
+        return receivingOrderService.updateDraftOrder(id, request, extractUserId(auth));
+    }
+
+    /** DELETE /v1/receiving-orders/{id} — Keeper deletes DRAFT order */
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Xóa phiếu nhập kho nháp (Keeper)", description = "Xóa phiếu nhập kho khi còn ở trạng thái DRAFT.\\n\\n"
+            + "⚠️ **CHỈ cho phép khi status = DRAFT.** Phiếu đã submit không thể xóa.\\n\\n"
+            + "**Data yêu cầu:** \\n"
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng cần xóa.")
+    public ApiResponse<Void> deleteDraftOrder(
+            @PathVariable Long id,
+            Authentication auth) {
+        return receivingOrderService.deleteDraftOrder(id, extractUserId(auth));
+    }
+
     @PutMapping("/{id}/lines")
     @Operation(summary = "Cập nhật số liệu dự kiến (Keeper)", description = "Chỉnh sửa thông tin items trên phiếu nhập kho.\n\n"
             + "⚠️ **CHỈ cho phép khi status = DRAFT.** Sau khi submit (PENDING_COUNT), phiếu sẽ bị khóa chỉnh sửa.\n\n"

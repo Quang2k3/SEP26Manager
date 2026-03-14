@@ -135,6 +135,90 @@ public class ReceivingOrderService {
                 return getOrder(savedOrder.getReceivingId());
         }
 
+        // ─── Update Draft Order ───────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<ReceivingOrderResponse> updateDraftOrder(Long id,
+                        org.example.sep26management.application.dto.request.ReceivingOrderRequest request,
+                        Long userId) {
+                ReceivingOrderEntity order = findOrder(id);
+                if (!"DRAFT".equals(order.getStatus())) {
+                        throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                                "Cannot update: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
+                }
+
+                // Update header fields
+                if (request.getSourceType() != null) {
+                        order.setSourceType(request.getSourceType());
+                }
+                if (request.getSourceReferenceCode() != null) {
+                        order.setSourceReferenceCode(request.getSourceReferenceCode());
+                }
+                if (request.getNote() != null) {
+                        order.setNote(request.getNote());
+                }
+                if (request.getSupplierCode() != null && !request.getSupplierCode().isBlank()) {
+                        Long supplierId = supplierRepo.findBySupplierCode(request.getSupplierCode())
+                                .map(SupplierEntity::getSupplierId)
+                                .orElseThrow(() -> new RuntimeException(
+                                        "Supplier not found: " + request.getSupplierCode()));
+                        order.setSupplierId(supplierId);
+                }
+
+                // Replace items if provided
+                if (request.getItems() != null && !request.getItems().isEmpty()) {
+                        // Delete existing items
+                        List<ReceivingItemEntity> existingItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
+                        receivingItemRepo.deleteAll(existingItems);
+
+                        // Create new items
+                        for (var itemReq : request.getItems()) {
+                                SkuEntity sku = skuRepo.findBySkuCode(itemReq.getSkuCode())
+                                        .orElseThrow(() -> new RuntimeException(
+                                                "SKU not found for code: " + itemReq.getSkuCode()));
+
+                                ReceivingItemEntity item = ReceivingItemEntity.builder()
+                                        .receivingOrder(order)
+                                        .skuId(sku.getSkuId())
+                                        .expectedQty(itemReq.getExpectedQty() != null ? itemReq.getExpectedQty()
+                                                : BigDecimal.ZERO)
+                                        .receivedQty(BigDecimal.ZERO)
+                                        .lotNumber(itemReq.getLotNumber())
+                                        .manufactureDate(itemReq.getManufactureDate())
+                                        .expiryDate(itemReq.getExpiryDate())
+                                        .build();
+                                receivingItemRepo.save(item);
+                        }
+                }
+
+                order.setUpdatedAt(LocalDateTime.now());
+                receivingOrderRepo.save(order);
+
+                log.info("Draft GRN {} updated by userId={}", order.getReceivingCode(), userId);
+                return getOrder(id);
+        }
+
+        // ─── Delete Draft Order ───────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<Void> deleteDraftOrder(Long id, Long userId) {
+                ReceivingOrderEntity order = findOrder(id);
+                if (!"DRAFT".equals(order.getStatus())) {
+                        throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                                "Cannot delete: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
+                }
+
+                // Delete items first
+                List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
+                receivingItemRepo.deleteAll(items);
+
+                // Delete order
+                receivingOrderRepo.delete(order);
+
+                log.info("Draft GRN {} deleted by userId={}", order.getReceivingCode(), userId);
+                return ApiResponse.success("Draft order deleted successfully", null);
+        }
+
         // ─── Update Lines ──────────────────────────────────────────────────────────
 
         @Transactional
