@@ -135,6 +135,90 @@ public class ReceivingOrderService {
                 return getOrder(savedOrder.getReceivingId());
         }
 
+        // ─── Update Draft Order ───────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<ReceivingOrderResponse> updateDraftOrder(Long id,
+                        org.example.sep26management.application.dto.request.ReceivingOrderRequest request,
+                        Long userId) {
+                ReceivingOrderEntity order = findOrder(id);
+                if (!"DRAFT".equals(order.getStatus())) {
+                        throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                                "Cannot update: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
+                }
+
+                // Update header fields
+                if (request.getSourceType() != null) {
+                        order.setSourceType(request.getSourceType());
+                }
+                if (request.getSourceReferenceCode() != null) {
+                        order.setSourceReferenceCode(request.getSourceReferenceCode());
+                }
+                if (request.getNote() != null) {
+                        order.setNote(request.getNote());
+                }
+                if (request.getSupplierCode() != null && !request.getSupplierCode().isBlank()) {
+                        Long supplierId = supplierRepo.findBySupplierCode(request.getSupplierCode())
+                                .map(SupplierEntity::getSupplierId)
+                                .orElseThrow(() -> new RuntimeException(
+                                        "Supplier not found: " + request.getSupplierCode()));
+                        order.setSupplierId(supplierId);
+                }
+
+                // Replace items if provided
+                if (request.getItems() != null && !request.getItems().isEmpty()) {
+                        // Delete existing items
+                        List<ReceivingItemEntity> existingItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
+                        receivingItemRepo.deleteAll(existingItems);
+
+                        // Create new items
+                        for (var itemReq : request.getItems()) {
+                                SkuEntity sku = skuRepo.findBySkuCode(itemReq.getSkuCode())
+                                        .orElseThrow(() -> new RuntimeException(
+                                                "SKU not found for code: " + itemReq.getSkuCode()));
+
+                                ReceivingItemEntity item = ReceivingItemEntity.builder()
+                                        .receivingOrder(order)
+                                        .skuId(sku.getSkuId())
+                                        .expectedQty(itemReq.getExpectedQty() != null ? itemReq.getExpectedQty()
+                                                : BigDecimal.ZERO)
+                                        .receivedQty(BigDecimal.ZERO)
+                                        .lotNumber(itemReq.getLotNumber())
+                                        .manufactureDate(itemReq.getManufactureDate())
+                                        .expiryDate(itemReq.getExpiryDate())
+                                        .build();
+                                receivingItemRepo.save(item);
+                        }
+                }
+
+                order.setUpdatedAt(LocalDateTime.now());
+                receivingOrderRepo.save(order);
+
+                log.info("Draft GRN {} updated by userId={}", order.getReceivingCode(), userId);
+                return getOrder(id);
+        }
+
+        // ─── Delete Draft Order ───────────────────────────────────────────────────
+
+        @Transactional
+        public ApiResponse<Void> deleteDraftOrder(Long id, Long userId) {
+                ReceivingOrderEntity order = findOrder(id);
+                if (!"DRAFT".equals(order.getStatus())) {
+                        throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                                "Cannot delete: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
+                }
+
+                // Delete items first
+                List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
+                receivingItemRepo.deleteAll(items);
+
+                // Delete order
+                receivingOrderRepo.delete(order);
+
+                log.info("Draft GRN {} deleted by userId={}", order.getReceivingCode(), userId);
+                return ApiResponse.success("Draft order deleted successfully", null);
+        }
+
         // ─── Update Lines ──────────────────────────────────────────────────────────
 
         @Transactional
@@ -143,10 +227,9 @@ public class ReceivingOrderService {
                                                                Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
 
-                if (!"DRAFT".equals(order.getStatus()) && !"RECEIVED".equals(order.getStatus())
-                        && !"VERIFIED".equals(order.getStatus())
-                        && !"PENDING_INCIDENT".equals(order.getStatus())) {
-                        throw new RuntimeException("Cannot update lines for GRN in status '" + order.getStatus() + "'");
+                if (!"DRAFT".equals(order.getStatus())) {
+                        throw new RuntimeException(
+                                "Cannot update lines: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
                 }
 
                 if (request.getLines() != null) {
@@ -262,23 +345,40 @@ public class ReceivingOrderService {
                 return ApiResponse.success("OK", response);
         }
 
-        // ─── Submit ────────────────────────────────────────────────────────────────
+        // ─── Submit (DRAFT → PENDING_COUNT) ─────────────────────────────────────
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> submit(Long id, Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
                 validateStatus(order, "submit", "DRAFT");
 
-                // --- Sync from active session if exists (Failsafe for mobile scans) ---
+                order.setStatus("PENDING_COUNT");
+                order.setUpdatedAt(LocalDateTime.now());
+                receivingOrderRepo.save(order);
+
+                log.info("Receiving Order {} submitted (DRAFT → PENDING_COUNT) by userId={}",
+                        order.getReceivingCode(), userId);
+                return ApiResponse.success("Submitted successfully. Status: PENDING_COUNT. Keeper can now start scanning.",
+                        getOrder(id).getData());
+        }
+
+        // ─── Finalize Count (PENDING_COUNT → SUBMITTED) ─────────────────────────
+
+        @Transactional
+        public ApiResponse<ReceivingOrderResponse> finalizeCount(Long id, Long userId) {
+                ReceivingOrderEntity order = findOrder(id);
+                validateStatus(order, "finalize-count", "PENDING_COUNT");
+
+                // --- Sync from active scan session if exists ---
                 Optional<String> activeSessionId = sessionRedis.findActiveSession(order.getWarehouseId(), userId);
                 if (activeSessionId.isPresent()) {
                         sessionRedis.findById(activeSessionId.get()).ifPresent(sessionData -> {
                                 List<ScanLineItem> sessionLines = sessionData.getLines();
                                 if (sessionLines != null && !sessionLines.isEmpty()) {
-                                        log.info("Syncing {} lines from session {} into order {} before submit",
+                                        log.info("Syncing {} lines from session {} into order {} before finalize",
                                                 sessionLines.size(), activeSessionId.get(), id);
 
-                                        // Aggregate total qty per skuId (PASS + FAIL lines combined)
+                                        // Aggregate total qty per skuId
                                         Map<Long, BigDecimal> skuTotalQty = new java.util.HashMap<>();
                                         for (ScanLineItem sLine : sessionLines) {
                                                 if (sLine.getSkuId() != null && sLine.getQty() != null) {
@@ -302,87 +402,15 @@ public class ReceivingOrderService {
                                 }
                         });
                 }
-                // ----------------------------------------------------------------------
 
-                // Keeper submit = gửi toàn bộ thông tin scan lên, luôn SUBMITTED
-                // Việc đối chiếu expectedQty vs receivedQty là của QC ở bước sau
                 order.setStatus("SUBMITTED");
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
-                log.info("Receiving Order {} submitted by userId={}", order.getReceivingCode(), userId);
-                return ApiResponse.success("Submitted successfully", getOrder(id).getData());
-                /*
-                List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
-                boolean hasDiscrepancy = false;
-                List<IncidentItemEntity> incidentItems = new ArrayList<>();
 
-                for (ReceivingItemEntity item : items) {
-                        BigDecimal expectedQty = item.getExpectedQty() != null ? item.getExpectedQty()
-                                        : BigDecimal.ZERO;
-                        BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
-                                        : BigDecimal.ZERO;
-
-                        if (expectedQty.compareTo(receivedQty) != 0) {
-                                hasDiscrepancy = true;
-                                BigDecimal diffQty = expectedQty.subtract(receivedQty).abs();
-                                String typeStr = expectedQty.compareTo(receivedQty) > 0 ? "SHORTAGE" : "OVERAGE";
-
-                                log.warn("Discrepancy detected for SKU {}: Expected={}, Received={}, Type={}",
-                                                item.getSkuId(), expectedQty, receivedQty, typeStr);
-
-                                IncidentItemEntity incItem = IncidentItemEntity.builder()
-                                                .skuId(item.getSkuId())
-                                                .damagedQty(diffQty)
-                                                .expectedQty(expectedQty)
-                                                .actualQty(receivedQty)
-                                                .note("Hệ thống tự động ghi nhận "
-                                                                + (typeStr.equals("SHORTAGE") ? "thiếu" : "thừa")
-                                                                + " hàng khi Keeper trình duyệt")
-                                                .actionPassQty(BigDecimal.ZERO)
-                                                .actionReturnQty(BigDecimal.ZERO)
-                                                .actionScrapQty(BigDecimal.ZERO)
-                                                .reasonCode(typeStr)
-                                                .build();
-                                incidentItems.add(incItem);
-                        }
-                }
-
-                if (hasDiscrepancy) {
-                        boolean hasShortage = incidentItems.stream()
-                                        .anyMatch(i -> "SHORTAGE".equals(i.getReasonCode()));
-                        org.example.sep26management.application.enums.IncidentType mainType = hasShortage
-                                        ? org.example.sep26management.application.enums.IncidentType.SHORTAGE
-                                        : org.example.sep26management.application.enums.IncidentType.OVERAGE;
-
-                        IncidentEntity incident = IncidentEntity.builder()
-                                        .warehouseId(order.getWarehouseId())
-                                        .incidentType(mainType)
-                                        .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
-                                        .incidentCode("INC-QC-" + System.currentTimeMillis() % 10000)
-                                        .description("Tự động tạo sự cố do phát hiện sai lệch số lượng khi Keeper trình duyệt.")
-                                        .receivingId(id)
-                                        .status("OPEN")
-                                        .reportedBy(userId)
-                                        .build();
-
-                        IncidentEntity savedIncident = incidentRepo.save(incident);
-                        for (IncidentItemEntity incItem : incidentItems) {
-                                incItem.setIncident(savedIncident);
-                                incidentItemRepo.save(incItem);
-                        }
-                        order.setStatus("PENDING_INCIDENT");
-                        log.info("GRN {} submitted with discrepancy → PENDING_INCIDENT by userId={}",
-                                        order.getReceivingCode(), userId);
-                } else {
-                        order.setStatus("SUBMITTED");
-                        log.info("GRN {} submitted OK → SUBMITTED by userId={}", order.getReceivingCode(), userId);
-                }
-
-                order.setUpdatedAt(LocalDateTime.now());
-                receivingOrderRepo.save(order);
-
-                return ApiResponse.success("GRN submitted successfully", getOrder(id).getData());
-                */
+                log.info("Receiving Order {} finalized (PENDING_COUNT → SUBMITTED) by userId={}",
+                        order.getReceivingCode(), userId);
+                return ApiResponse.success("Count finalized. Status: SUBMITTED. Ready for QC review.",
+                        getOrder(id).getData());
         }
 
         // ─── QC Approve ──────────────────────────────────────────────────────────
@@ -478,15 +506,53 @@ public class ReceivingOrderService {
                         receivingItemRepo.save(dbItem);
                 }
 
-                // QC scan xong → luôn QC_APPROVED
-                // Việc phán xét FAIL/incident là do QC chọn thủ công, không tự động
-                order.setStatus("QC_APPROVED");
-                order.setApprovedBy(qcUserId);
-                order.setApprovedAt(LocalDateTime.now());
-                order.setUpdatedAt(LocalDateTime.now());
-                receivingOrderRepo.save(order);
-                if (false) { // disabled: old incident logic
-                        order.setStatus("QC_APPROVED"); // placeholder
+                if (hasFailItems) {
+                        // Tạo Quality Incident
+                        IncidentEntity incident = IncidentEntity.builder()
+                                .warehouseId(order.getWarehouseId())
+                                .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
+                                .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
+                                .description("Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)")
+                                .receivingId(id)
+                                .status("OPEN")
+                                .reportedBy(qcUserId)
+                                .build();
+
+                        IncidentEntity savedIncident = incidentRepo.save(incident);
+
+                        for (IncidentItemEntity incItem : incidentItems) {
+                                incItem.setIncident(savedIncident);
+                                incidentItemRepo.save(incItem);
+                        }
+
+                        order.setStatus("PENDING_INCIDENT");
+                        order.setRejectedBy(qcUserId);
+                        order.setRejectedAt(LocalDateTime.now());
+                        order.setRejectReason("Hàng lỗi phát hiện qua QC Scanner. Incident ID: "
+                                + savedIncident.getIncidentId());
+                        order.setUpdatedAt(LocalDateTime.now());
+                        receivingOrderRepo.save(order);
+
+                        // Audit log: QC rejected (fail items found)
+                        auditLogService.logAction(
+                                qcUserId,
+                                "RECEIVING_QC_REJECTED",
+                                "RECEIVING_ORDER",
+                                order.getReceivingId(),
+                                "Receiving Order " + order.getReceivingCode()
+                                        + " QC rejected — fail items detected. Incident ID: "
+                                        + savedIncident.getIncidentId(),
+                                null, null);
+
+                        log.info("QC scan completed with errors for GRN {}. Created Incident {}.",
+                                order.getReceivingCode(), savedIncident.getIncidentId());
+                } else {
+                        // Toàn bộ PASS
+                        order.setStatus("QC_APPROVED");
+                        order.setApprovedBy(qcUserId);
+                        order.setApprovedAt(LocalDateTime.now());
+                        order.setUpdatedAt(LocalDateTime.now());
+                        receivingOrderRepo.save(order);
 
                         // Audit log: QC approved (100% pass)
                         auditLogService.logAction(
