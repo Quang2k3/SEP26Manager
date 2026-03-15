@@ -86,12 +86,16 @@ otp:
 
 file:
   upload:
-    dir: ${user.home}/warehouse-uploads
+    # QUAN TRỌNG: Trên production/container, set env var UPLOAD_DIR trỏ đến
+    # một persistent volume (ví dụ: /data/uploads hoặc mount NFS/S3-Fuse).
+    # Nếu không có persistent volume, avatar sẽ mất khi container restart.
+    # Ví dụ Docker: -v /host/uploads:/data/uploads -e UPLOAD_DIR=/data/uploads
+    dir: ${UPLOAD_DIR:${user.home}/warehouse-uploads}
     max-size: 5242880
 
 server:
   # 8082 to locally test with Postman, 8080 for deployment
-#   port: 8082
+  #   port: 8082
   port: 8080
 #  servlet:
 #    context-path: /api   # REMOVED — Cloudflare Tunnel không thêm prefix, FE gọi /auth/login trực tiếp
@@ -157,7 +161,7 @@ spring:
     url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     driverClassName: org.h2.Driver
     username: sa
-    password: 
+    password:
 
   jpa:
     database-platform: org.hibernate.dialect.H2Dialect
