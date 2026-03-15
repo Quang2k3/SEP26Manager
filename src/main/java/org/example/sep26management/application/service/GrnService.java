@@ -111,18 +111,29 @@ public class GrnService {
     @Transactional
     public ApiResponse<GrnResponse> post(Long id, Long userId) {
         GrnEntity grn = findGrn(id);
+
+        // Guard: chỉ APPROVED mới được post
         if (!"APPROVED".equals(grn.getStatus())) {
-            throw new BusinessException("Không thể nhập kho GRN đang ở trạng thái: " + grn.getStatus());
+            throw new BusinessException("Không thể nhập kho GRN đang ở trạng thái: " + grn.getStatus()
+                    + ". Chỉ GRN đã được duyệt (APPROVED) mới được nhập kho.");
         }
 
         List<GrnItemEntity> items = grnItemRepo.findByGrnGrnId(id);
         if (items.isEmpty()) {
-            throw new BusinessException("GRN không có dòng hàng nào để nhập kho");
+            throw new BusinessException("GRN không có dòng hàng nào để nhập kho.");
         }
 
+        // BUG FIX 1: stagingLocationId có thể null nếu warehouse chưa có staging location
+        // -> locationId NOT NULL trong inventory_transactions -> DataIntegrityViolationException
         Long stagingLocationId = getFirstStagingLocation(grn.getWarehouseId());
+        if (stagingLocationId == null) {
+            throw new BusinessException(
+                    "Kho #" + grn.getWarehouseId() + " chưa có vị trí Staging. "
+                            + "Vui lòng tạo ít nhất 1 location với is_staging=true trước khi nhập kho.");
+        }
 
-        List<ReceivingItemEntity> rcvItems = receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
+        List<ReceivingItemEntity> rcvItems =
+                receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
 
         PutawayTaskEntity task = PutawayTaskEntity.builder()
                 .warehouseId(grn.getWarehouseId())
@@ -135,6 +146,7 @@ public class GrnService {
         task = putawayTaskRepo.save(task);
 
         for (GrnItemEntity item : items) {
+            // Match receiving item by SKU + lot + expiry, fallback to SKU only
             ReceivingItemEntity matchedReceivingItem = rcvItems.stream()
                     .filter(r -> r.getSkuId().equals(item.getSkuId())
                             && java.util.Objects.equals(r.getLotNumber(), item.getLotNumber())
@@ -145,7 +157,15 @@ public class GrnService {
                             .findFirst()
                             .orElse(null));
 
-            Long recItemId = matchedReceivingItem != null ? matchedReceivingItem.getReceivingItemId() : null;
+            // BUG FIX 3: recItemId = null -> receiving_item_id NOT NULL violation
+            // Throw BusinessException ro rang thay vi de DB throw constraint error
+            if (matchedReceivingItem == null) {
+                throw new BusinessException(
+                        "Không tìm thấy receiving item cho SKU " + item.getSkuId()
+                                + " trong phiếu nhận hàng #" + grn.getReceivingId()
+                                + ". Vui lòng kiểm tra lại phiếu nhận hàng.");
+            }
+            Long recItemId = matchedReceivingItem.getReceivingItemId();
 
             Long lotId = null;
             if (item.getLotNumber() != null && !item.getLotNumber().isBlank()) {
@@ -188,8 +208,8 @@ public class GrnService {
                     item.getQuantity());
 
             Long destLocationId = null;
-            Optional<org.example.sep26management.application.dto.response.PutawaySuggestion> sug = putawaySuggestionService
-                    .suggestLocation(grn.getWarehouseId(), item.getSkuId(), item.getQuantity());
+            Optional<org.example.sep26management.application.dto.response.PutawaySuggestion> sug =
+                    putawaySuggestionService.suggestLocation(grn.getWarehouseId(), item.getSkuId(), item.getQuantity());
             if (sug.isPresent()) {
                 destLocationId = sug.get().getSuggestedLocationId();
             }
