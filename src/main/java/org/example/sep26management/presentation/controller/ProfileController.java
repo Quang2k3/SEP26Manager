@@ -18,6 +18,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -145,6 +146,13 @@ public class ProfileController {
         }
 
         throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
+    }
+
+    @GetMapping("/cloudinary-status")
+    @Operation(summary = "Kiem tra Cloudinary credentials", description = "Endpoint debug: kiem tra xem Cloudinary co duoc cau hinh dung khong.")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> cloudinaryStatus() {
+        Map<String, Object> status = profileService.getCloudinaryStatus();
+        return ResponseEntity.ok(ApiResponse.success("Cloudinary status", status));
     }
 
     private String getClientIpAddress(HttpServletRequest request) {

@@ -223,6 +223,33 @@ public class ProfileService {
         }
     }
 
+    // ─── Debug: Cloudinary Status ────────────────────────────────────────────
+
+    public Map<String, Object> getCloudinaryStatus() {
+        Map<String, Object> status = new java.util.LinkedHashMap<>();
+        try {
+            // Lấy config từ Cloudinary instance
+            Object cloudName = cloudinary.config.cloudName;
+            Object apiKey   = cloudinary.config.apiKey;
+
+            boolean hasCloudName = cloudName != null && !cloudName.toString().isBlank();
+            boolean hasApiKey    = apiKey    != null && !apiKey.toString().isBlank();
+            boolean hasApiSecret = cloudinary.config.apiSecret != null
+                    && !cloudinary.config.apiSecret.isBlank();
+
+            status.put("cloudName",    hasCloudName ? cloudName.toString() : "(NOT SET)");
+            status.put("apiKey",       hasApiKey    ? apiKey.toString().substring(0, Math.min(6, apiKey.toString().length())) + "***" : "(NOT SET)");
+            status.put("apiSecretSet", hasApiSecret);
+            status.put("configured",   hasCloudName && hasApiKey && hasApiSecret);
+            status.put("note", hasCloudName
+                    ? "cloud-name da duoc set. Neu van loi, kiem tra lai gia tri tai console.cloudinary.com"
+                    : "CLOUDINARY_CLOUD_NAME chua duoc set - avatar upload se that bai!");
+        } catch (Exception e) {
+            status.put("error", e.getMessage());
+        }
+        return status;
+    }
+
     private String getFileExtension(String filename) {
         int lastDotIndex = filename.lastIndexOf('.');
         if (lastDotIndex > 0 && lastDotIndex < filename.length() - 1) {
