@@ -42,6 +42,13 @@ public class GrnController {
         return grnService.listGrns(status, page, size);
     }
 
+    @PostMapping("/{id}/submit")
+    @Operation(summary = "Keeper gửi GRN cho Manager duyệt",
+            description = "Chuyển ReceivingOrder.status từ GRN_CREATED → PENDING_APPROVAL để Manager thấy trong dashboard.")
+    public ApiResponse<GrnResponse> submit(@PathVariable Long id) {
+        return grnService.submitToManager(id);
+    }
+
     @GetMapping("/by-receiving/{receivingId}")
     @Operation(summary = "Lấy GRN theo Receiving Order", description = "Keeper dùng để kiểm tra GRN đã được tạo từ Receiving Order chưa.\n\n"
             + "**Data yêu cầu:**\n"

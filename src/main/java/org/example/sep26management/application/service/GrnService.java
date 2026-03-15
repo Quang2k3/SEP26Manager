@@ -29,6 +29,7 @@ public class GrnService {
     private final PutawaySuggestionService putawaySuggestionService;
     private final JdbcTemplate jdbcTemplate;
     private final ReceivingItemJpaRepository receivingItemRepo;
+    private final ReceivingOrderJpaRepository receivingOrderRepo;
     private final InventoryLotJpaRepository inventoryLotRepo;
     private final InventoryTransactionJpaRepository inventoryTransactionRepo;
     private final InventorySnapshotJpaRepository inventorySnapshotRepo;
@@ -227,6 +228,25 @@ public class GrnService {
         grnRepo.save(grn);
 
         return ApiResponse.success("GRN posted, Putaway task created successfully.", toSummaryResponse(grn));
+    }
+
+    /**
+     * Keeper gọi khi bấm "Gửi Manager duyệt"
+     * - GRN phải đang ở PENDING_APPROVAL (đã được tạo đúng status)
+     * - Cập nhật ReceivingOrder.status = "PENDING_APPROVAL" để FE hiển thị đúng
+     */
+    @Transactional
+    public ApiResponse<GrnResponse> submitToManager(Long grnId) {
+        GrnEntity grn = findGrn(grnId);
+        if (!"PENDING_APPROVAL".equals(grn.getStatus())) {
+            throw new RuntimeException("GRN is not in PENDING_APPROVAL status: " + grn.getStatus());
+        }
+        // Cập nhật ReceivingOrder status để FE hiển thị đúng
+        receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
+            order.setStatus("PENDING_APPROVAL");
+            receivingOrderRepo.save(order);
+        });
+        return ApiResponse.success("GRN submitted to manager for approval", toSummaryResponse(grn));
     }
 
     public ApiResponse<GrnResponse> getByReceivingId(Long receivingId) {
