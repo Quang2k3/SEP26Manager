@@ -23,7 +23,7 @@ public class UpdateProfileRequest {
     private String fullName;
 
     @Schema(description = "Số điện thoại liên lạc", example = "0987654321")
-    @Pattern(regexp = "^[0-9]{9,15}$", message = "Phone number must be between 9 and 15 digits")
+    @Pattern(regexp = "^$|^[0-9]{9,15}$", message = "Phone number must be between 9 and 15 digits")
     private String phone;
 
     @Schema(description = "Giới tính", example = "MALE", allowableValues = { "MALE", "FEMALE", "OTHER" })
