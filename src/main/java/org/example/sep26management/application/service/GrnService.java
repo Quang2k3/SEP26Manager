@@ -30,6 +30,7 @@ public class GrnService {
     private final JdbcTemplate jdbcTemplate;
     private final ReceivingItemJpaRepository receivingItemRepo;
     private final ReceivingOrderJpaRepository receivingOrderRepo;
+    private final SupplierJpaRepository supplierRepo;
     private final InventoryLotJpaRepository inventoryLotRepo;
     private final InventoryTransactionJpaRepository inventoryTransactionRepo;
     private final InventorySnapshotJpaRepository inventorySnapshotRepo;
@@ -59,30 +60,8 @@ public class GrnService {
 
     public ApiResponse<GrnResponse> getGrn(Long id) {
         GrnEntity grn = findGrn(id);
-        List<GrnItemEntity> items = grnItemRepo.findByGrnGrnId(id);
-
-        GrnResponse res = toSummaryResponse(grn);
-        res.setItems(items.stream().map(gi -> {
-            String skuCode = null;
-            String skuName = null;
-            SkuEntity sku = skuRepo.findById(gi.getSkuId()).orElse(null);
-            if (sku != null) {
-                skuCode = sku.getSkuCode();
-                skuName = sku.getSkuName();
-            }
-            return GrnItemResponse.builder()
-                    .grnItemId(gi.getGrnItemId())
-                    .skuId(gi.getSkuId())
-                    .skuCode(skuCode)
-                    .skuName(skuName)
-                    .quantity(gi.getQuantity())
-                    .lotNumber(gi.getLotNumber())
-                    .manufactureDate(gi.getManufactureDate())
-                    .expiryDate(gi.getExpiryDate())
-                    .build();
-        }).collect(Collectors.toList()));
-
-        return ApiResponse.success("GRN details retrieved", res);
+        // items đã được load trong toSummaryResponse
+        return ApiResponse.success("GRN details retrieved", toSummaryResponse(grn));
     }
 
     @Transactional
@@ -262,13 +241,31 @@ public class GrnService {
     }
 
     private GrnResponse toSummaryResponse(GrnEntity grn) {
+        // Load items cho mọi response — FE cần để hiển thị số lượng SKU/thùng
+        List<GrnItemEntity> itemEntities = grnItemRepo.findByGrnGrnId(grn.getGrnId());
+        List<GrnItemResponse> items = itemEntities.stream().map(gi -> {
+            String skuCode = skuRepo.findById(gi.getSkuId())
+                    .map(s -> s.getSkuCode()).orElse("SKU-" + gi.getSkuId());
+            String skuName = skuRepo.findById(gi.getSkuId())
+                    .map(s -> s.getSkuName()).orElse("");
+            return GrnItemResponse.builder()
+                    .grnItemId(gi.getGrnItemId())
+                    .skuId(gi.getSkuId())
+                    .skuCode(skuCode)
+                    .skuName(skuName)
+                    .quantity(gi.getQuantity())
+                    .lotNumber(gi.getLotNumber())
+                    .manufactureDate(gi.getManufactureDate())
+                    .expiryDate(gi.getExpiryDate())
+                    .build();
+        }).collect(java.util.stream.Collectors.toList());
+
         return GrnResponse.builder()
                 .grnId(grn.getGrnId())
                 .grnCode(grn.getGrnCode())
                 .receivingId(grn.getReceivingId())
                 .warehouseId(grn.getWarehouseId())
                 .sourceType(grn.getSourceType())
-                .supplierId(grn.getSupplierId())
                 .sourceReferenceCode(grn.getSourceReferenceCode())
                 .status(grn.getStatus())
                 .createdBy(grn.getCreatedBy())
@@ -277,6 +274,12 @@ public class GrnService {
                 .approvedBy(grn.getApprovedBy())
                 .approvedAt(grn.getApprovedAt())
                 .note(grn.getNote())
+                .supplierId(grn.getSupplierId())
+                .supplierName(grn.getSupplierId() != null
+                        ? supplierRepo.findById(grn.getSupplierId())
+                        .map(s -> s.getSupplierName()).orElse(null)
+                        : null)
+                .items(items)
                 .build();
     }
 
