@@ -53,11 +53,11 @@ public class AuthService {
 
                 // Step 4: Verify credentials
                 UserEntity user = userRepository.findByEmail(request.getEmail())
-                                .orElseThrow(() -> {
-                                        log.warn(LogMessages.AUTH_LOGIN_FAILED_USER_NOT_FOUND, request.getEmail());
-                                        auditLogService.logFailedLogin(request.getEmail(), "User not found", ipAddress);
-                                        return new UnauthorizedException(MessageConstants.INVALID_CREDENTIALS);
-                                });
+                        .orElseThrow(() -> {
+                                log.warn(LogMessages.AUTH_LOGIN_FAILED_USER_NOT_FOUND, request.getEmail());
+                                auditLogService.logFailedLogin(request.getEmail(), "User not found", ipAddress);
+                                return new UnauthorizedException(MessageConstants.INVALID_CREDENTIALS);
+                        });
 
                 // Step 5: Check account eligibility (BR-AUTH-01)
                 if (!canLogin(user)) {
@@ -68,7 +68,7 @@ public class AuthService {
                 // Verify password
                 if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
                         log.warn(LogMessages.AUTH_LOGIN_FAILED_INVALID_PASSWORD, user.getEmail(),
-                                        user.getFailedLoginAttempts() + 1);
+                                user.getFailedLoginAttempts() + 1);
                         user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
 
                         // Lock after 5 failed attempts
@@ -77,7 +77,7 @@ public class AuthService {
                                 user.setLockedUntil(LocalDateTime.now().plusMinutes(15));
                                 userRepository.save(user);
                                 auditLogService.logFailedLogin(user.getEmail(), "Account locked due to failed attempts",
-                                                ipAddress);
+                                        ipAddress);
                                 throw new UnauthorizedException(MessageConstants.ACCOUNT_DISABLED);
                         }
 
@@ -105,27 +105,27 @@ public class AuthService {
 
                         // Audit log
                         auditLogService.logAction(
-                                        user.getUserId(),
-                                        "LOGIN_PENDING_OTP",
-                                        "USER",
-                                        user.getUserId(),
-                                        "First login - OTP verification required",
-                                        ipAddress,
-                                        userAgent);
+                                user.getUserId(),
+                                "LOGIN_PENDING_OTP",
+                                "USER",
+                                user.getUserId(),
+                                "First login - OTP verification required",
+                                ipAddress,
+                                userAgent);
 
                         // Generate pending token for OTP verification
                         String pendingToken = jwtTokenProvider.generatePendingToken(user.getEmail());
 
                         // Return response indicating verification required
                         return LoginResponse.builder()
-                                        .requiresVerification(true)
-                                        .pendingToken(pendingToken)
-                                        .user(LoginResponse.UserInfoDTO.builder()
-                                                        .userId(user.getUserId())
-                                                        .email(user.getEmail())
-                                                        .fullName(user.getFullName())
-                                                        .build())
-                                        .build();
+                                .requiresVerification(true)
+                                .pendingToken(pendingToken)
+                                .user(LoginResponse.UserInfoDTO.builder()
+                                        .userId(user.getUserId())
+                                        .email(user.getEmail())
+                                        .fullName(user.getFullName())
+                                        .build())
+                                .build();
                 }
 
                 // Lấy danh sách kho được phân công cho user
@@ -134,44 +134,44 @@ public class AuthService {
 
                 // Step 7: Generate JWT token using UserEntityMapper
                 String token = jwtTokenProvider.generateToken(
-                                domainUser,
-                                Boolean.TRUE.equals(request.getRememberMe()));
+                        domainUser,
+                        Boolean.TRUE.equals(request.getRememberMe()));
 
                 // Calculate expiration
                 long expiresIn = Boolean.TRUE.equals(request.getRememberMe())
-                                ? 7 * 24 * 60 * 60 * 1000L // 7 days
-                                : 5 * 60 * 1000L; // 5 minutes
+                        ? 7 * 24 * 60 * 60 * 1000L // 7 days
+                        : 7 * 24 * 60 * 60 * 1000L; // 7 days — match JWT expiration-ms config
 
                 auditLogService.logAction(
-                                user.getUserId(),
-                                "LOGIN",
-                                "USER",
-                                user.getUserId(),
-                                "Successful login",
-                                ipAddress,
-                                userAgent);
+                        user.getUserId(),
+                        "LOGIN",
+                        "USER",
+                        user.getUserId(),
+                        "Successful login",
+                        ipAddress,
+                        userAgent);
 
                 // Step 8: Return success response
                 return LoginResponse.builder()
-                                .token(token)
-                                .tokenType("Bearer")
-                                .expiresIn(expiresIn)
-                                .requiresVerification(false)
-                                .user(LoginResponse.UserInfoDTO.builder()
-                                                .userId(user.getUserId())
-                                                .email(user.getEmail())
-                                                .fullName(user.getFullName())
-                                                .roleCodes(domainUser.getRoleCodes())
-                                                .avatarUrl(user.getAvatarUrl())
-                                                .warehouseIds(warehouseIds)
-                                                .build())
-                                .build();
+                        .token(token)
+                        .tokenType("Bearer")
+                        .expiresIn(expiresIn)
+                        .requiresVerification(false)
+                        .user(LoginResponse.UserInfoDTO.builder()
+                                .userId(user.getUserId())
+                                .email(user.getEmail())
+                                .fullName(user.getFullName())
+                                .roleCodes(domainUser.getRoleCodes())
+                                .avatarUrl(user.getAvatarUrl())
+                                .warehouseIds(warehouseIds)
+                                .build())
+                        .build();
         }
 
         /**
          * Complete OTP verification after first login and generate JWT token
          * Called after OTP is successfully verified
-         * 
+         *
          * @param email     User email
          * @param ipAddress IP address
          * @param userAgent User agent
@@ -181,7 +181,7 @@ public class AuthService {
                 log.info(LogMessages.AUTH_COMPLETING_OTP_VERIFICATION, email);
 
                 UserEntity user = userRepository.findByEmail(email)
-                                .orElseThrow(() -> new UnauthorizedException(MessageConstants.USER_NOT_FOUND));
+                        .orElseThrow(() -> new UnauthorizedException(MessageConstants.USER_NOT_FOUND));
 
                 // ✅ Update trạng thái sau khi verify OTP
                 if (user.getStatus() == UserStatus.PENDING_VERIFY) {
@@ -200,31 +200,31 @@ public class AuthService {
                 domainUser.setWarehouseIds(warehouseIds);
 
                 String token = jwtTokenProvider.generateToken(domainUser, false);
-                long expiresIn = 5 * 60 * 1000L;
+                long expiresIn = 7 * 24 * 60 * 60 * 1000L; // 7 days — match JWT expiration-ms config
 
                 auditLogService.logAction(
-                                user.getUserId(),
-                                "FIRST_LOGIN_COMPLETED",
-                                "USER",
-                                user.getUserId(),
-                                "OTP verified successfully, first login completed",
-                                ipAddress,
-                                userAgent);
+                        user.getUserId(),
+                        "FIRST_LOGIN_COMPLETED",
+                        "USER",
+                        user.getUserId(),
+                        "OTP verified successfully, first login completed",
+                        ipAddress,
+                        userAgent);
 
                 return LoginResponse.builder()
-                                .token(token)
-                                .tokenType("Bearer")
-                                .expiresIn(expiresIn)
-                                .requiresVerification(false)
-                                .user(LoginResponse.UserInfoDTO.builder()
-                                                .userId(user.getUserId())
-                                                .email(user.getEmail())
-                                                .fullName(user.getFullName())
-                                                .roleCodes(domainUser.getRoleCodes())
-                                                .avatarUrl(user.getAvatarUrl())
-                                                .warehouseIds(warehouseIds)
-                                                .build())
-                                .build();
+                        .token(token)
+                        .tokenType("Bearer")
+                        .expiresIn(expiresIn)
+                        .requiresVerification(false)
+                        .user(LoginResponse.UserInfoDTO.builder()
+                                .userId(user.getUserId())
+                                .email(user.getEmail())
+                                .fullName(user.getFullName())
+                                .roleCodes(domainUser.getRoleCodes())
+                                .avatarUrl(user.getAvatarUrl())
+                                .warehouseIds(warehouseIds)
+                                .build())
+                        .build();
         }
 
         /**
@@ -234,7 +234,7 @@ public class AuthService {
                 log.info("Forgot password request for email: {}", email);
 
                 UserEntity user = userRepository.findByEmail(email)
-                                .orElseThrow(() -> new BusinessException("Email không tồn tại trong hệ thống."));
+                        .orElseThrow(() -> new BusinessException("Email không tồn tại trong hệ thống."));
 
                 if (user.getStatus() == UserStatus.INACTIVE) {
                         throw new BusinessException("Tài khoản đã bị vô hiệu hóa. Liên hệ admin.");
@@ -248,7 +248,7 @@ public class AuthService {
          * UC-AUTH-05: Reset Password — verify OTP + đặt mật khẩu mới
          */
         public void resetPassword(String email, String otp, String newPassword, String confirmPassword,
-                        String ipAddress, String userAgent) {
+                                  String ipAddress, String userAgent) {
                 log.info("Reset password request for email: {}", email);
 
                 if (!newPassword.equals(confirmPassword)) {
@@ -261,7 +261,7 @@ public class AuthService {
                 }
 
                 UserEntity user = userRepository.findByEmail(email)
-                                .orElseThrow(() -> new BusinessException("Email không tồn tại trong hệ thống."));
+                        .orElseThrow(() -> new BusinessException("Email không tồn tại trong hệ thống."));
 
                 user.setPasswordHash(passwordEncoder.encode(newPassword));
                 user.setFailedLoginAttempts(0);
@@ -272,9 +272,9 @@ public class AuthService {
                 userRepository.save(user);
 
                 auditLogService.logAction(
-                                user.getUserId(), "RESET_PASSWORD", "USER", user.getUserId(),
-                                "Password reset via forgot-password OTP",
-                                ipAddress, userAgent);
+                        user.getUserId(), "RESET_PASSWORD", "USER", user.getUserId(),
+                        "Password reset via forgot-password OTP",
+                        ipAddress, userAgent);
 
                 log.info("Password reset successfully for: {}", email);
         }
@@ -289,13 +289,13 @@ public class AuthService {
                 // For now, just log the action
 
                 auditLogService.logAction(
-                                userId,
-                                "LOGOUT",
-                                "USER",
-                                userId,
-                                "User logged out",
-                                ipAddress,
-                                userAgent);
+                        userId,
+                        "LOGOUT",
+                        "USER",
+                        userId,
+                        "User logged out",
+                        ipAddress,
+                        userAgent);
 
                 return ApiResponse.success(MessageConstants.LOGOUT_SUCCESS);
         }
@@ -308,26 +308,26 @@ public class AuthService {
                 log.info(LogMessages.AUTH_FETCHING_CURRENT_USER, userId);
 
                 UserEntity userEntity = userRepository.findById(userId)
-                                .orElseThrow(() -> new BusinessException(MessageConstants.USER_NOT_FOUND));
+                        .orElseThrow(() -> new BusinessException(MessageConstants.USER_NOT_FOUND));
 
                 User user = userEntityMapper.toDomain(userEntity);
 
                 return UserResponse.builder()
-                                .userId(user.getUserId())
-                                .email(user.getEmail())
-                                .fullName(user.getFullName())
-                                .phone(user.getPhone())
-                                .gender(user.getGender())
-                                .dateOfBirth(user.getDateOfBirth())
-                                .address(user.getAddress())
-                                .avatarUrl(user.getAvatarUrl())
-                                .roleCodes(user.getRoleCodes())
-                                .status(user.getStatus())
-                                .isPermanent(user.getIsPermanent())
-                                .expireDate(user.getExpireDate())
-                                .lastLoginAt(user.getLastLoginAt())
-                                .createdAt(user.getCreatedAt())
-                                .build();
+                        .userId(user.getUserId())
+                        .email(user.getEmail())
+                        .fullName(user.getFullName())
+                        .phone(user.getPhone())
+                        .gender(user.getGender())
+                        .dateOfBirth(user.getDateOfBirth())
+                        .address(user.getAddress())
+                        .avatarUrl(user.getAvatarUrl())
+                        .roleCodes(user.getRoleCodes())
+                        .status(user.getStatus())
+                        .isPermanent(user.getIsPermanent())
+                        .expireDate(user.getExpireDate())
+                        .lastLoginAt(user.getLastLoginAt())
+                        .createdAt(user.getCreatedAt())
+                        .build();
         }
 
         // ============================================
@@ -347,8 +347,8 @@ public class AuthService {
 
                 // Check account expiration
                 if (Boolean.FALSE.equals(user.getIsPermanent()) &&
-                                user.getExpireDate() != null &&
-                                user.getExpireDate().isBefore(java.time.LocalDate.now())) {
+                        user.getExpireDate() != null &&
+                        user.getExpireDate().isBefore(java.time.LocalDate.now())) {
                         return false;
                 }
 
