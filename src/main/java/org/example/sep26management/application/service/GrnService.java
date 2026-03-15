@@ -5,6 +5,7 @@ import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.GrnItemResponse;
 import org.example.sep26management.application.dto.response.GrnResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
+import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.persistence.entity.*;
 import org.example.sep26management.infrastructure.persistence.repository.*;
 import org.springframework.data.domain.*;
@@ -64,7 +65,6 @@ public class GrnService {
 
     public ApiResponse<GrnResponse> getGrn(Long id) {
         GrnEntity grn = findGrn(id);
-        // items đã được load trong toSummaryResponse
         return ApiResponse.success("GRN details retrieved", toSummaryResponse(grn));
     }
 
@@ -72,14 +72,13 @@ public class GrnService {
     public ApiResponse<GrnResponse> approve(Long id, Long managerId) {
         GrnEntity grn = findGrn(id);
         if (!"PENDING_APPROVAL".equals(grn.getStatus())) {
-            throw new RuntimeException("Cannot approve GRN in status " + grn.getStatus());
+            throw new BusinessException("Không thể duyệt GRN đang ở trạng thái: " + grn.getStatus());
         }
         grn.setStatus("APPROVED");
         grn.setApprovedBy(managerId);
         grn.setApprovedAt(LocalDateTime.now());
         grnRepo.save(grn);
 
-        // Cập nhật ReceivingOrder status
         receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
             order.setStatus("GRN_APPROVED");
             receivingOrderRepo.save(order);
@@ -92,13 +91,15 @@ public class GrnService {
     public ApiResponse<GrnResponse> reject(Long id, String reason, Long managerId) {
         GrnEntity grn = findGrn(id);
         if (!"PENDING_APPROVAL".equals(grn.getStatus())) {
-            throw new RuntimeException("Cannot reject GRN in status " + grn.getStatus());
+            throw new BusinessException("Không thể từ chối GRN đang ở trạng thái: " + grn.getStatus());
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessException("Lý do từ chối không được để trống");
         }
         grn.setStatus("REJECTED");
         grn.setNote((grn.getNote() == null ? "" : grn.getNote() + " | ") + "Rejected by " + managerId + ": " + reason);
         grnRepo.save(grn);
 
-        // Cập nhật ReceivingOrder về GRN_CREATED để Keeper xem lại
         receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
             order.setStatus("GRN_CREATED");
             receivingOrderRepo.save(order);
@@ -111,22 +112,18 @@ public class GrnService {
     public ApiResponse<GrnResponse> post(Long id, Long userId) {
         GrnEntity grn = findGrn(id);
         if (!"APPROVED".equals(grn.getStatus())) {
-            throw new RuntimeException("Cannot POST GRN in status " + grn.getStatus());
+            throw new BusinessException("Không thể nhập kho GRN đang ở trạng thái: " + grn.getStatus());
         }
 
         List<GrnItemEntity> items = grnItemRepo.findByGrnGrnId(id);
         if (items.isEmpty()) {
-            throw new RuntimeException("GRN has no items to post");
+            throw new BusinessException("GRN không có dòng hàng nào để nhập kho");
         }
 
-        // Lấy Staging Location — không bắt buộc, nếu không có thì để null
         Long stagingLocationId = getFirstStagingLocation(grn.getWarehouseId());
-        // Không throw nếu thiếu staging — putaway task vẫn tạo được
 
-        // Lấy danh sách items bên receiving để map receivingItemId sang putawayTaskItem
         List<ReceivingItemEntity> rcvItems = receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
 
-        // Tạo Putaway Task
         PutawayTaskEntity task = PutawayTaskEntity.builder()
                 .warehouseId(grn.getWarehouseId())
                 .receivingId(grn.getReceivingId())
@@ -138,13 +135,11 @@ public class GrnService {
         task = putawayTaskRepo.save(task);
 
         for (GrnItemEntity item : items) {
-            // Tìm receivingItem tương ứng (ưu tiên match theo SKU + lotNumber + expiryDate nếu có)
             ReceivingItemEntity matchedReceivingItem = rcvItems.stream()
                     .filter(r -> r.getSkuId().equals(item.getSkuId())
                             && java.util.Objects.equals(r.getLotNumber(), item.getLotNumber())
                             && java.util.Objects.equals(r.getExpiryDate(), item.getExpiryDate()))
                     .findFirst()
-                    // fallback: match theo SKU nếu không tìm thấy bản ghi khớp lot/expiry
                     .orElseGet(() -> rcvItems.stream()
                             .filter(r -> r.getSkuId().equals(item.getSkuId()))
                             .findFirst()
@@ -152,7 +147,6 @@ public class GrnService {
 
             Long recItemId = matchedReceivingItem != null ? matchedReceivingItem.getReceivingItemId() : null;
 
-            // 0. Tạo hoặc lấy InventoryLot cho dòng này (để bám FEFO theo lot/expiry)
             Long lotId = null;
             if (item.getLotNumber() != null && !item.getLotNumber().isBlank()) {
                 Optional<InventoryLotEntity> lotOpt = inventoryLotRepo
@@ -173,7 +167,7 @@ public class GrnService {
                 });
                 lotId = lot.getLotId();
             }
-            // 1. Ghi log Transaction (Nhập kho vào staging)
+
             InventoryTransactionEntity tx = InventoryTransactionEntity.builder()
                     .warehouseId(grn.getWarehouseId())
                     .locationId(stagingLocationId)
@@ -186,7 +180,6 @@ public class GrnService {
                     .build();
             inventoryTransactionRepo.save(tx);
 
-            // 2. Cập nhật Snapshot (Sử dụng Native Upsert đã sửa) — bám theo lotId để phục vụ FEFO
             inventorySnapshotRepo.upsertInventory(
                     grn.getWarehouseId(),
                     item.getSkuId(),
@@ -194,7 +187,6 @@ public class GrnService {
                     stagingLocationId,
                     item.getQuantity());
 
-            // 3. Gợi ý Putaway (Suggest destination location)
             Long destLocationId = null;
             Optional<org.example.sep26management.application.dto.response.PutawaySuggestion> sug = putawaySuggestionService
                     .suggestLocation(grn.getWarehouseId(), item.getSkuId(), item.getQuantity());
@@ -202,7 +194,6 @@ public class GrnService {
                 destLocationId = sug.get().getSuggestedLocationId();
             }
 
-            // 4. Sinh Putaway Task Item
             PutawayTaskItemEntity taskItem = PutawayTaskItemEntity.builder()
                     .putawayTask(task)
                     .receivingItemId(recItemId)
@@ -218,7 +209,6 @@ public class GrnService {
         grn.setStatus("POSTED");
         grnRepo.save(grn);
 
-        // Cập nhật ReceivingOrder status → POSTED
         receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
             order.setStatus("POSTED");
             receivingOrderRepo.save(order);
@@ -227,18 +217,12 @@ public class GrnService {
         return ApiResponse.success("GRN posted, Putaway task created successfully.", toSummaryResponse(grn));
     }
 
-    /**
-     * Keeper gọi khi bấm "Gửi Manager duyệt"
-     * - GRN phải đang ở PENDING_APPROVAL (đã được tạo đúng status)
-     * - Cập nhật ReceivingOrder.status = "PENDING_APPROVAL" để FE hiển thị đúng
-     */
     @Transactional
     public ApiResponse<GrnResponse> submitToManager(Long grnId) {
         GrnEntity grn = findGrn(grnId);
         if (!"PENDING_APPROVAL".equals(grn.getStatus())) {
-            throw new RuntimeException("GRN is not in PENDING_APPROVAL status: " + grn.getStatus());
+            throw new BusinessException("GRN không ở trạng thái PENDING_APPROVAL: " + grn.getStatus());
         }
-        // Cập nhật ReceivingOrder status để FE hiển thị đúng
         receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
             order.setStatus("PENDING_APPROVAL");
             receivingOrderRepo.save(order);
@@ -249,17 +233,17 @@ public class GrnService {
     public ApiResponse<GrnResponse> getByReceivingId(Long receivingId) {
         List<GrnEntity> grns = grnRepo.findByReceivingIdOrderByCreatedAtDesc(receivingId);
         if (grns.isEmpty()) {
-            throw new RuntimeException("No GRN found for receiving order: " + receivingId);
+            throw new BusinessException("Chưa có GRN cho đơn nhập kho này (receivingId=" + receivingId + ")");
         }
         return ApiResponse.success("OK", toSummaryResponse(grns.get(0)));
     }
 
     private GrnEntity findGrn(Long id) {
-        return grnRepo.findById(id).orElseThrow(() -> new RuntimeException("GRN not found: " + id));
+        return grnRepo.findById(id)
+                .orElseThrow(() -> new BusinessException("Không tìm thấy GRN với id=" + id));
     }
 
     private GrnResponse toSummaryResponse(GrnEntity grn) {
-        // Load items cho mọi response — FE cần để hiển thị số lượng SKU/thùng
         List<GrnItemEntity> itemEntities = grnItemRepo.findByGrnGrnId(grn.getGrnId());
         List<GrnItemResponse> items = itemEntities.stream().map(gi -> {
             String skuCode = skuRepo.findById(gi.getSkuId())
