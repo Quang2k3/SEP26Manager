@@ -57,17 +57,11 @@ public class ProfileController {
             + "- `status`: Trạng thái (ACTIVE, INACTIVE).\n"
             + "- `avatarUrl`: Đường dẫn lấy ảnh đại diện.")
     public ResponseEntity<ApiResponse<UserProfileResponse>> getProfile() {
-        try {
-            Long userId = getCurrentUserId();
-            log.info(LogMessages.PROFILE_FETCHING, userId);
+        Long userId = getCurrentUserId();
+        log.info(LogMessages.PROFILE_FETCHING, userId);
 
-            ApiResponse<UserProfileResponse> response = profileService.getProfile(userId);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error(LogMessages.PROFILE_ERROR_GETTING, e.getMessage(), e);
-            return ResponseEntity.internalServerError()
-                    .body(ApiResponse.error("Failed to get profile: " + e.getMessage()));
-        }
+        ApiResponse<UserProfileResponse> response = profileService.getProfile(userId);
+        return ResponseEntity.ok(response);
     }
 
     @PutMapping(value = "/update-profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -76,22 +70,16 @@ public class ProfileController {
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
             @Valid @ModelAttribute UpdateProfileRequest request,
             HttpServletRequest httpRequest) {
-        try {
-            Long userId = getCurrentUserId();
-            String ipAddress = getClientIpAddress(httpRequest);
-            String userAgent = httpRequest.getHeader("User-Agent");
+        Long userId = getCurrentUserId();
+        String ipAddress = getClientIpAddress(httpRequest);
+        String userAgent = httpRequest.getHeader("User-Agent");
 
-            log.info(LogMessages.PROFILE_UPDATING, userId);
+        log.info(LogMessages.PROFILE_UPDATING, userId);
 
-            ApiResponse<UserProfileResponse> response = profileService.updateProfile(userId, request, ipAddress,
-                    userAgent);
+        ApiResponse<UserProfileResponse> response = profileService.updateProfile(userId, request, ipAddress,
+                userAgent);
 
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error(LogMessages.PROFILE_ERROR_UPDATING, e.getMessage(), e);
-            return ResponseEntity.internalServerError()
-                    .body(ApiResponse.error("Failed to update profile: " + e.getMessage()));
-        }
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/change-password")
@@ -100,25 +88,19 @@ public class ProfileController {
     public ResponseEntity<ApiResponse<Void>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
             HttpServletRequest httpRequest) {
-        try {
-            Long userId = getCurrentUserId();
-            String ipAddress = getClientIpAddress(httpRequest);
-            String userAgent = httpRequest.getHeader("User-Agent");
+        Long userId = getCurrentUserId();
+        String ipAddress = getClientIpAddress(httpRequest);
+        String userAgent = httpRequest.getHeader("User-Agent");
 
-            log.info(LogMessages.PROFILE_CHANGING_PASSWORD, userId);
+        log.info(LogMessages.PROFILE_CHANGING_PASSWORD, userId);
 
-            ApiResponse<Void> response = profileService.changePassword(
-                    userId,
-                    request,
-                    ipAddress,
-                    userAgent);
+        ApiResponse<Void> response = profileService.changePassword(
+                userId,
+                request,
+                ipAddress,
+                userAgent);
 
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error(LogMessages.PROFILE_ERROR_CHANGING_PASSWORD, e.getMessage(), e);
-            return ResponseEntity.internalServerError()
-                    .body(ApiResponse.error("Failed to change password: " + e.getMessage()));
-        }
+        return ResponseEntity.ok(response);
     }
 
     private Long getCurrentUserId() {

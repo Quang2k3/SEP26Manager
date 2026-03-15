@@ -217,8 +217,12 @@ public class ProfileService {
                 throw new BusinessException(MessageConstants.FILE_NOT_IMAGE);
             }
 
-            // Create upload directory if not exists
-            Path uploadPath = Paths.get(uploadDir, "avatars");
+            // Resolve upload path — dùng uploadDir từ config
+            // Nếu là đường dẫn tương đối, resolve từ thư mục chạy JAR (user.dir)
+            Path baseDir = Paths.get(uploadDir).isAbsolute()
+                    ? Paths.get(uploadDir)
+                    : Paths.get(System.getProperty("user.dir"), uploadDir);
+            Path uploadPath = baseDir.resolve("avatars");
             log.info("Avatar upload resolved path: {}", uploadPath.toAbsolutePath());
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
