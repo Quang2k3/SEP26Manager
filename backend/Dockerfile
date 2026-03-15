@@ -16,8 +16,11 @@ FROM eclipse-temurin:17-jre-alpine
 
 WORKDIR /app
 
-# Create non-root user
-RUN addgroup -S spring && adduser -S spring -G spring
+# Create non-root user và cấp quyền write cho /app
+RUN addgroup -S spring && adduser -S spring -G spring \
+    && mkdir -p /app/uploads/avatars \
+    && chown -R spring:spring /app
+
 USER spring:spring
 
 # Copy JAR from builder
@@ -35,4 +38,3 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 # Run application
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
-
