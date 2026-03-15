@@ -119,11 +119,9 @@ public class GrnService {
             throw new RuntimeException("GRN has no items to post");
         }
 
-        // Lấy Staging Location
+        // Lấy Staging Location — không bắt buộc, nếu không có thì để null
         Long stagingLocationId = getFirstStagingLocation(grn.getWarehouseId());
-        if (stagingLocationId == null) {
-            throw new RuntimeException("No Staging location found for warehouse " + grn.getWarehouseId());
-        }
+        // Không throw nếu thiếu staging — putaway task vẫn tạo được
 
         // Lấy danh sách items bên receiving để map receivingItemId sang putawayTaskItem
         List<ReceivingItemEntity> rcvItems = receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
