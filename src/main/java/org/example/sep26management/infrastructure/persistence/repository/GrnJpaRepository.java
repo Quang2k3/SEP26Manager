@@ -16,5 +16,9 @@ public interface GrnJpaRepository extends JpaRepository<GrnEntity, Long> {
 
     Page<GrnEntity> findByStatus(String status, Pageable pageable);
 
+    Page<GrnEntity> findByWarehouseIdOrderByCreatedAtDesc(Long warehouseId, Pageable pageable);
+
+    Page<GrnEntity> findByWarehouseIdAndStatusOrderByCreatedAtDesc(Long warehouseId, String status, Pageable pageable);
+
     List<GrnEntity> findByReceivingIdOrderByCreatedAtDesc(Long receivingId);
 }

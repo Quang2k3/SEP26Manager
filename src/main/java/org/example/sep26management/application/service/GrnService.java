@@ -35,10 +35,14 @@ public class GrnService {
     private final InventoryTransactionJpaRepository inventoryTransactionRepo;
     private final InventorySnapshotJpaRepository inventorySnapshotRepo;
 
-    public ApiResponse<PageResponse<GrnResponse>> listGrns(String status, int page, int size) {
+    public ApiResponse<PageResponse<GrnResponse>> listGrns(Long warehouseId, String status, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<GrnEntity> entityPage;
-        if (status != null && !status.isBlank()) {
+        if (warehouseId != null && status != null && !status.isBlank()) {
+            entityPage = grnRepo.findByWarehouseIdAndStatusOrderByCreatedAtDesc(warehouseId, status, pageable);
+        } else if (warehouseId != null) {
+            entityPage = grnRepo.findByWarehouseIdOrderByCreatedAtDesc(warehouseId, pageable);
+        } else if (status != null && !status.isBlank()) {
             entityPage = grnRepo.findByStatus(status, pageable);
         } else {
             entityPage = grnRepo.findAll(pageable);
