@@ -1,5 +1,3 @@
-
-
 services:
   # PostgreSQL Database - COMMENTED OUT (using local PostgreSQL instead)
   # Uncomment if you want to use Docker PostgreSQL
@@ -80,7 +78,7 @@ services:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
       - ./backend/logs:/app/logs
-      - avatar_data:/home/spring/warehouse-uploads
+      - avatar_data:/app/uploads   # uploads nằm cạnh JAR (/app/uploads)
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
       interval: 30s
