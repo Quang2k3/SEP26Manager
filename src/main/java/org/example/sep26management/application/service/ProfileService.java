@@ -138,28 +138,29 @@ public class ProfileService {
         if (request.getFullName() != null && !request.getFullName().trim().isEmpty()) {
             user.setFullName(request.getFullName().trim());
         }
-        
+
         if (request.getPhone() != null && !request.getPhone().trim().isEmpty()) {
             user.setPhone(request.getPhone().trim());
         }
-        
+
         if (request.getGender() != null && !request.getGender().trim().isEmpty()) {
             user.setGender(request.getGender());
         }
-        
+
         if (request.getDateOfBirth() != null) {
             user.setDateOfBirth(request.getDateOfBirth());
         }
-        
+
         if (request.getAddress() != null && !request.getAddress().trim().isEmpty()) {
             user.setAddress(request.getAddress().trim());
         }
-        
+
         user.setUpdatedBy(userId);
 
         // Handle avatar upload if provided
+        // oldAvatarUrl đã được khai báo ở trên (dùng chung cho audit log và xóa file cũ)
         if (request.getAvatar() != null && !request.getAvatar().isEmpty()) {
-            String avatarUrl = saveAvatar(request.getAvatar(), userId);
+            String avatarUrl = saveAvatar(request.getAvatar(), userId, oldAvatarUrl);
             user.setAvatarUrl(avatarUrl);
         }
 
@@ -186,21 +187,21 @@ public class ProfileService {
     // HELPER METHODS
     // ============================================
 
-    private String saveAvatar(MultipartFile file, Long userId) {
+    /**
+     * Lưu avatar mới, xóa avatar cũ nếu tên file khác.
+     * Dùng tên file cố định theo userId + extension → REPLACE_EXISTING tự ghi đè,
+     * tránh tích lũy file rác trên disk.
+     */
+    private String saveAvatar(MultipartFile file, Long userId, String oldAvatarUrl) {
         try {
-            // Step 6b: Avatar Validation
-
-            // Check if file is empty
+            // Validation
             if (file.isEmpty()) {
                 throw new BusinessException(MessageConstants.FILE_EMPTY);
             }
-
-            // Check file size (BR-PERS-13)
             if (file.getSize() > maxFileSize) {
                 throw new BusinessException(MessageConstants.FILE_TOO_LARGE);
             }
 
-            // Check file extension
             String originalFilename = file.getOriginalFilename();
             if (originalFilename == null) {
                 throw new BusinessException(MessageConstants.FILE_INVALID_NAME);
@@ -211,30 +212,38 @@ public class ProfileService {
                 throw new BusinessException(MessageConstants.FILE_NOT_IMAGE);
             }
 
-            // Check content type
             String contentType = file.getContentType();
             if (contentType == null || !contentType.startsWith("image/")) {
                 throw new BusinessException(MessageConstants.FILE_NOT_IMAGE);
             }
 
-            // Create upload directory if not exists
+            // Tạo thư mục nếu chưa có
             Path uploadPath = Paths.get(uploadDir, "avatars");
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
             }
 
-            // Generate unique filename
-            String newFilename = String.format("avatar_%d_%s.%s",
-                    userId,
-                    UUID.randomUUID().toString(),
-                    extension);
-
+            // Tên file cố định theo userId: avatar_<userId>.<ext>
+            // → REPLACE_EXISTING tự ghi đè lần sau, không sinh file rác
+            String newFilename = String.format("avatar_%d.%s", userId, extension);
             Path filePath = uploadPath.resolve(newFilename);
 
-            // Save file
+            // Xóa avatar cũ nếu tên file khác (đổi extension, ví dụ jpg → png)
+            if (oldAvatarUrl != null && !oldAvatarUrl.isBlank()) {
+                String oldFilename = oldAvatarUrl.substring(oldAvatarUrl.lastIndexOf('/') + 1);
+                if (!oldFilename.equals(newFilename)) {
+                    Path oldFilePath = uploadPath.resolve(oldFilename);
+                    try {
+                        Files.deleteIfExists(oldFilePath);
+                    } catch (IOException ignored) {
+                        log.warn("Could not delete old avatar file: {}", oldFilePath);
+                    }
+                }
+            }
+
+            // Lưu file (ghi đè nếu đã tồn tại)
             Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
 
-            // Return relative URL
             return "/uploads/avatars/" + newFilename;
 
         } catch (IOException e) {
@@ -252,14 +261,14 @@ public class ProfileService {
     }
 
     private String buildOldValue(String fullName, String phone, String gender,
-            String address, String avatarUrl) {
+                                 String address, String avatarUrl) {
         return String.format(
                 "{\"fullName\":\"%s\",\"phone\":\"%s\",\"gender\":\"%s\",\"address\":\"%s\",\"avatarUrl\":\"%s\"}",
                 fullName, phone, gender, address, avatarUrl);
     }
 
     private String buildNewValue(String fullName, String phone, String gender,
-            String address, String avatarUrl) {
+                                 String address, String avatarUrl) {
         return buildOldValue(fullName, phone, gender, address, avatarUrl);
     }
 }
