@@ -30,6 +30,7 @@ public class GrnResponse {
 
     @Schema(description = "ID nhà cung cấp", example = "5")
     private Long supplierId;
+    private String supplierName;
 
     @Schema(description = "Mã chứng từ xuất/tham chiếu", example = "PO-20231015-01")
     private String sourceReferenceCode;
