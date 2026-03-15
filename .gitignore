@@ -34,3 +34,5 @@ build/
 
 ### GitHub Actions Runner ###
 actions-runner/
+
+.env

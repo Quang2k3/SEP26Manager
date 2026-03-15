@@ -86,11 +86,15 @@ otp:
 
 file:
   upload:
-    # Dùng đường dẫn tương đối ./uploads — nằm cạnh JAR, không phụ thuộc user/Docker
-    # Docker: mount volume vào /app/uploads thay vì /home/spring/warehouse-uploads
-    # Ví dụ: -v /host/uploads:/app/uploads  (UPLOAD_DIR không cần set nữa)
     dir: ${UPLOAD_DIR:./uploads}
     max-size: 5242880
+
+# Cloudinary Configuration for avatar storage
+cloudinary:
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+  api-key: ${CLOUDINARY_API_KEY:}
+  api-secret: ${CLOUDINARY_API_SECRET:}
+
 
 server:
   # 8082 to locally test with Postman, 8080 for deployment

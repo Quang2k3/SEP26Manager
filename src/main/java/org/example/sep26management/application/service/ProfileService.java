@@ -1,5 +1,7 @@
 package org.example.sep26management.application.service;
 
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.LogMessages;
@@ -20,14 +22,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -39,67 +37,49 @@ public class ProfileService {
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
     private final UserMapper userMapper;
-
-    @Value("${file.upload.dir}")
-    private String uploadDir;
+    private final Cloudinary cloudinary;
 
     @Value("${file.upload.max-size}")
     private long maxFileSize;
 
-    private static final List<String> ALLOWED_IMAGE_EXTENSIONS = Arrays.asList("jpg", "jpeg", "png");
+    private static final List<String> ALLOWED_IMAGE_EXTENSIONS = Arrays.asList("jpg", "jpeg", "png", "webp");
+    private static final String CLOUDINARY_FOLDER = "sep26wms/avatars";
 
-    /**
-     * UC-PERS-02: Change Password
-     */
+    // ─── Change Password ──────────────────────────────────────────────────────
+
     public ApiResponse<Void> changePassword(
             Long userId,
             ChangePasswordRequest request,
             String ipAddress,
             String userAgent) {
+
         log.info(LogMessages.PROFILE_CHANGING_PASSWORD, userId);
 
-        // Find user
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException(MessageConstants.USER_NOT_FOUND));
 
-        // Step 4: Validate current password
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
             throw new BusinessException(MessageConstants.PASSWORD_INCORRECT);
         }
-
-        // Step 5: Validate new password
-        // 5a: Check if passwords match
         if (!request.getNewPassword().equals(request.getConfirmPassword())) {
             throw new BusinessException(MessageConstants.PASSWORD_MISMATCH);
         }
-
-        // 5c: Check if new password is same as current (BR-PERS-02)
         if (passwordEncoder.matches(request.getNewPassword(), user.getPasswordHash())) {
             throw new BusinessException(MessageConstants.PASSWORD_SAME);
         }
 
-        // Step 6: Update password
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         user.setPasswordChangedAt(LocalDateTime.now());
         userRepository.save(user);
 
-        // Step 7: Log audit
-        auditLogService.logAction(
-                userId,
-                "PASSWORD_CHANGE",
-                "USER",
-                userId,
-                "Password changed successfully",
-                ipAddress,
-                userAgent);
+        auditLogService.logAction(userId, "PASSWORD_CHANGE", "USER", userId,
+                "Password changed successfully", ipAddress, userAgent);
 
-        // Step 8: Return success (BR-PERS-04: maintain current session)
         return ApiResponse.success(MessageConstants.PASSWORD_CHANGED);
     }
 
-    /**
-     * UC-PERS-03: View Personal Profile
-     */
+    // ─── Get Profile ──────────────────────────────────────────────────────────
+
     @Transactional(readOnly = true)
     public ApiResponse<UserProfileResponse> getProfile(Long userId) {
         log.info(LogMessages.PROFILE_FETCHING, userId);
@@ -110,143 +90,108 @@ public class ProfileService {
         return ApiResponse.success(MessageConstants.PROFILE_SUCCESS, userMapper.toProfileResponse(user));
     }
 
-    /**
-     * UC-PERS-04: Update Personal Profile
-     */
+    // ─── Update Profile ───────────────────────────────────────────────────────
+
     public ApiResponse<UserProfileResponse> updateProfile(
             Long userId,
             UpdateProfileRequest request,
             String ipAddress,
             String userAgent) {
+
         log.info(LogMessages.PROFILE_UPDATING, userId);
 
-        // Step 2: Retrieve current profile
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException(MessageConstants.PROFILE_LOAD_FAILED));
 
-        // Store old values for audit
-        String oldFullName = user.getFullName();
-        String oldPhone = user.getPhone();
-        String oldGender = user.getGender();
-        String oldAddress = user.getAddress();
+        String oldFullName  = user.getFullName();
+        String oldPhone     = user.getPhone();
+        String oldGender    = user.getGender();
+        String oldAddress   = user.getAddress();
         String oldAvatarUrl = user.getAvatarUrl();
 
-        // Step 4: User modifies data
-        // Step 6: Validate (already done by @Valid annotation in controller)
-
-        // Update basic info - only if provided (not null/blank)
         if (request.getFullName() != null && !request.getFullName().trim().isEmpty()) {
             user.setFullName(request.getFullName().trim());
         }
-
         if (request.getPhone() != null && !request.getPhone().trim().isEmpty()) {
             user.setPhone(request.getPhone().trim());
         }
-
         if (request.getGender() != null && !request.getGender().trim().isEmpty()) {
             user.setGender(request.getGender());
         }
-
         if (request.getDateOfBirth() != null) {
             user.setDateOfBirth(request.getDateOfBirth());
         }
-
         if (request.getAddress() != null && !request.getAddress().trim().isEmpty()) {
             user.setAddress(request.getAddress().trim());
         }
 
         user.setUpdatedBy(userId);
 
-        // Handle avatar upload if provided
+        // Upload avatar lên Cloudinary nếu có
         if (request.getAvatar() != null && !request.getAvatar().isEmpty()) {
-            String avatarUrl = saveAvatar(request.getAvatar(), userId);
+            String avatarUrl = uploadAvatarToCloudinary(request.getAvatar(), userId);
             user.setAvatarUrl(avatarUrl);
         }
 
-        // Step 7: Persist changes
         userRepository.save(user);
 
-        // Step 8: Log audit
-        auditLogService.logAction(
-                userId,
-                "UPDATE_PROFILE",
-                "USER",
-                userId,
-                "Profile updated",
-                ipAddress,
-                userAgent,
-                buildOldValue(oldFullName, oldPhone, oldGender, oldAddress, oldAvatarUrl),
-                buildNewValue(user.getFullName(), user.getPhone(), user.getGender(),
+        auditLogService.logAction(userId, "UPDATE_PROFILE", "USER", userId, "Profile updated",
+                ipAddress, userAgent,
+                buildValue(oldFullName, oldPhone, oldGender, oldAddress, oldAvatarUrl),
+                buildValue(user.getFullName(), user.getPhone(), user.getGender(),
                         user.getAddress(), user.getAvatarUrl()));
 
         return ApiResponse.success(MessageConstants.PROFILE_UPDATED, userMapper.toProfileResponse(user));
     }
 
-    // ============================================
-    // HELPER METHODS
-    // ============================================
+    // ─── Cloudinary Upload ────────────────────────────────────────────────────
 
-    private String saveAvatar(MultipartFile file, Long userId) {
+    @SuppressWarnings("unchecked")
+    private String uploadAvatarToCloudinary(MultipartFile file, Long userId) {
+        // Validate
+        if (file.isEmpty()) {
+            throw new BusinessException(MessageConstants.FILE_EMPTY);
+        }
+        if (file.getSize() > maxFileSize) {
+            throw new BusinessException(MessageConstants.FILE_TOO_LARGE);
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null) {
+            throw new BusinessException(MessageConstants.FILE_INVALID_NAME);
+        }
+
+        String extension = getFileExtension(originalFilename).toLowerCase();
+        if (!ALLOWED_IMAGE_EXTENSIONS.contains(extension)) {
+            throw new BusinessException(MessageConstants.FILE_NOT_IMAGE);
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new BusinessException(MessageConstants.FILE_NOT_IMAGE);
+        }
+
         try {
-            // Step 6b: Avatar Validation
+            // Public ID cố định theo userId → tự ghi đè ảnh cũ, không sinh file rác
+            String publicId = CLOUDINARY_FOLDER + "/avatar_" + userId;
 
-            // Check if file is empty
-            if (file.isEmpty()) {
-                throw new BusinessException(MessageConstants.FILE_EMPTY);
-            }
+            Map uploadResult = cloudinary.uploader().upload(
+                    file.getBytes(),
+                    ObjectUtils.asMap(
+                            "public_id",     publicId,
+                            "overwrite",     true,
+                            "resource_type", "image",
+                            // Tự động crop về 400x400, chất lượng auto
+                            "transformation", "c_fill,g_face,h_400,w_400,q_auto,f_auto"
+                    )
+            );
 
-            // Check file size (BR-PERS-13)
-            if (file.getSize() > maxFileSize) {
-                throw new BusinessException(MessageConstants.FILE_TOO_LARGE);
-            }
-
-            // Check file extension
-            String originalFilename = file.getOriginalFilename();
-            if (originalFilename == null) {
-                throw new BusinessException(MessageConstants.FILE_INVALID_NAME);
-            }
-
-            String extension = getFileExtension(originalFilename).toLowerCase();
-            if (!ALLOWED_IMAGE_EXTENSIONS.contains(extension)) {
-                throw new BusinessException(MessageConstants.FILE_NOT_IMAGE);
-            }
-
-            // Check content type
-            String contentType = file.getContentType();
-            if (contentType == null || !contentType.startsWith("image/")) {
-                throw new BusinessException(MessageConstants.FILE_NOT_IMAGE);
-            }
-
-            // Resolve upload path — dùng uploadDir từ config
-            // Nếu là đường dẫn tương đối, resolve từ thư mục chạy JAR (user.dir)
-            Path baseDir = Paths.get(uploadDir).isAbsolute()
-                    ? Paths.get(uploadDir)
-                    : Paths.get(System.getProperty("user.dir"), uploadDir);
-            Path uploadPath = baseDir.resolve("avatars");
-            log.info("Avatar upload resolved path: {}", uploadPath.toAbsolutePath());
-            if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-                log.info("Created avatar directory: {}", uploadPath.toAbsolutePath());
-            }
-
-            // Tên file cố định theo userId → tự ghi đè, không sinh file rác
-            String newFilename = String.format("avatar_%d.%s", userId, extension);
-            Path filePath = uploadPath.resolve(newFilename);
-
-            // Xóa file cũ nếu đổi extension (jpg→png)
-            log.info("Saving avatar to: {}", filePath.toAbsolutePath());
-
-            // Save file (ghi đè nếu đã tồn tại)
-            Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
-
-            // Return relative URL
-            return "/uploads/avatars/" + newFilename;
+            String secureUrl = (String) uploadResult.get("secure_url");
+            log.info("Avatar uploaded to Cloudinary for userId={}: {}", userId, secureUrl);
+            return secureUrl;
 
         } catch (IOException e) {
-            log.error("Failed to save avatar. uploadDir=[{}] resolved=[{}] userId=[{}] error=[{}]",
-                    uploadDir,
-                    java.nio.file.Paths.get(uploadDir).toAbsolutePath(),
-                    userId, e.getMessage(), e);
+            log.error("Failed to upload avatar to Cloudinary for userId={}: {}", userId, e.getMessage(), e);
             throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
         }
     }
@@ -259,15 +204,10 @@ public class ProfileService {
         return "";
     }
 
-    private String buildOldValue(String fullName, String phone, String gender,
-                                 String address, String avatarUrl) {
+    private String buildValue(String fullName, String phone, String gender,
+                              String address, String avatarUrl) {
         return String.format(
                 "{\"fullName\":\"%s\",\"phone\":\"%s\",\"gender\":\"%s\",\"address\":\"%s\",\"avatarUrl\":\"%s\"}",
                 fullName, phone, gender, address, avatarUrl);
-    }
-
-    private String buildNewValue(String fullName, String phone, String gender,
-                                 String address, String avatarUrl) {
-        return buildOldValue(fullName, phone, gender, address, avatarUrl);
     }
 }
