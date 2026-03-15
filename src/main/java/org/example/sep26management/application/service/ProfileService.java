@@ -26,6 +26,7 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 @Service
 @RequiredArgsConstructor
@@ -175,14 +176,22 @@ public class ProfileService {
             // Public ID cố định theo userId → tự ghi đè ảnh cũ, không sinh file rác
             String publicId = CLOUDINARY_FOLDER + "/avatar_" + userId;
 
+            // transformation phải là List<Map>, không phải String
+            List<Map<String, Object>> transformation = new java.util.ArrayList<>();
+            transformation.add(ObjectUtils.asMap(
+                    "width", 400, "height", 400,
+                    "crop", "fill", "gravity", "face",
+                    "quality", "auto", "fetch_format", "auto"
+            ));
+
             Map uploadResult = cloudinary.uploader().upload(
                     file.getBytes(),
                     ObjectUtils.asMap(
-                            "public_id",     publicId,
-                            "overwrite",     true,
-                            "resource_type", "image",
-                            // Tự động crop về 400x400, chất lượng auto
-                            "transformation", "c_fill,g_face,h_400,w_400,q_auto,f_auto"
+                            "public_id",      publicId,
+                            "overwrite",      true,
+                            "resource_type",  "image",
+                            "transformation", transformation,
+                            "invalidate",     true   // xóa CDN cache khi overwrite
                     )
             );
 
