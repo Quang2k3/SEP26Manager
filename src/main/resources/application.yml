@@ -86,11 +86,10 @@ otp:
 
 file:
   upload:
-    # QUAN TRỌNG: Trên production/container, set env var UPLOAD_DIR trỏ đến
-    # một persistent volume (ví dụ: /data/uploads hoặc mount NFS/S3-Fuse).
-    # Nếu không có persistent volume, avatar sẽ mất khi container restart.
-    # Ví dụ Docker: -v /host/uploads:/data/uploads -e UPLOAD_DIR=/data/uploads
-    dir: ${UPLOAD_DIR:${user.home}/warehouse-uploads}
+    # Dùng đường dẫn tương đối ./uploads — nằm cạnh JAR, không phụ thuộc user/Docker
+    # Docker: mount volume vào /app/uploads thay vì /home/spring/warehouse-uploads
+    # Ví dụ: -v /host/uploads:/app/uploads  (UPLOAD_DIR không cần set nữa)
+    dir: ${UPLOAD_DIR:./uploads}
     max-size: 5242880
 
 server:
