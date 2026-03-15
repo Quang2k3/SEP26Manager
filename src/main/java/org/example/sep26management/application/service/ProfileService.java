@@ -219,8 +219,10 @@ public class ProfileService {
 
             // Tạo thư mục nếu chưa có
             Path uploadPath = Paths.get(uploadDir, "avatars");
+            log.info("Avatar upload path: {}", uploadPath.toAbsolutePath());
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
+                log.info("Created avatar directory: {}", uploadPath.toAbsolutePath());
             }
 
             // Tên file cố định theo userId: avatar_<userId>.<ext>
@@ -247,7 +249,9 @@ public class ProfileService {
             return "/uploads/avatars/" + newFilename;
 
         } catch (IOException e) {
-            log.error(LogMessages.PROFILE_ERROR_SAVING_AVATAR, e);
+            // Log rõ thư mục đang cố ghi để dễ debug permission issue
+            log.error("Failed to save avatar. uploadDir=[{}], userId=[{}], error=[{}]",
+                    uploadDir, userId, e.getMessage(), e);
             throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
         }
     }
