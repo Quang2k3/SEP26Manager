@@ -42,6 +42,14 @@ public class GrnController {
         return grnService.listGrns(status, page, size);
     }
 
+    @GetMapping("/by-receiving/{receivingId}")
+    @Operation(summary = "Lấy GRN theo Receiving Order", description = "Keeper dùng để kiểm tra GRN đã được tạo từ Receiving Order chưa.\n\n"
+            + "**Data yêu cầu:**\n"
+            + "- `@PathVariable receivingId`: ID của Receiving Order.")
+    public ApiResponse<GrnResponse> getByReceivingId(@PathVariable Long receivingId) {
+        return grnService.getByReceivingId(receivingId);
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Chi tiết GRN",
             description = "Xem chi tiết 1 GRN bao gồm danh sách SKU với số lượng nhập kho, lot number, ngày sản xuất, hạn sử dụng.\n\n"

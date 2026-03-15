@@ -229,6 +229,14 @@ public class GrnService {
         return ApiResponse.success("GRN posted, Putaway task created successfully.", toSummaryResponse(grn));
     }
 
+    public ApiResponse<GrnResponse> getByReceivingId(Long receivingId) {
+        List<GrnEntity> grns = grnRepo.findByReceivingIdOrderByCreatedAtDesc(receivingId);
+        if (grns.isEmpty()) {
+            throw new RuntimeException("No GRN found for receiving order: " + receivingId);
+        }
+        return ApiResponse.success("OK", toSummaryResponse(grns.get(0)));
+    }
+
     private GrnEntity findGrn(Long id) {
         return grnRepo.findById(id).orElseThrow(() -> new RuntimeException("GRN not found: " + id));
     }
