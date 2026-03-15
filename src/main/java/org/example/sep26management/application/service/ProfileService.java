@@ -173,34 +173,52 @@ public class ProfileService {
         }
 
         try {
-            // Public ID cố định theo userId → tự ghi đè ảnh cũ, không sinh file rác
             String publicId = CLOUDINARY_FOLDER + "/avatar_" + userId;
 
-            // transformation phải là List<Map>, không phải String
-            List<Map<String, Object>> transformation = new java.util.ArrayList<>();
-            transformation.add(ObjectUtils.asMap(
-                    "width", 400, "height", 400,
-                    "crop", "fill", "gravity", "face",
-                    "quality", "auto", "fetch_format", "auto"
+            // DUNG "eager" thay vi "transformation" khi upload trong Java SDK
+            // "transformation" chi dung khi build delivery URL, KHONG phai khi upload
+            List<Map<String, Object>> eager = new ArrayList<>();
+            eager.add(ObjectUtils.asMap(
+                    "width",        400,
+                    "height",       400,
+                    "crop",         "fill",
+                    "gravity",      "face",
+                    "quality",      "auto",
+                    "fetch_format", "auto"
             ));
 
-            Map uploadResult = cloudinary.uploader().upload(
+            @SuppressWarnings("unchecked")
+            Map<String, Object> uploadResult = cloudinary.uploader().upload(
                     file.getBytes(),
                     ObjectUtils.asMap(
-                            "public_id",      publicId,
-                            "overwrite",      true,
-                            "resource_type",  "image",
-                            "transformation", transformation,
-                            "invalidate",     true   // xóa CDN cache khi overwrite
+                            "public_id",     publicId,
+                            "overwrite",     true,
+                            "resource_type", "image",
+                            "eager",         eager,
+                            "invalidate",    true
                     )
             );
 
             String secureUrl = (String) uploadResult.get("secure_url");
-            log.info("Avatar uploaded to Cloudinary for userId={}: {}", userId, secureUrl);
+            if (secureUrl == null) {
+                log.error("Cloudinary returned null secure_url. Response: {}", uploadResult);
+                throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
+            }
+            log.info("Avatar uploaded successfully for userId={}: {}", userId, secureUrl);
             return secureUrl;
 
+        } catch (BusinessException e) {
+            throw e;
         } catch (IOException e) {
-            log.error("Failed to upload avatar to Cloudinary for userId={}: {}", userId, e.getMessage(), e);
+            // IOException: loi doc bytes tu MultipartFile
+            log.error("IO error reading file for userId={}: {}", userId, e.getMessage(), e);
+            throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
+        } catch (Exception e) {
+            // Cloudinary SDK throw RuntimeException (com.cloudinary.api.exceptions.*)
+            // khi credentials sai (401), cloud_name sai, rate limit, loi mang...
+            // KHONG phai IOException -> phai catch Exception rieng o day
+            log.error("Cloudinary upload failed for userId={}: [{}] {}", userId,
+                    e.getClass().getSimpleName(), e.getMessage(), e);
             throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
         }
     }
