@@ -23,7 +23,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.beans.PropertyEditorSupport;
-
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
 
 @RestController
@@ -38,12 +40,29 @@ public class ProfileController {
 
     @InitBinder
     public void initBinder(WebDataBinder binder) {
-        // Handle empty string to MultipartFile conversion for Swagger "Send empty value"
+        // Handle empty string → null for MultipartFile (Swagger "Send empty value")
         binder.registerCustomEditor(MultipartFile.class, new PropertyEditorSupport() {
             @Override
             public void setAsText(String text) {
                 if (text == null || text.trim().isEmpty()) {
                     setValue(null);
+                }
+            }
+        });
+
+        // Handle String → LocalDate cho multipart/form-data (format: yyyy-MM-dd)
+        // @JsonFormat chỉ hoạt động với JSON body, không hoạt động với @ModelAttribute
+        binder.registerCustomEditor(LocalDate.class, new PropertyEditorSupport() {
+            @Override
+            public void setAsText(String text) {
+                if (text == null || text.trim().isEmpty()) {
+                    setValue(null);
+                    return;
+                }
+                try {
+                    setValue(LocalDate.parse(text.trim(), DateTimeFormatter.ISO_LOCAL_DATE));
+                } catch (DateTimeParseException e) {
+                    setValue(null); // bỏ qua nếu format sai thay vì throw 500
                 }
             }
         });
