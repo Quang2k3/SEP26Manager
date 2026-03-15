@@ -79,10 +79,13 @@ public class GrnService {
         grn.setApprovedAt(LocalDateTime.now());
         grnRepo.save(grn);
 
-        // Automated post upon manual approval by Manager
-        this.post(id, managerId);
+        // Cập nhật ReceivingOrder status
+        receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
+            order.setStatus("GRN_APPROVED");
+            receivingOrderRepo.save(order);
+        });
 
-        return ApiResponse.success("GRN approved and posted successfully.", toSummaryResponse(grn));
+        return ApiResponse.success("GRN approved.", toSummaryResponse(grn));
     }
 
     @Transactional
@@ -94,6 +97,13 @@ public class GrnService {
         grn.setStatus("REJECTED");
         grn.setNote((grn.getNote() == null ? "" : grn.getNote() + " | ") + "Rejected by " + managerId + ": " + reason);
         grnRepo.save(grn);
+
+        // Cập nhật ReceivingOrder về GRN_CREATED để Keeper xem lại
+        receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
+            order.setStatus("GRN_CREATED");
+            receivingOrderRepo.save(order);
+        });
+
         return ApiResponse.success("GRN rejected", toSummaryResponse(grn));
     }
 
@@ -209,6 +219,12 @@ public class GrnService {
 
         grn.setStatus("POSTED");
         grnRepo.save(grn);
+
+        // Cập nhật ReceivingOrder status → POSTED
+        receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
+            order.setStatus("POSTED");
+            receivingOrderRepo.save(order);
+        });
 
         return ApiResponse.success("GRN posted, Putaway task created successfully.", toSummaryResponse(grn));
     }
