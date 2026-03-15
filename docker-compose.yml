@@ -74,6 +74,11 @@ services:
       JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
 
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+
+      # Cloudinary Configuration (avatar upload)
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
