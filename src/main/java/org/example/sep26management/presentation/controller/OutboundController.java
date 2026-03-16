@@ -231,9 +231,27 @@ public class OutboundController {
 
     @GetMapping("/pick-list/{taskId}")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
-    @Operation(summary = "Chi tiết Pick List")
+    @Operation(summary = "Chi tiết Pick List theo taskId")
     public ResponseEntity<ApiResponse<PickListResponse>> getPickList(@PathVariable Long taskId) {
         return ResponseEntity.ok(pickListService.getPickList(taskId));
+    }
+
+    @GetMapping("/pick-list/by-document/{documentId}")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @Operation(summary = "Lấy Pick List theo documentId (soId)",
+            description = "Tự động tìm picking task đang active cho đơn hàng. "
+                    + "Dùng khi FE mở lại modal và không có taskId trong state.")
+    public ResponseEntity<ApiResponse<PickListResponse>> getPickListByDocument(@PathVariable Long documentId) {
+        return ResponseEntity.ok(pickListService.getPickListByDocument(documentId, getWarehouseId()));
+    }
+
+    @PatchMapping("/pick-list/{taskId}/confirm-picked")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Keeper xác nhận đã lấy đủ hàng",
+            description = "Chuyển picking task OPEN/IN_PROGRESS → PICKED. Bắt buộc trước khi bắt đầu QC.")
+    public ResponseEntity<ApiResponse<PickListResponse>> confirmPicked(
+            @PathVariable Long taskId, HttpServletRequest http) {
+        return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http)));
     }
 
     // ═════════════════════════════════════════════════════════════
@@ -319,14 +337,7 @@ public class OutboundController {
                 if (first != null)              return Long.parseLong(first.toString());
             }
         }
-        // MANAGER có thể không có warehouse gán → trả null thay vì throw 500
-        // OutboundListService và getSummary() sẽ handle null warehouseId
-        String role = getCurrentRole();
-        if ("MANAGER".equals(role) || "ADMIN".equals(role)) {
-            return null; // null = query tất cả warehouse (MANAGER view)
-        }
-        throw new org.example.sep26management.infrastructure.exception.BusinessException(
-                "Tài khoản của bạn chưa được gán kho. Liên hệ Admin để được phân công.");
+        throw new RuntimeException("Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
     }
 
     private String getCurrentRole() {

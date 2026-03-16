@@ -185,21 +185,6 @@ public class PickListService {
             responseItems.get(i).setSequence(i + 1);
         }
 
-        // ─── Update document status → PICKING ──────────────────────────────────
-        if (request.getOrderType() == OutboundType.SALES_ORDER) {
-            soRepository.findById(request.getDocumentId()).ifPresent(so -> {
-                so.setStatus("PICKING");
-                soRepository.save(so);
-                log.info("Sales order {} status updated to PICKING", so.getSoCode());
-            });
-        } else {
-            transferRepository.findById(request.getDocumentId()).ifPresent(t -> {
-                t.setStatus("PICKING");
-                transferRepository.save(t);
-                log.info("Transfer {} status updated to PICKING", t.getTransferCode());
-            });
-        }
-
         auditLogService.logAction(userId, "PICK_LIST_GENERATED",
                 request.getOrderType() == OutboundType.SALES_ORDER ? "SALES_ORDER" : "TRANSFER",
                 request.getDocumentId(),
@@ -267,15 +252,14 @@ public class PickListService {
                 .build());
     }
 
+
     /**
-     * SCRUM-511 ext: Keeper confirms all items have been physically picked.
-     * Transitions picking task: OPEN/IN_PROGRESS → PICKED
-     * Sets pickedQty = requiredQty for all items not yet marked.
-     * This is required before QC can start (startQcSession requires PICKED status).
+     * Keeper xác nhận đã lấy đủ hàng → picking task OPEN/IN_PROGRESS → PICKED.
+     * Bắt buộc trước khi QC có thể gọi start-qc (start-qc yêu cầu task PICKED).
      */
     @Transactional
     public ApiResponse<PickListResponse> confirmPicked(Long taskId, Long userId, String ip, String ua) {
-        log.info("Confirming picking for taskId={}, userId={}", taskId, userId);
+        log.info("confirmPicked: taskId={}, userId={}", taskId, userId);
 
         PickingTaskEntity task = pickingTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -283,15 +267,11 @@ public class PickListService {
 
         if (!("OPEN".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()))) {
             throw new BusinessException(
-                    "Cannot confirm picking: task must be OPEN or IN_PROGRESS. Current: " + task.getStatus());
+                    "Không thể xác nhận: task phải ở trạng thái OPEN hoặc IN_PROGRESS. Hiện tại: " + task.getStatus());
         }
 
+        // Set pickedQty = requiredQty cho các item chưa được đánh dấu
         List<PickingTaskItemEntity> items = pickingTaskItemExtendedRepository.findByPickingTaskId(taskId);
-        if (items.isEmpty()) {
-            throw new BusinessException("No items found in pick list task " + taskId);
-        }
-
-        // Set pickedQty = requiredQty for items that haven't been marked yet
         for (PickingTaskItemEntity item : items) {
             if (item.getPickedQty() == null || item.getPickedQty().compareTo(java.math.BigDecimal.ZERO) == 0) {
                 item.setPickedQty(item.getRequiredQty());
@@ -299,16 +279,39 @@ public class PickListService {
             }
         }
 
-        // Transition task status → PICKED
+        // Chuyển task sang PICKED
         task.setStatus("PICKED");
-        task.setStartedAt(task.getStartedAt() != null ? task.getStartedAt() : java.time.LocalDateTime.now());
+        if (task.getStartedAt() == null) task.setStartedAt(java.time.LocalDateTime.now());
         pickingTaskRepository.save(task);
 
         auditLogService.logAction(userId, "PICKING_CONFIRMED", "picking_tasks", taskId,
-                "Pick task " + taskId + " confirmed by keeper — ready for QC", ip, ua);
+                "Pick task " + taskId + " confirmed PICKED by keeper", ip, ua);
 
-        log.info("Pick task {} confirmed as PICKED by userId={}", taskId, userId);
+        log.info("confirmPicked OK: taskId={} → PICKED", taskId);
         return getPickList(taskId);
+    }
+
+
+    /**
+     * Lấy pick list đang active (OPEN / IN_PROGRESS / PICKED) theo documentId (soId).
+     * Dùng khi FE mở lại modal và không có taskId trong state.
+     */
+    @Transactional(readOnly = true)
+    public ApiResponse<PickListResponse> getPickListByDocument(Long documentId, Long warehouseId) {
+        List<PickingTaskEntity> tasks = pickingTaskRepository
+                .findByWarehouseIdAndSoId(warehouseId, documentId);
+
+        // Lấy task active nhất (không phải CANCELLED/COMPLETED)
+        PickingTaskEntity active = tasks.stream()
+                .filter(t -> !"CANCELLED".equals(t.getStatus()) && !"COMPLETED".equals(t.getStatus()))
+                .findFirst()
+                .orElse(tasks.isEmpty() ? null : tasks.get(tasks.size() - 1));
+
+        if (active == null) {
+            throw new ResourceNotFoundException("Không tìm thấy Pick List cho đơn #" + documentId);
+        }
+
+        return getPickList(active.getPickingTaskId());
     }
 
     private Long resolveLocationForReservation(ReservationEntity res, Long warehouseId) {
