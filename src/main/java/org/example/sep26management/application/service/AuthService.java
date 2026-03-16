@@ -45,6 +45,13 @@ public class AuthService {
         @Value("${otp.resend-limit-per-hour}")
         private int otpResendLimitPerHour;
 
+        // BUG-01 FIX: đọc thời hạn JWT từ config thay vì hard-code
+        @Value("${jwt.expiration-ms}")
+        private long jwtExpirationMs;
+
+        @Value("${jwt.remember-me-expiration-ms}")
+        private long jwtRememberMeExpirationMs;
+
         /**
          * UC-AUTH-01: Login with JWT
          */
@@ -137,10 +144,10 @@ public class AuthService {
                         domainUser,
                         Boolean.TRUE.equals(request.getRememberMe()));
 
-                // Calculate expiration
+                // BUG-01 FIX: trả đúng expiresIn theo rememberMe
                 long expiresIn = Boolean.TRUE.equals(request.getRememberMe())
-                        ? 7 * 24 * 60 * 60 * 1000L // 7 days
-                        : 7 * 24 * 60 * 60 * 1000L; // 7 days — match JWT expiration-ms config
+                        ? jwtRememberMeExpirationMs   // 7 days (remember-me)
+                        : jwtExpirationMs;            // default session (từ config)
 
                 auditLogService.logAction(
                         user.getUserId(),
@@ -200,7 +207,8 @@ public class AuthService {
                 domainUser.setWarehouseIds(warehouseIds);
 
                 String token = jwtTokenProvider.generateToken(domainUser, false);
-                long expiresIn = 7 * 24 * 60 * 60 * 1000L; // 7 days — match JWT expiration-ms config
+                // BUG-01 FIX: dùng config thay vì hard-code 7 ngày
+                long expiresIn = jwtExpirationMs;
 
                 auditLogService.logAction(
                         user.getUserId(),
@@ -280,13 +288,15 @@ public class AuthService {
         }
 
         /**
-         * UC-AUTH-02: Logout
+         * UC-AUTH-02: Logout — BUG-02 FIX: blacklist token để không dùng được sau logout
          */
-        public ApiResponse<Void> logout(Long userId, String ipAddress, String userAgent) {
+        public ApiResponse<Void> logout(Long userId, String rawToken, String ipAddress, String userAgent) {
                 log.info(LogMessages.AUTH_LOGOUT, userId);
 
-                // Invalidate session (can be implemented with Redis for token blacklist)
-                // For now, just log the action
+                // BUG-02 FIX: đưa token vào Redis blacklist, TTL = thời hạn còn lại của token
+                if (rawToken != null && !rawToken.isBlank()) {
+                        jwtTokenProvider.blacklistToken(rawToken);
+                }
 
                 auditLogService.logAction(
                         userId,
@@ -335,12 +345,26 @@ public class AuthService {
         // ============================================
 
         private boolean canLogin(UserEntity user) {
-                // Check status
-                if (user.getStatus() == UserStatus.INACTIVE || user.getStatus() == UserStatus.LOCKED) {
+                // Check status INACTIVE — không bao giờ được unlock tự động
+                if (user.getStatus() == UserStatus.INACTIVE) {
                         return false;
                 }
 
-                // Check if locked temporarily
+                // BUG-03 FIX: LOCKED chỉ block nếu lockedUntil còn hiệu lực.
+                // Nếu lockedUntil đã qua → auto-unlock, cho phép đăng nhập lại.
+                if (user.getStatus() == UserStatus.LOCKED) {
+                        if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
+                                // Vẫn trong thời gian bị khóa
+                                return false;
+                        }
+                        // lockedUntil đã qua (hoặc null) → tự động mở khóa
+                        user.setStatus(UserStatus.ACTIVE);
+                        user.setFailedLoginAttempts(0);
+                        user.setLockedUntil(null);
+                        userRepository.save(user);
+                }
+
+                // Check if locked temporarily (trường hợp status chưa được update về LOCKED)
                 if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
                         return false;
                 }

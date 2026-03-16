@@ -240,9 +240,16 @@ public class GrnService {
     @Transactional
     public ApiResponse<GrnResponse> submitToManager(Long grnId) {
         GrnEntity grn = findGrn(grnId);
-        if (!"PENDING_APPROVAL".equals(grn.getStatus())) {
-            throw new BusinessException("GRN không ở trạng thái PENDING_APPROVAL: " + grn.getStatus());
+        // BUG-04 FIX: GRN mới tạo mang status "GRN_CREATED", không phải "PENDING_APPROVAL"
+        // Guard cũ kiểm tra sai → luôn throw, không submit được
+        if (!"GRN_CREATED".equals(grn.getStatus())) {
+            throw new BusinessException("GRN không ở trạng thái GRN_CREATED: " + grn.getStatus()
+                    + ". Chỉ có thể submit GRN vừa tạo xong.");
         }
+        // Cập nhật GRN → PENDING_APPROVAL
+        grn.setStatus("PENDING_APPROVAL");
+        grnRepo.save(grn);
+
         receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
             order.setStatus("PENDING_APPROVAL");
             receivingOrderRepo.save(order);

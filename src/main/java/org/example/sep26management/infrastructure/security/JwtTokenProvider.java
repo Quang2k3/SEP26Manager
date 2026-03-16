@@ -6,10 +6,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.LogMessages;
 import org.example.sep26management.domain.entity.User;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -25,6 +27,15 @@ public class JwtTokenProvider {
 
     @Value("${jwt.remember-me-expiration-ms}")
     private long jwtRememberMeExpirationMs;
+
+    // BUG-02 FIX: inject RedisTemplate để lưu blacklist token sau logout
+    private final RedisTemplate<String, Object> redisTemplate;
+
+    private static final String BLACKLIST_PREFIX = "jwt:blacklist:";
+
+    public JwtTokenProvider(RedisTemplate<String, Object> redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
 
     private SecretKey getSigningKey() {
         byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
@@ -147,7 +158,7 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Validate JWT token
+     * Validate JWT token — kiểm tra cả signature/expiry lẫn blacklist (BUG-02 FIX)
      */
     public boolean validateToken(String token) {
         try {
@@ -155,6 +166,11 @@ public class JwtTokenProvider {
                     .setSigningKey(getSigningKey())
                     .build()
                     .parseClaimsJws(token);
+            // BUG-02 FIX: từ chối token đã bị blacklist sau logout
+            if (isBlacklisted(token)) {
+                log.warn("JWT token is blacklisted (user already logged out)");
+                return false;
+            }
             return true;
         } catch (MalformedJwtException ex) {
             log.error(LogMessages.JWT_INVALID_TOKEN);
@@ -166,6 +182,36 @@ public class JwtTokenProvider {
             log.error(LogMessages.JWT_CLAIMS_EMPTY);
         }
         return false;
+    }
+
+    /**
+     * BUG-02 FIX: Blacklist token khi logout.
+     * TTL = thời gian còn lại của token để không lưu Redis mãi mãi.
+     */
+    public void blacklistToken(String token) {
+        try {
+            Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(getSigningKey())
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody();
+            long remainingMs = claims.getExpiration().getTime() - System.currentTimeMillis();
+            if (remainingMs > 0) {
+                String key = BLACKLIST_PREFIX + token;
+                redisTemplate.opsForValue().set(key, "1", Duration.ofMillis(remainingMs));
+                log.info("JWT token blacklisted, TTL={}ms", remainingMs);
+            }
+        } catch (Exception ex) {
+            log.warn("Could not blacklist token (may already be expired): {}", ex.getMessage());
+        }
+    }
+
+    /**
+     * BUG-02 FIX: Kiểm tra token có trong blacklist không.
+     */
+    public boolean isBlacklisted(String token) {
+        String key = BLACKLIST_PREFIX + token;
+        return Boolean.TRUE.equals(redisTemplate.hasKey(key));
     }
 
     /**
