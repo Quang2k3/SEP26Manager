@@ -40,12 +40,7 @@ public class OutboundService {
     private final LocationJpaRepository locationRepository;
 
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-505: UC-OUT-01 Create Outbound Order
-    // BR-OUT-01: order type determines fields
-    // BR-OUT-02: delivery/transfer date >= today
-    // BR-OUT-03: real-time availability check
-    // BR-OUT-04: warn if qty > available
-    // BR-OUT-05: document code format
+    // SCRUM-505: Create
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
@@ -71,7 +66,6 @@ public class OutboundService {
     }
 
     private OutboundResponse createSalesOrder(CreateOutboundRequest req, Long createdBy, String ip, String ua) {
-        // BE tự resolve customerId từ customerCode — FE chỉ truyền customerCode
         CustomerEntity customer = customerRepository.findByCustomerCode(req.getCustomerCode())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Customer not found with code: " + req.getCustomerCode()));
@@ -80,6 +74,7 @@ public class OutboundService {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
         }
 
+        // checkStockAvailability chỉ tạo WARNING, không block
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 req.getWarehouseId(), req.getItems());
 
@@ -114,7 +109,6 @@ public class OutboundService {
     }
 
     private OutboundResponse createInternalTransfer(CreateOutboundRequest req, Long createdBy, String ip, String ua) {
-        // BE tự resolve destinationWarehouseId từ destinationWarehouseCode — FE chỉ truyền code
         WarehouseEntity destWarehouse = warehouseRepository.findByWarehouseCode(req.getDestinationWarehouseCode())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Destination warehouse not found with code: " + req.getDestinationWarehouseCode()));
@@ -122,7 +116,6 @@ public class OutboundService {
         if (destWarehouse.getWarehouseId().equals(req.getWarehouseId())) {
             throw new BusinessException(MessageConstants.OUTBOUND_SAME_WAREHOUSE);
         }
-
 
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 req.getWarehouseId(), req.getItems());
@@ -156,7 +149,7 @@ public class OutboundService {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-506: UC-OUT-02 Update Outbound Order
+    // SCRUM-506: Update
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
@@ -184,17 +177,14 @@ public class OutboundService {
         if (!"DRAFT".equals(so.getStatus())) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_EDITABLE);
         }
-
         if (!so.getCreatedBy().equals(userId)) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
         }
-
         if (req.getDeliveryDate() != null && req.getDeliveryDate().isBefore(LocalDate.now())) {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
         }
 
         if (req.getCustomerCode() != null) {
-            // BE tự resolve customerId từ customerCode
             CustomerEntity newCustomer = customerRepository.findByCustomerCode(req.getCustomerCode())
                     .orElseThrow(() -> new ResourceNotFoundException(
                             "Customer not found with code: " + req.getCustomerCode()));
@@ -236,17 +226,14 @@ public class OutboundService {
         if (!"DRAFT".equals(transfer.getStatus())) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_EDITABLE);
         }
-
         if (!transfer.getCreatedBy().equals(userId)) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
         }
-
         if (req.getTransferDate() != null && req.getTransferDate().isBefore(LocalDate.now())) {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
         }
 
         if (req.getDestinationWarehouseCode() != null) {
-            // BE tự resolve destinationWarehouseId từ destinationWarehouseCode
             WarehouseEntity destWarehouse = warehouseRepository.findByWarehouseCode(req.getDestinationWarehouseCode())
                     .orElseThrow(() -> new ResourceNotFoundException(
                             "Destination warehouse not found with code: " + req.getDestinationWarehouseCode()));
@@ -277,11 +264,9 @@ public class OutboundService {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-507: UC-OUT-03 Submit Outbound Order
-    // BR-OUT-09: hard block if insufficient stock
-    // BR-OUT-10: final stock check at submission
-    // BR-OUT-11: sales order → PENDING_APPROVAL
-    // BR-OUT-12: internal transfer → auto-approve
+    // SCRUM-507: Submit
+    // Chỉ chuyển DRAFT → PENDING_APPROVAL. KHÔNG check tồn.
+    // Check tồn xảy ra tại bước Allocate (AllocateStockService).
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
@@ -309,16 +294,11 @@ public class OutboundService {
         if (!"DRAFT".equals(so.getStatus())) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_DRAFT);
         }
-
         if (!so.getCreatedBy().equals(userId)) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
         }
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
-
-        // NOTE: Không check tồn kho tại đây.
-        // Submit chỉ chuyển DRAFT → PENDING_APPROVAL để Manager xem xét.
-        // Tồn kho sẽ được kiểm tra và khoá tại bước Allocate (sau khi Manager duyệt).
 
         if (req.getNote() != null) so.setNote(req.getNote());
         so.setStatus("PENDING_APPROVAL");
@@ -342,24 +322,20 @@ public class OutboundService {
         if (!"DRAFT".equals(transfer.getStatus())) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_DRAFT);
         }
-
         if (!transfer.getCreatedBy().equals(userId)) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
         }
 
         List<TransferItemEntity> items = transferItemRepository.findByTransferId(transferId);
 
-        // NOTE: Không check tồn kho tại đây — check ở bước Allocate.
-
         if (req.getNote() != null) transfer.setNote(req.getNote());
 
-        // BR-OUT-12: internal transfers auto-approve
+        // Internal transfer tự động duyệt, không cần Manager
         transfer.setStatus("APPROVED");
         transfer.setApprovedAt(LocalDateTime.now());
         transfer.setApprovedBy(0L);
         transferRepository.save(transfer);
 
-        // BR-OUT-17/18: reserve inventory in single transaction
         reserveInventory(transfer.getFromWarehouseId(), items.stream()
                 .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
                 .toList(), "transfers", transferId, userId);
@@ -373,12 +349,9 @@ public class OutboundService {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-508: UC-OUT-04 Approve Outbound Order (MANAGER only)
-    // BR-OUT-14: real-time stock shown on approval screen
-    // BR-OUT-15: warn if post-approval stock < 0 (no minimum field in SkuEntity)
-    // BR-OUT-16: final stock check before committing
-    // BR-OUT-17: reserve inventory on approval
-    // BR-OUT-18: all operations in single @Transactional
+    // SCRUM-508: Approve (MANAGER)
+    // Manager chỉ duyệt về mặt nghiệp vụ — KHÔNG block khi thiếu tồn.
+    // Tồn kho sẽ được kiểm tra và khoá tại bước Allocate (AllocateStockService).
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
@@ -389,53 +362,34 @@ public class OutboundService {
 
         log.info("Approving sales order: soId={}, managerId={}", soId, managerId);
 
-        // ── 1. Load order ──────────────────────────────────────────
         SalesOrderEntity so = soRepository.findById(soId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
 
-        // Must be PENDING_APPROVAL
         if (!"PENDING_APPROVAL".equals(so.getStatus())) {
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_PENDING_APPROVAL);
         }
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
 
-        // ── 2. BR-OUT-14: build real-time stock snapshot for response ──
+        // Chỉ build stock snapshot để hiển thị thông tin cho Manager — KHÔNG block
         List<OutboundResponse.StockWarning> stockSnapshot = buildStockSnapshot(
                 so.getWarehouseId(), items.stream()
                         .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
                         .toList());
 
-        // ── 3. BR-OUT-15: warn if any item would drop available stock below 0 ──
-        List<String> belowZeroWarnings = new ArrayList<>();
+        // Log cảnh báo nếu tồn thấp, nhưng KHÔNG throw exception
         for (SalesOrderItemEntity item : items) {
             BigDecimal available = getAvailableQty(so.getWarehouseId(), item.getSkuId());
-            BigDecimal afterApproval = available.subtract(item.getOrderedQty());
-            if (afterApproval.compareTo(BigDecimal.ZERO) < 0) {
+            if (available.compareTo(item.getOrderedQty()) < 0) {
                 String skuCode = skuRepository.findById(item.getSkuId())
                         .map(s -> s.getSkuCode()).orElse("SKU#" + item.getSkuId());
-                belowZeroWarnings.add(String.format(
-                        "%s: available=%s, requested=%s, deficit=%s",
-                        skuCode, available, item.getOrderedQty(), afterApproval.abs()));
+                log.warn("Low stock warning on approve: SO={}, SKU={}, available={}, requested={}",
+                        so.getSoCode(), skuCode, available, item.getOrderedQty());
             }
         }
-        // Log warnings but DO NOT block — BR-OUT-15 is a warning, BR-OUT-16 is the hard block
-        if (!belowZeroWarnings.isEmpty()) {
-            log.warn("BR-OUT-15: Stock below zero warning for SO {}: {}", so.getSoCode(), belowZeroWarnings);
-        }
 
-        // ── 4. BR-OUT-16: final hard stock check before committing ──
-        validateSufficientStock(so.getWarehouseId(), items.stream()
-                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
-                .toList());
-
-        // ── 5. BR-OUT-17 + BR-OUT-18: reserve inventory (all in this @Transactional) ──
-        reserveInventory(so.getWarehouseId(), items.stream()
-                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
-                .toList(), "sales_orders", soId, managerId);
-
-        // ── 6. Update order status → APPROVED ──────────────────────
+        // Không reserve inventory tại đây — sẽ được reserve tại bước Allocate
         so.setStatus("APPROVED");
         so.setApprovedBy(managerId);
         so.setApprovedAt(LocalDateTime.now());
@@ -445,11 +399,49 @@ public class OutboundService {
         log.info("Sales order {} approved by managerId={}", so.getSoCode(), managerId);
 
         auditLogService.logAction(managerId, "OUTBOUND_APPROVED", "SALES_ORDER", soId,
-                "Sales order " + so.getSoCode() + " approved, inventory reserved", ip, ua);
+                "Sales order " + so.getSoCode() + " approved", ip, ua);
 
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_APPROVED_SUCCESS,
                 buildSalesOrderResponse(so, items, customer, stockSnapshot));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // SCRUM-508 (Reject): Reject Sales Order (MANAGER)
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<OutboundResponse> rejectOutbound(
+            Long soId,
+            String rejectionReason,
+            Long managerId, String ip, String ua) {
+
+        log.info("Rejecting sales order: soId={}, managerId={}", soId, managerId);
+
+        SalesOrderEntity so = soRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
+
+        if (!"PENDING_APPROVAL".equals(so.getStatus())) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_PENDING_APPROVAL);
+        }
+        if (rejectionReason == null || rejectionReason.trim().length() < 20) {
+            throw new BusinessException(MessageConstants.OUTBOUND_REJECTION_REASON_REQUIRED);
+        }
+
+        so.setStatus("REJECTED");
+        so.setNote((so.getNote() != null ? so.getNote() + " | " : "") + "Rejected: " + rejectionReason);
+        so.setApprovedBy(managerId);
+        so.setApprovedAt(LocalDateTime.now());
+        soRepository.save(so);
+
+        auditLogService.logAction(managerId, "OUTBOUND_REJECTED", "SALES_ORDER", soId,
+                "Sales order " + so.getSoCode() + " rejected. Reason: " + rejectionReason, ip, ua);
+
+        List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
+        CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
+        return ApiResponse.success(MessageConstants.OUTBOUND_REJECTED_SUCCESS,
+                buildSalesOrderResponse(so, items, customer, null));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -478,6 +470,7 @@ public class OutboundService {
         }
     }
 
+    // Chỉ tạo WARNING, không block — dùng khi Create/Update để hiển thị cảnh báo cho user
     private List<OutboundResponse.StockWarning> checkStockAvailability(
             Long warehouseId, List<CreateOutboundRequest.OutboundItemRequest> items) {
 
@@ -498,10 +491,6 @@ public class OutboundService {
         return warnings;
     }
 
-    /**
-     * BR-OUT-14: Build real-time stock snapshot for approval screen
-     * Shows current available qty for each item at time of approval
-     */
     private List<OutboundResponse.StockWarning> buildStockSnapshot(
             Long warehouseId, List<AbstractMap.SimpleEntry<Long, BigDecimal>> items) {
 
@@ -511,7 +500,6 @@ public class OutboundService {
             BigDecimal available = getAvailableQty(warehouseId, skuId);
             String skuCode = skuRepository.findById(skuId)
                     .map(s -> s.getSkuCode()).orElse("SKU#" + skuId);
-
             return OutboundResponse.StockWarning.builder()
                     .skuId(skuId).skuCode(skuCode)
                     .requestedQty(requestedQty).availableQty(available)
@@ -523,28 +511,6 @@ public class OutboundService {
         }).toList();
     }
 
-    private void validateSufficientStock(Long warehouseId,
-                                         List<AbstractMap.SimpleEntry<Long, BigDecimal>> items) {
-
-        List<String> shortages = new ArrayList<>();
-        for (var entry : items) {
-            BigDecimal available = getAvailableQty(warehouseId, entry.getKey());
-            if (available.compareTo(entry.getValue()) < 0) {
-                String skuCode = skuRepository.findById(entry.getKey())
-                        .map(s -> s.getSkuCode()).orElse("SKU#" + entry.getKey());
-                shortages.add(String.format("%s: available=%s, requested=%s",
-                        skuCode, available, entry.getValue()));
-            }
-        }
-        if (!shortages.isEmpty()) {
-            throw new BusinessException(
-                    MessageConstants.OUTBOUND_INSUFFICIENT_STOCK_BLOCK + ": " + String.join("; ", shortages));
-        }
-    }
-
-    /**
-     * Available = snapshot.quantity - snapshot.reserved_qty (across all lots/locations)
-     */
     private BigDecimal getAvailableQty(Long warehouseId, Long skuId) {
         BigDecimal total = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, skuId);
         BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, skuId);
@@ -553,27 +519,16 @@ public class OutboundService {
         return total.subtract(reserved).max(BigDecimal.ZERO);
     }
 
-    /**
-     * BR-OUT-17/18: Reserve inventory — single transaction
-     * - Tạo reservation record
-     * - Tạo inventory_transaction type=RESERVE với location_id = staging location của warehouse
-     * - Update snapshot.reserved_qty
-     *
-     * NOTE: inventory_transactions.location_id có FK → locations, không cho phép 0 hay NULL.
-     *       Dùng staging location đầu tiên của warehouse làm "virtual" location cho RESERVE txn.
-     */
     private void reserveInventory(Long warehouseId,
                                   List<AbstractMap.SimpleEntry<Long, BigDecimal>> items,
                                   String refTable, Long refId, Long userId) {
 
-        // Lấy staging location id cho warehouse — dùng làm locationId cho RESERVE transaction
         Long stagingLocationId = getFirstStagingOrAnyLocationId(warehouseId);
 
         for (var entry : items) {
             Long skuId = entry.getKey();
             BigDecimal qty = entry.getValue();
 
-            // 1. Reservation record (không cần locationId)
             ReservationEntity reservation = ReservationEntity.builder()
                     .warehouseId(warehouseId)
                     .skuId(skuId)
@@ -584,12 +539,11 @@ public class OutboundService {
                     .build();
             reservationRepository.save(reservation);
 
-            // 2. Inventory transaction — dùng staging location thực tế
             InventoryTransactionEntity txn = InventoryTransactionEntity.builder()
                     .warehouseId(warehouseId)
                     .skuId(skuId)
-                    .locationId(stagingLocationId) // FIX: dùng location thực tế
-                    .quantity(qty.negate())         // negative = reserved out
+                    .locationId(stagingLocationId)
+                    .quantity(qty.negate())
                     .txnType("RESERVE")
                     .referenceTable(refTable)
                     .referenceId(refId)
@@ -597,68 +551,19 @@ public class OutboundService {
                     .build();
             txnRepository.save(txn);
 
-            // 3. Increment reserved_qty in snapshot
             snapshotRepository.incrementReservedByWarehouseAndSku(warehouseId, skuId, qty);
         }
     }
 
-    /**
-     * Lấy staging location đầu tiên của warehouse.
-     * Fallback: lấy bất kỳ location nào của warehouse nếu không có staging.
-     * Dùng cho inventory_transactions.location_id khi không có location cụ thể (RESERVE txn).
-     */
     private Long getFirstStagingOrAnyLocationId(Long warehouseId) {
-        // Tìm staging location trước
         return locationRepository.findFirstStagingByWarehouse(warehouseId)
                 .map(loc -> loc.getLocationId())
                 .orElseGet(() ->
                         locationRepository.findFirstByWarehouseId(warehouseId)
                                 .map(loc -> loc.getLocationId())
                                 .orElseThrow(() -> new BusinessException(
-                                        "No location found for warehouse " + warehouseId + ". Cannot create RESERVE transaction."))
+                                        "No location found for warehouse " + warehouseId))
                 );
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // SCRUM-508 (Reject path): UC-OUT-04 Reject Sales Order (MANAGER)
-    // Tách riêng khỏi approveSalesOrder để controller gọi rõ ràng hơn
-    // ─────────────────────────────────────────────────────────────
-
-    @Transactional
-    public ApiResponse<OutboundResponse> rejectOutbound(
-            Long soId,
-            String rejectionReason,
-            Long managerId, String ip, String ua) {
-
-        log.info("Rejecting sales order: soId={}, managerId={}", soId, managerId);
-
-        SalesOrderEntity so = soRepository.findById(soId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
-
-        if (!"PENDING_APPROVAL".equals(so.getStatus())) {
-            throw new BusinessException(MessageConstants.OUTBOUND_NOT_PENDING_APPROVAL);
-        }
-
-        if (rejectionReason == null || rejectionReason.trim().length() < 20) {
-            throw new BusinessException(MessageConstants.OUTBOUND_REJECTION_REASON_REQUIRED);
-        }
-
-        so.setStatus("REJECTED");
-        so.setNote((so.getNote() != null ? so.getNote() + " | " : "") + "Rejected: " + rejectionReason);
-        so.setApprovedBy(managerId);   // tái dụng approvedBy để lưu người xử lý
-        so.setApprovedAt(LocalDateTime.now());
-        soRepository.save(so);
-
-        log.info("Sales order {} rejected by managerId={}", so.getSoCode(), managerId);
-
-        auditLogService.logAction(managerId, "OUTBOUND_REJECTED", "SALES_ORDER", soId,
-                "Sales order " + so.getSoCode() + " rejected. Reason: " + rejectionReason, ip, ua);
-
-        List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
-        CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
-        return ApiResponse.success(MessageConstants.OUTBOUND_REJECTED_SUCCESS,
-                buildSalesOrderResponse(so, items, customer, null));
     }
 
     // ─── Response builders ───────────────────────────────────────
