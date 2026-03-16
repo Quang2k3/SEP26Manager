@@ -17,12 +17,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * SCRUM-509: UC-OUT-06 View Outbound List
- * BR-OUT-24: default last 30 days, newest first
- * BR-OUT-25: 20 per page
- * BR-OUT-26: actions based on role + status
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -48,96 +42,122 @@ public class OutboundListService {
             String currentUserRole,
             int page, int size) {
 
-        // BR-OUT-24: default last 30 days
-        final LocalDateTime effectiveFromDate = (fromDate != null) ? fromDate : LocalDateTime.now().minusDays(30);
-        final LocalDateTime effectiveToDate = toDate;
-        final String effectiveKeyword = keyword;
-        if (size <= 0) size = 20; // BR-OUT-25
+        log.info("listOutbound: warehouseId={}, status={}, orderType={}, page={}", warehouseId, status, orderType, page);
 
-        List<OutboundListResponse> combined = new ArrayList<>();
+        try {
+            final LocalDateTime effectiveFromDate = (fromDate != null) ? fromDate : LocalDateTime.now().minusDays(30);
+            final LocalDateTime effectiveToDate = toDate;
+            final String effectiveKeyword = keyword;
+            if (size <= 0) size = 20;
 
-        // Fetch SALES_ORDER if type is null or SALES_ORDER
-        if (orderType == null || orderType == OutboundType.SALES_ORDER) {
-            Page<SalesOrderEntity> soPage = soQueryRepository.searchSalesOrders(
-                    warehouseId, status, createdBy, effectiveFromDate, effectiveToDate, effectiveKeyword,
-                    PageRequest.of(0, 1000)); // fetch all then merge
+            List<OutboundListResponse> combined = new ArrayList<>();
 
-            soPage.getContent().forEach(so -> {
-                List<?> items = soItemRepository.findBySoId(so.getSoId());
-                String destination = customerRepository.findById(so.getCustomerId())
-                        .map(c -> c.getCustomerName()).orElse("N/A");
+            // SALES_ORDER
+            if (orderType == null || orderType == OutboundType.SALES_ORDER) {
+                Page<SalesOrderEntity> soPage = soQueryRepository.searchSalesOrders(
+                        warehouseId, status, createdBy, effectiveFromDate, effectiveToDate, effectiveKeyword,
+                        PageRequest.of(0, 1000));
 
-                combined.add(OutboundListResponse.builder()
-                        .documentId(so.getSoId())
-                        .documentCode(so.getSoCode())
-                        .orderType(OutboundType.SALES_ORDER)
-                        .destination(destination)
-                        .status(so.getStatus())
-                        .totalItems(items.size())
-                        .createdBy(so.getCreatedBy())
-                        .createdAt(so.getCreatedAt())
-                        .shipmentDate(so.getRequiredShipDate())
-                        // BR-OUT-26: actions
-                        .canEdit(isDraft(so.getStatus()) && so.getCreatedBy().equals(currentUserId))
-                        .canDelete(isDraft(so.getStatus()) && so.getCreatedBy().equals(currentUserId))
-                        .canSubmit(isDraft(so.getStatus()) && so.getCreatedBy().equals(currentUserId))
-                        .canApprove(isPending(so.getStatus()) && isManager(currentUserRole))
-                        .canConfirm(isApproved(so.getStatus()) && isKeeper(currentUserRole))
-                        .build());
-            });
-        }
-
-        // Fetch INTERNAL_TRANSFER if type is null or INTERNAL_TRANSFER
-        if (orderType == null || orderType == OutboundType.INTERNAL_TRANSFER) {
-            List<TransferEntity> transfers = transferRepository
-                    .findByFromWarehouseIdAndStatus(warehouseId, status != null ? status : "");
-
-            transfers.stream()
-                    .filter(t -> t.getCreatedAt().isAfter(effectiveFromDate))
-                    .filter(t -> effectiveKeyword == null || effectiveKeyword.isBlank()
-                            || t.getTransferCode().toLowerCase().contains(effectiveKeyword.toLowerCase()))
-                    .forEach(t -> {
-                        List<?> items = transferItemRepository.findByTransferId(t.getTransferId());
-                        String destName = warehouseRepository.findById(t.getToWarehouseId())
-                                .map(w -> w.getWarehouseName()).orElse("N/A");
+                soPage.getContent().forEach(so -> {
+                    try {
+                        List<?> items = soItemRepository.findBySoId(so.getSoId());
+                        String destination = customerRepository.findById(so.getCustomerId())
+                                .map(c -> c.getCustomerName()).orElse("N/A");
 
                         combined.add(OutboundListResponse.builder()
-                                .documentId(t.getTransferId())
-                                .documentCode(t.getTransferCode())
-                                .orderType(OutboundType.INTERNAL_TRANSFER)
-                                .destination(destName)
-                                .status(t.getStatus())
+                                .documentId(so.getSoId())
+                                .documentCode(so.getSoCode())
+                                .orderType(OutboundType.SALES_ORDER)
+                                .destination(destination)
+                                .status(so.getStatus())
                                 .totalItems(items.size())
-                                .createdBy(t.getCreatedBy())
-                                .createdAt(t.getCreatedAt())
-                                .canEdit(isDraft(t.getStatus()) && t.getCreatedBy().equals(currentUserId))
-                                .canDelete(isDraft(t.getStatus()) && t.getCreatedBy().equals(currentUserId))
-                                .canSubmit(isDraft(t.getStatus()) && t.getCreatedBy().equals(currentUserId))
-                                .canApprove(isPending(t.getStatus()) && isManager(currentUserRole))
-                                .canConfirm(isApproved(t.getStatus()) && isKeeper(currentUserRole))
+                                .createdBy(so.getCreatedBy())
+                                .createdAt(so.getCreatedAt())
+                                .shipmentDate(so.getRequiredShipDate())
+                                .canEdit(isDraft(so.getStatus()) && so.getCreatedBy() != null && so.getCreatedBy().equals(currentUserId))
+                                .canDelete(isDraft(so.getStatus()) && so.getCreatedBy() != null && so.getCreatedBy().equals(currentUserId))
+                                .canSubmit(isDraft(so.getStatus()) && so.getCreatedBy() != null && so.getCreatedBy().equals(currentUserId))
+                                .canApprove(isPending(so.getStatus()) && isManager(currentUserRole))
+                                .canConfirm(isApproved(so.getStatus()) && isKeeper(currentUserRole))
                                 .build());
-                    });
+                    } catch (Exception e) {
+                        log.warn("Skip SO {}: {}", so.getSoId(), e.getMessage());
+                    }
+                });
+            }
+
+            // INTERNAL_TRANSFER
+            if (orderType == null || orderType == OutboundType.INTERNAL_TRANSFER) {
+                // Nếu status null → lấy tất cả transfer theo warehouse
+                List<TransferEntity> transfers;
+                if (status == null || status.isBlank()) {
+                    transfers = transferRepository.findAll().stream()
+                            .filter(t -> warehouseId.equals(t.getFromWarehouseId()))
+                            .toList();
+                } else {
+                    transfers = transferRepository.findByFromWarehouseIdAndStatus(warehouseId, status);
+                }
+
+                transfers.stream()
+                        .filter(t -> t.getCreatedAt() != null && t.getCreatedAt().isAfter(effectiveFromDate))
+                        .filter(t -> effectiveKeyword == null || effectiveKeyword.isBlank()
+                                || t.getTransferCode().toLowerCase().contains(effectiveKeyword.toLowerCase()))
+                        .forEach(t -> {
+                            try {
+                                List<?> items = transferItemRepository.findByTransferId(t.getTransferId());
+                                String destName = warehouseRepository.findById(t.getToWarehouseId())
+                                        .map(w -> w.getWarehouseName()).orElse("N/A");
+
+                                combined.add(OutboundListResponse.builder()
+                                        .documentId(t.getTransferId())
+                                        .documentCode(t.getTransferCode())
+                                        .orderType(OutboundType.INTERNAL_TRANSFER)
+                                        .destination(destName)
+                                        .status(t.getStatus())
+                                        .totalItems(items.size())
+                                        .createdBy(t.getCreatedBy())
+                                        .createdAt(t.getCreatedAt())
+                                        .canEdit(isDraft(t.getStatus()) && t.getCreatedBy() != null && t.getCreatedBy().equals(currentUserId))
+                                        .canDelete(isDraft(t.getStatus()) && t.getCreatedBy() != null && t.getCreatedBy().equals(currentUserId))
+                                        .canSubmit(isDraft(t.getStatus()) && t.getCreatedBy() != null && t.getCreatedBy().equals(currentUserId))
+                                        .canApprove(isPending(t.getStatus()) && isManager(currentUserRole))
+                                        .canConfirm(isApproved(t.getStatus()) && isKeeper(currentUserRole))
+                                        .build());
+                            } catch (Exception e) {
+                                log.warn("Skip Transfer {}: {}", t.getTransferId(), e.getMessage());
+                            }
+                        });
+            }
+
+            // Sort null-safe
+            combined.sort((a, b) -> {
+                if (a.getCreatedAt() == null && b.getCreatedAt() == null) return 0;
+                if (a.getCreatedAt() == null) return 1;
+                if (b.getCreatedAt() == null) return -1;
+                return b.getCreatedAt().compareTo(a.getCreatedAt());
+            });
+
+            int total = combined.size();
+            int start = page * size;
+            int end = Math.min(start + size, total);
+            List<OutboundListResponse> pageContent = start >= total ? List.of() : combined.subList(start, end);
+
+            log.info("listOutbound result: total={}, returned={}", total, pageContent.size());
+
+            return ApiResponse.success(
+                    total == 0 ? MessageConstants.OUTBOUND_LIST_EMPTY : MessageConstants.OUTBOUND_LIST_SUCCESS,
+                    PageResponse.<OutboundListResponse>builder()
+                            .content(pageContent)
+                            .page(page).size(size)
+                            .totalElements(total)
+                            .totalPages((int) Math.ceil((double) total / size))
+                            .last(end >= total)
+                            .build());
+
+        } catch (Exception e) {
+            log.error("listOutbound FAILED: warehouseId={}, error={}", warehouseId, e.getMessage(), e);
+            throw e;
         }
-
-        // Sort by createdAt DESC (BR-OUT-24: newest first)
-        combined.sort((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()));
-
-        // Manual pagination
-        int total = combined.size();
-        int start = page * size;
-        int end = Math.min(start + size, total);
-        List<OutboundListResponse> pageContent = start >= total
-                ? List.of() : combined.subList(start, end);
-
-        return ApiResponse.success(
-                total == 0 ? MessageConstants.OUTBOUND_LIST_EMPTY : MessageConstants.OUTBOUND_LIST_SUCCESS,
-                PageResponse.<OutboundListResponse>builder()
-                        .content(pageContent)
-                        .page(page).size(size)
-                        .totalElements(total)
-                        .totalPages((int) Math.ceil((double) total / size))
-                        .last(end >= total)
-                        .build());
     }
 
     @Transactional(readOnly = true)
