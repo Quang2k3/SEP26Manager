@@ -10,6 +10,7 @@ import org.example.sep26management.application.dto.response.ZoneResponse;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.ZoneEntity;
+import org.example.sep26management.infrastructure.persistence.repository.LocationJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.WarehouseJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
 import org.springframework.data.domain.Page;
@@ -27,6 +28,7 @@ public class ZoneService {
 
         private final ZoneJpaRepository zoneRepository;
         private final WarehouseJpaRepository warehouseRepository;
+        private final LocationJpaRepository locationRepository;
         private final AuditLogService auditLogService;
 
         // ─────────────────────────────────────────────────────────────
@@ -114,9 +116,16 @@ public class ZoneService {
                 zone.setActive(false);
                 zoneRepository.save(zone);
 
-                log.info("Zone deactivated: zoneId={}, code={}", zone.getZoneId(), zone.getZoneCode());
+                // Cascade: đóng băng toàn bộ locations thuộc zone này
+                java.util.List<org.example.sep26management.infrastructure.persistence.entity.LocationEntity> locations
+                        = locationRepository.findByZoneId(zoneId);
+                locations.forEach(loc -> loc.setActive(false));
+                locationRepository.saveAll(locations);
 
-                return ApiResponse.success("Zone đã được vô hiệu hóa.", null);
+                log.info("Zone deactivated: zoneId={}, code={}, froze {} locations",
+                        zone.getZoneId(), zone.getZoneCode(), locations.size());
+
+                return ApiResponse.success("Zone và " + locations.size() + " location đã được vô hiệu hóa.", null);
         }
 
         @Transactional
@@ -132,9 +141,16 @@ public class ZoneService {
                 zone.setActive(true);
                 zoneRepository.save(zone);
 
-                log.info("Zone reactivated: zoneId={}, code={}", zone.getZoneId(), zone.getZoneCode());
+                // Cascade: mở lại toàn bộ locations thuộc zone này
+                java.util.List<org.example.sep26management.infrastructure.persistence.entity.LocationEntity> locations
+                        = locationRepository.findByZoneId(zoneId);
+                locations.forEach(loc -> loc.setActive(true));
+                locationRepository.saveAll(locations);
 
-                return ApiResponse.success("Zone đã được mở lại.", null);
+                log.info("Zone reactivated: zoneId={}, code={}, unfroze {} locations",
+                        zone.getZoneId(), zone.getZoneCode(), locations.size());
+
+                return ApiResponse.success("Zone và " + locations.size() + " location đã được mở lại.", null);
         }
 
         private ZoneResponse toResponse(ZoneEntity zone) {
