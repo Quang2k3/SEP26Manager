@@ -12,6 +12,8 @@ import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.ZoneResponse;
 import org.example.sep26management.application.service.ZoneService;
+import org.example.sep26management.infrastructure.persistence.entity.ZoneEntity;
+import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -41,6 +43,7 @@ import java.util.Map;
 public class ZoneController {
 
     private final ZoneService zoneService;
+    private final ZoneJpaRepository zoneRepository;
 
     // ─────────────────────────────────────────────────────────────
     // UC-LOC-01: Create Zone
@@ -71,6 +74,25 @@ public class ZoneController {
 
     // ─────────────────────────────────────────────────────────────
     // List Zones by warehouse
+    @GetMapping("/{zoneId}")
+    @PreAuthorize("hasAnyRole('MANAGER', 'KEEPER')")
+    @Operation(summary = "Chi tiết zone", description = "Lấy thông tin 1 zone theo ID.")
+    public ResponseEntity<ApiResponse<ZoneResponse>> getZone(@PathVariable Long zoneId) {
+        ZoneEntity zone = zoneRepository.findById(zoneId)
+                .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.ResourceNotFoundException(
+                        String.format(org.example.sep26management.application.constants.MessageConstants.ZONE_NOT_FOUND, zoneId)));
+        ZoneResponse resp = ZoneResponse.builder()
+                .zoneId(zone.getZoneId())
+                .warehouseId(zone.getWarehouseId())
+                .zoneCode(zone.getZoneCode())
+                .zoneName(zone.getZoneName())
+                .active(zone.getActive())
+                .createdAt(zone.getCreatedAt())
+                .updatedAt(zone.getUpdatedAt())
+                .build();
+        return ResponseEntity.ok(ApiResponse.success("OK", resp));
+    }
+
     // GET /v1/zones?warehouseId=1&activeOnly=true
     // ─────────────────────────────────────────────────────────────
 
