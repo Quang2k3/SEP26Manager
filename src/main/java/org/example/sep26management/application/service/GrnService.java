@@ -15,9 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -125,6 +123,8 @@ public class GrnService {
             throw new BusinessException("GRN không có dòng hàng nào để nhập kho.");
         }
 
+        // BUG FIX 1: stagingLocationId có thể null nếu warehouse chưa có staging location
+        // -> locationId NOT NULL trong inventory_transactions -> DataIntegrityViolationException
         Long stagingLocationId = getFirstStagingLocation(grn.getWarehouseId());
         if (stagingLocationId == null) {
             throw new BusinessException(
@@ -146,6 +146,7 @@ public class GrnService {
         task = putawayTaskRepo.save(task);
 
         for (GrnItemEntity item : items) {
+            // Match receiving item by SKU + lot + expiry, fallback to SKU only
             ReceivingItemEntity matchedReceivingItem = rcvItems.stream()
                     .filter(r -> r.getSkuId().equals(item.getSkuId())
                             && java.util.Objects.equals(r.getLotNumber(), item.getLotNumber())
@@ -156,6 +157,8 @@ public class GrnService {
                             .findFirst()
                             .orElse(null));
 
+            // BUG FIX 3: recItemId = null -> receiving_item_id NOT NULL violation
+            // Throw BusinessException ro rang thay vi de DB throw constraint error
             if (matchedReceivingItem == null) {
                 throw new BusinessException(
                         "Không tìm thấy receiving item cho SKU " + item.getSkuId()
@@ -185,13 +188,10 @@ public class GrnService {
                 lotId = lot.getLotId();
             }
 
-            // FIX: thêm .lotId(lotId) để ghi đúng lot vào inventory_transactions
-            // Trước đây bỏ sót → DB ghi lotId=null → FEFO query sai
             InventoryTransactionEntity tx = InventoryTransactionEntity.builder()
                     .warehouseId(grn.getWarehouseId())
                     .locationId(stagingLocationId)
                     .skuId(item.getSkuId())
-                    .lotId(lotId)
                     .txnType("RECEIVING")
                     .quantity(item.getQuantity())
                     .referenceTable("GRN")
@@ -240,16 +240,9 @@ public class GrnService {
     @Transactional
     public ApiResponse<GrnResponse> submitToManager(Long grnId) {
         GrnEntity grn = findGrn(grnId);
-        // BUG-04 FIX: GRN mới tạo mang status "GRN_CREATED", không phải "PENDING_APPROVAL"
-        // Guard cũ kiểm tra sai → luôn throw, không submit được
-        if (!"GRN_CREATED".equals(grn.getStatus())) {
-            throw new BusinessException("GRN không ở trạng thái GRN_CREATED: " + grn.getStatus()
-                    + ". Chỉ có thể submit GRN vừa tạo xong.");
+        if (!"PENDING_APPROVAL".equals(grn.getStatus())) {
+            throw new BusinessException("GRN không ở trạng thái PENDING_APPROVAL: " + grn.getStatus());
         }
-        // Cập nhật GRN → PENDING_APPROVAL
-        grn.setStatus("PENDING_APPROVAL");
-        grnRepo.save(grn);
-
         receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
             order.setStatus("PENDING_APPROVAL");
             receivingOrderRepo.save(order);
@@ -272,18 +265,11 @@ public class GrnService {
 
     private GrnResponse toSummaryResponse(GrnEntity grn) {
         List<GrnItemEntity> itemEntities = grnItemRepo.findByGrnGrnId(grn.getGrnId());
-
-        // BUG-06 FIX: Load tất cả SKU cần thiết 1 lần thay vì findById 2 lần cho mỗi item (N+1 query)
-        Set<Long> skuIds = itemEntities.stream()
-                .map(GrnItemEntity::getSkuId)
-                .collect(Collectors.toSet());
-        Map<Long, SkuEntity> skuMap = skuRepo.findAllById(skuIds).stream()
-                .collect(Collectors.toMap(SkuEntity::getSkuId, s -> s));
-
         List<GrnItemResponse> items = itemEntities.stream().map(gi -> {
-            SkuEntity sku = skuMap.get(gi.getSkuId());
-            String skuCode = sku != null ? sku.getSkuCode() : "SKU-" + gi.getSkuId();
-            String skuName = sku != null ? sku.getSkuName() : "";
+            String skuCode = skuRepo.findById(gi.getSkuId())
+                    .map(s -> s.getSkuCode()).orElse("SKU-" + gi.getSkuId());
+            String skuName = skuRepo.findById(gi.getSkuId())
+                    .map(s -> s.getSkuName()).orElse("");
             return GrnItemResponse.builder()
                     .grnItemId(gi.getGrnItemId())
                     .skuId(gi.getSkuId())
