@@ -2,13 +2,11 @@ package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.response.*;
 import org.example.sep26management.application.enums.OutboundType;
 import org.example.sep26management.infrastructure.persistence.entity.SalesOrderEntity;
 import org.example.sep26management.infrastructure.persistence.entity.TransferEntity;
 import org.example.sep26management.infrastructure.persistence.repository.*;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -43,32 +40,22 @@ public class OutboundListService {
             String currentUserRole,
             int page, int size) {
 
+        if (size <= 0) size = 20;
         log.info("listOutbound: warehouseId={}, status={}, orderType={}, page={}", warehouseId, status, orderType, page);
 
-        try {
-            // FIX: Khi không có fromDate filter, lấy từ đầu (không cắt 30 ngày)
-            // Summary đếm từ 30 ngày nhưng list nên hiển thị TẤT CẢ theo mặc định
-            final LocalDateTime effectiveFromDate = fromDate; // null = không filter ngày
-            final LocalDateTime effectiveToDate = toDate;
-            final String effectiveKeyword = keyword;
-            if (size <= 0) size = 20;
+        List<OutboundListResponse> combined = new ArrayList<>();
 
-            List<OutboundListResponse> combined = new ArrayList<>();
+        // ── SALES ORDERS ────────────────────────────────────────────────────────
+        if (orderType == null || orderType == OutboundType.SALES_ORDER) {
+            try {
+                List<SalesOrderEntity> soList = soQueryRepository.searchSalesOrders(
+                        warehouseId, status, createdBy, fromDate, toDate, keyword,
+                        PageRequest.of(0, 1000)).getContent();
 
-            // SALES_ORDER
-            if (orderType == null || orderType == OutboundType.SALES_ORDER) {
-                Page<SalesOrderEntity> soPage = soQueryRepository.searchSalesOrders(
-                        warehouseId, status, createdBy, effectiveFromDate, effectiveToDate, effectiveKeyword,
-                        PageRequest.of(0, 1000));
-
-                soPage.getContent().forEach(so -> {
+                for (SalesOrderEntity so : soList) {
                     try {
-                        List<?> items = soItemRepository.findBySoId(so.getSoId());
-                        // Null-safe: customerId có thể null nếu data không nhất quán
-                        String destination = (so.getCustomerId() != null)
-                                ? customerRepository.findById(so.getCustomerId())
-                                .map(c -> c.getCustomerName()).orElse("Khách hàng #" + so.getCustomerId())
-                                : "N/A";
+                        int itemCount = soItemRepository.findBySoId(so.getSoId()).size();
+                        String destination = resolveCustomerName(so.getCustomerId());
 
                         combined.add(OutboundListResponse.builder()
                                 .documentId(so.getSoId())
@@ -76,151 +63,153 @@ public class OutboundListService {
                                 .orderType(OutboundType.SALES_ORDER)
                                 .destination(destination)
                                 .status(so.getStatus())
-                                .totalItems(items.size())
+                                .warehouseId(so.getWarehouseId())
+                                .totalItems(itemCount)
                                 .createdBy(so.getCreatedBy())
                                 .createdAt(so.getCreatedAt())
                                 .shipmentDate(so.getRequiredShipDate())
-                                .canEdit(isDraft(so.getStatus()) && so.getCreatedBy() != null && so.getCreatedBy().equals(currentUserId))
-                                .canDelete(isDraft(so.getStatus()) && so.getCreatedBy() != null && so.getCreatedBy().equals(currentUserId))
-                                .canSubmit(isDraft(so.getStatus()) && so.getCreatedBy() != null && so.getCreatedBy().equals(currentUserId))
+                                .canEdit(isDraft(so.getStatus()) && owns(so.getCreatedBy(), currentUserId))
+                                .canDelete(isDraft(so.getStatus()) && owns(so.getCreatedBy(), currentUserId))
+                                .canSubmit(isDraft(so.getStatus()) && owns(so.getCreatedBy(), currentUserId))
                                 .canApprove(isPending(so.getStatus()) && isManager(currentUserRole))
-                                .warehouseId(so.getWarehouseId())
                                 .canConfirm(isApproved(so.getStatus()) && isKeeper(currentUserRole))
                                 .build());
                     } catch (Exception e) {
-                        log.warn("Skip SO {}: {}", so.getSoId(), e.getMessage());
+                        log.warn("Skip SO id={}: {}", so.getSoId(), e.getMessage());
                     }
-                });
-            }
-
-            // INTERNAL_TRANSFER
-            if (orderType == null || orderType == OutboundType.INTERNAL_TRANSFER) {
-                // Nếu status null → lấy tất cả transfer theo warehouse
-                List<TransferEntity> transfers;
-                if (status == null || status.isBlank()) {
-                    // FIX: dùng query filter theo warehouseId thay vì findAll()
-                    transfers = (warehouseId != null)
-                            ? transferRepository.findByFromWarehouseIdOrderByCreatedAtDesc(warehouseId)
-                            : transferRepository.findAll();
-                } else {
-                    transfers = (warehouseId != null)
-                            ? transferRepository.findByFromWarehouseIdAndStatus(warehouseId, status)
-                            : transferRepository.findAll().stream()
-                            .filter(t -> status.equals(t.getStatus()))
-                            .collect(java.util.stream.Collectors.toList());
                 }
-
-                transfers.stream()
-                        // Chỉ filter ngày nếu user chọn fromDate
-                        .filter(t -> effectiveFromDate == null || (t.getCreatedAt() != null && t.getCreatedAt().isAfter(effectiveFromDate)))
-                        .filter(t -> effectiveKeyword == null || effectiveKeyword.isBlank()
-                                || t.getTransferCode().toLowerCase().contains(effectiveKeyword.toLowerCase()))
-                        .forEach(t -> {
-                            try {
-                                List<?> items = transferItemRepository.findByTransferId(t.getTransferId());
-                                String destName = warehouseRepository.findById(t.getToWarehouseId())
-                                        .map(w -> w.getWarehouseName()).orElse("N/A");
-
-                                combined.add(OutboundListResponse.builder()
-                                        .documentId(t.getTransferId())
-                                        .documentCode(t.getTransferCode())
-                                        .orderType(OutboundType.INTERNAL_TRANSFER)
-                                        .destination(destName)
-                                        .status(t.getStatus())
-                                        .totalItems(items.size())
-                                        .createdBy(t.getCreatedBy())
-                                        .createdAt(t.getCreatedAt())
-                                        .canEdit(isDraft(t.getStatus()) && t.getCreatedBy() != null && t.getCreatedBy().equals(currentUserId))
-                                        .canDelete(isDraft(t.getStatus()) && t.getCreatedBy() != null && t.getCreatedBy().equals(currentUserId))
-                                        .canSubmit(isDraft(t.getStatus()) && t.getCreatedBy() != null && t.getCreatedBy().equals(currentUserId))
-                                        .canApprove(isPending(t.getStatus()) && isManager(currentUserRole))
-                                        .warehouseId(t.getFromWarehouseId())
-                                        .canConfirm(isApproved(t.getStatus()) && isKeeper(currentUserRole))
-                                        .build());
-                            } catch (Exception e) {
-                                log.warn("Skip Transfer {}: {}", t.getTransferId(), e.getMessage());
-                            }
-                        });
+            } catch (Exception e) {
+                log.error("listOutbound SO query failed: {}", e.getMessage(), e);
             }
-
-            // Sort null-safe
-            combined.sort((a, b) -> {
-                if (a.getCreatedAt() == null && b.getCreatedAt() == null) return 0;
-                if (a.getCreatedAt() == null) return 1;
-                if (b.getCreatedAt() == null) return -1;
-                return b.getCreatedAt().compareTo(a.getCreatedAt());
-            });
-
-            int total = combined.size();
-            int start = page * size;
-            int end = Math.min(start + size, total);
-            List<OutboundListResponse> pageContent = start >= total ? List.of() : combined.subList(start, end);
-
-            log.info("listOutbound result: total={}, returned={}", total, pageContent.size());
-
-            return ApiResponse.success(
-                    total == 0 ? MessageConstants.OUTBOUND_LIST_EMPTY : MessageConstants.OUTBOUND_LIST_SUCCESS,
-                    PageResponse.<OutboundListResponse>builder()
-                            .content(pageContent)
-                            .page(page).size(size)
-                            .totalElements(total)
-                            .totalPages((int) Math.ceil((double) total / size))
-                            .last(end >= total)
-                            .build());
-
-        } catch (Exception e) {
-            log.error("listOutbound FAILED: warehouseId={}, error={}", warehouseId, e.getMessage(), e);
-            throw e;
         }
+
+        // ── INTERNAL TRANSFERS ──────────────────────────────────────────────────
+        if (orderType == null || orderType == OutboundType.INTERNAL_TRANSFER) {
+            try {
+                List<TransferEntity> transfers = (warehouseId != null)
+                        ? (status == null || status.isBlank()
+                        ? transferRepository.findByFromWarehouseIdOrderByCreatedAtDesc(warehouseId)
+                        : transferRepository.findByFromWarehouseIdAndStatus(warehouseId, status))
+                        : transferRepository.findAll();
+
+                for (TransferEntity t : transfers) {
+                    try {
+                        // Apply keyword filter
+                        if (keyword != null && !keyword.isBlank()
+                                && !t.getTransferCode().toLowerCase().contains(keyword.toLowerCase())) continue;
+                        // Apply status filter for null-warehouseId path
+                        if (warehouseId == null && status != null && !status.isBlank()
+                                && !status.equals(t.getStatus())) continue;
+
+                        int itemCount = transferItemRepository.findByTransferId(t.getTransferId()).size();
+                        String destName = (t.getToWarehouseId() != null)
+                                ? warehouseRepository.findById(t.getToWarehouseId())
+                                .map(w -> w.getWarehouseName()).orElse("N/A")
+                                : "N/A";
+
+                        combined.add(OutboundListResponse.builder()
+                                .documentId(t.getTransferId())
+                                .documentCode(t.getTransferCode())
+                                .orderType(OutboundType.INTERNAL_TRANSFER)
+                                .destination(destName)
+                                .status(t.getStatus())
+                                .warehouseId(t.getFromWarehouseId())
+                                .totalItems(itemCount)
+                                .createdBy(t.getCreatedBy())
+                                .createdAt(t.getCreatedAt())
+                                .canEdit(isDraft(t.getStatus()) && owns(t.getCreatedBy(), currentUserId))
+                                .canDelete(isDraft(t.getStatus()) && owns(t.getCreatedBy(), currentUserId))
+                                .canSubmit(isDraft(t.getStatus()) && owns(t.getCreatedBy(), currentUserId))
+                                .canApprove(isPending(t.getStatus()) && isManager(currentUserRole))
+                                .canConfirm(isApproved(t.getStatus()) && isKeeper(currentUserRole))
+                                .build());
+                    } catch (Exception e) {
+                        log.warn("Skip Transfer id={}: {}", t.getTransferId(), e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                log.error("listOutbound Transfer query failed: {}", e.getMessage(), e);
+            }
+        }
+
+        // ── Sort + Paginate ─────────────────────────────────────────────────────
+        combined.sort((a, b) -> {
+            if (a.getCreatedAt() == null) return 1;
+            if (b.getCreatedAt() == null) return -1;
+            return b.getCreatedAt().compareTo(a.getCreatedAt());
+        });
+
+        int total = combined.size();
+        int start = Math.min(page * size, total);
+        int end   = Math.min(start + size, total);
+        List<OutboundListResponse> pageContent = combined.subList(start, end);
+
+        log.info("listOutbound OK: total={}, page={}, returned={}", total, page, pageContent.size());
+
+        return ApiResponse.success(
+                total == 0 ? "Không có lệnh xuất kho nào." : "Danh sách lệnh xuất kho.",
+                PageResponse.<OutboundListResponse>builder()
+                        .content(pageContent)
+                        .page(page)
+                        .size(size)
+                        .totalElements(total)
+                        .totalPages(size > 0 ? (int) Math.ceil((double) total / size) : 0)
+                        .last(end >= total)
+                        .build());
     }
 
+    // ── Summary ─────────────────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public ApiResponse<OutboundSummaryResponse> getSummary(Long warehouseId) {
-        // Summary cards: count all-time (không giới hạn 30 ngày)
-        // warehouseId null → MANAGER xem tất cả → dùng countByStatusAllTime(null, ...)
-        // Nhưng countByStatusAllTime không có null-safe warehouseId → fallback to 0 safely
-        try {
-            long draft         = safeCount(warehouseId, "DRAFT");
-            long pending       = safeCount(warehouseId, "PENDING_APPROVAL");
-            long approved      = safeCount(warehouseId, "APPROVED");
-            long allocated     = safeCount(warehouseId, "ALLOCATED");
-            long picking       = safeCount(warehouseId, "PICKING");
-            long qcScan        = safeCount(warehouseId, "QC_SCAN");
-            long dispatched    = safeCount(warehouseId, "DISPATCHED");
-            long rejected      = safeCount(warehouseId, "REJECTED");
-            long total = draft + pending + approved + allocated + picking + qcScan + dispatched + rejected;
+        long draft      = safeCount(warehouseId, "DRAFT");
+        long pending    = safeCount(warehouseId, "PENDING_APPROVAL");
+        long approved   = safeCount(warehouseId, "APPROVED");
+        long allocated  = safeCount(warehouseId, "ALLOCATED");
+        long picking    = safeCount(warehouseId, "PICKING");
+        long qcScan     = safeCount(warehouseId, "QC_SCAN");
+        long dispatched = safeCount(warehouseId, "DISPATCHED");
+        long rejected   = safeCount(warehouseId, "REJECTED");
 
-            return ApiResponse.success("Summary loaded", OutboundSummaryResponse.builder()
-                    .total(total)
-                    .draft(draft)
-                    .pendingApproval(pending)
-                    .approved(approved)
-                    .allocated(allocated)
-                    .picking(picking)
-                    .qcScan(qcScan)
-                    .dispatched(dispatched)
-                    .rejected(rejected)
-                    .build());
+        return ApiResponse.success("OK", OutboundSummaryResponse.builder()
+                .total(draft + pending + approved + allocated + picking + qcScan + dispatched + rejected)
+                .draft(draft)
+                .pendingApproval(pending)
+                .approved(approved)
+                .allocated(allocated)
+                .picking(picking)
+                .qcScan(qcScan)
+                .dispatched(dispatched)
+                .rejected(rejected)
+                .build());
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────────
+    private String resolveCustomerName(Long customerId) {
+        if (customerId == null) return "N/A";
+        try {
+            return customerRepository.findById(customerId)
+                    .map(c -> c.getCustomerName())
+                    .orElse("Khách hàng #" + customerId);
         } catch (Exception e) {
-            log.error("getSummary failed: warehouseId={}, error={}", warehouseId, e.getMessage());
-            return ApiResponse.success("Summary loaded", OutboundSummaryResponse.builder().build());
+            return "Khách hàng #" + customerId;
         }
     }
 
-    /** Count SO by status, null-safe for warehouseId */
     private long safeCount(Long warehouseId, String status) {
         try {
-            if (warehouseId == null) return 0L; // MANAGER without warehouse: skip SO count
             return soQueryRepository.countByStatusAllTime(warehouseId, status);
         } catch (Exception e) {
-            log.warn("safeCount failed for status={}: {}", status, e.getMessage());
+            log.warn("safeCount({}, {}) failed: {}", warehouseId, status, e.getMessage());
             return 0L;
         }
     }
 
-    private boolean isDraft(String s) { return "DRAFT".equals(s); }
+    private boolean isDraft(String s)   { return "DRAFT".equals(s); }
     private boolean isPending(String s) { return "PENDING_APPROVAL".equals(s); }
-    private boolean isApproved(String s) { return "APPROVED".equals(s); }
-    private boolean isManager(String role) { return "MANAGER".equals(role) || "ROLE_MANAGER".equals(role); }
-    private boolean isKeeper(String role) { return "KEEPER".equals(role) || "ROLE_KEEPER".equals(role); }
+    private boolean isApproved(String s){ return "APPROVED".equals(s); }
+    private boolean owns(Long creator, Long currentUser) {
+        return creator != null && creator.equals(currentUser);
+    }
+    private boolean isManager(String r) { return "MANAGER".equals(r) || "ROLE_MANAGER".equals(r); }
+    private boolean isKeeper(String r)  { return "KEEPER".equals(r)  || "ROLE_KEEPER".equals(r);  }
 }
