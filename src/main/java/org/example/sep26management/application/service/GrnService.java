@@ -15,7 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -272,11 +274,18 @@ public class GrnService {
 
     private GrnResponse toSummaryResponse(GrnEntity grn) {
         List<GrnItemEntity> itemEntities = grnItemRepo.findByGrnGrnId(grn.getGrnId());
+
+        // BUG-06 FIX: Load tất cả SKU cần thiết 1 lần thay vì findById 2 lần cho mỗi item (N+1 query)
+        Set<Long> skuIds = itemEntities.stream()
+                .map(GrnItemEntity::getSkuId)
+                .collect(Collectors.toSet());
+        Map<Long, SkuEntity> skuMap = skuRepo.findAllById(skuIds).stream()
+                .collect(Collectors.toMap(SkuEntity::getSkuId, s -> s));
+
         List<GrnItemResponse> items = itemEntities.stream().map(gi -> {
-            String skuCode = skuRepo.findById(gi.getSkuId())
-                    .map(s -> s.getSkuCode()).orElse("SKU-" + gi.getSkuId());
-            String skuName = skuRepo.findById(gi.getSkuId())
-                    .map(s -> s.getSkuName()).orElse("");
+            SkuEntity sku = skuMap.get(gi.getSkuId());
+            String skuCode = sku != null ? sku.getSkuCode() : "SKU-" + gi.getSkuId();
+            String skuName = sku != null ? sku.getSkuName() : "";
             return GrnItemResponse.builder()
                     .grnItemId(gi.getGrnItemId())
                     .skuId(gi.getSkuId())
