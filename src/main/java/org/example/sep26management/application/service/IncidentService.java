@@ -87,7 +87,7 @@ public class IncidentService {
 
     @Transactional(readOnly = true)
     public ApiResponse<PageResponse<IncidentResponse>> listIncidents(String status,
-            org.example.sep26management.application.enums.IncidentCategory category, int page, int size) {
+                                                                     org.example.sep26management.application.enums.IncidentCategory category, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<IncidentEntity> incidentsPage;
 
@@ -172,7 +172,7 @@ public class IncidentService {
 
     @Transactional
     public ApiResponse<IncidentResponse> resolveIncident(Long id,
-            org.example.sep26management.application.dto.request.ResolveIncidentRequest request, Long managerId) {
+                                                         org.example.sep26management.application.dto.request.ResolveIncidentRequest request, Long managerId) {
         IncidentEntity incident = incidentRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("Incident not found: " + id));
 
@@ -207,7 +207,7 @@ public class IncidentService {
                 // Cập nhật lại note/reason cho item dựa trên phán quyết của manager
                 item.setNote(item.getNote() != null
                         ? item.getNote() + " | [Manager Decision]: " + res.getAction() + " (Qty: " + res.getQuantity()
-                                + ")"
+                        + ")"
                         : "[Manager Decision]: " + res.getAction() + " (Qty: " + res.getQuantity() + ")");
                 incidentItemRepo.save(item);
             }
@@ -228,8 +228,8 @@ public class IncidentService {
 
     @Transactional
     public ApiResponse<IncidentResponse> resolveDiscrepancy(Long id,
-            org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest request,
-            Long managerId) {
+                                                            org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest request,
+                                                            Long managerId) {
         IncidentEntity incident = incidentRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("Incident not found: " + id));
 
@@ -240,7 +240,7 @@ public class IncidentService {
 
         if (!org.example.sep26management.application.enums.IncidentType.SHORTAGE.equals(incident.getIncidentType())
                 && !org.example.sep26management.application.enums.IncidentType.OVERAGE
-                        .equals(incident.getIncidentType())) {
+                .equals(incident.getIncidentType())) {
             throw new RuntimeException(
                     "This API is only for resolving quantity discrepancy incidents (SHORTAGE/OVERAGE).");
         }
@@ -318,7 +318,7 @@ public class IncidentService {
             incidentItemRepo.save(incItem);
         }
 
-        // Resolve incident and move order to SUBMITTED for QC
+        // Resolve incident and move order — BE-C3 FIX: chỉ chuyển SUBMITTED nếu KHÔNG có WAIT_BACKORDER
         incident.setStatus("RESOLVED");
         if (request.getNote() != null && !request.getNote().isBlank()) {
             incident.setDescription(
@@ -326,7 +326,18 @@ public class IncidentService {
         }
         incidentRepo.save(incident);
 
-        order.setStatus("SUBMITTED");
+        if (hasWaitBackorder) {
+            // BE-C3 FIX: Còn item đang chờ giao bù → giữ PENDING_INCIDENT, không QC approve vội
+            // Order sẽ chuyển SUBMITTED khi supplier giao bù và Keeper scan lại
+            order.setStatus("PENDING_INCIDENT");
+            log.info("Discrepancy Incident {} resolved with WAIT_BACKORDER — order stays PENDING_INCIDENT (receivingId={})",
+                    incident.getIncidentCode(), order.getReceivingId());
+        } else {
+            // Tất cả item đã xử lý dứt điểm (CLOSE_SHORT / ACCEPT / RETURN) → cho QC tiếp tục
+            order.setStatus("SUBMITTED");
+            log.info("Discrepancy Incident {} fully resolved — order moved to SUBMITTED (receivingId={})",
+                    incident.getIncidentCode(), order.getReceivingId());
+        }
         receivingOrderRepo.save(order);
 
         log.info("Discrepancy Incident {} resolved by managerId={}, hasWaitBackorder={}",

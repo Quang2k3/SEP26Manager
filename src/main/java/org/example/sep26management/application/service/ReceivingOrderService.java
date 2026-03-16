@@ -139,8 +139,8 @@ public class ReceivingOrderService {
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> updateDraftOrder(Long id,
-                        org.example.sep26management.application.dto.request.ReceivingOrderRequest request,
-                        Long userId) {
+                                                                    org.example.sep26management.application.dto.request.ReceivingOrderRequest request,
+                                                                    Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
                 if (!"DRAFT".equals(order.getStatus())) {
                         throw new org.example.sep26management.infrastructure.exception.BusinessException(
@@ -578,18 +578,25 @@ public class ReceivingOrderService {
                         "hasFailItems", hasFailItems));
         }
 
-        // ─── Approve ───────────────────────────────────────────────────────────────
+        // ─── Approve (deprecated — đã chuyển sang GRN flow) ──────────────────────────
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> approve(Long id, Long managerId) {
-                throw new UnsupportedOperationException("Approve operation has been moved to GRN flow");
+                // BE-C4 FIX: Đổi UnsupportedOperationException → BusinessException (HTTP 400)
+                // để GlobalExceptionHandler trả đúng status code thay vì 500
+                throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                        "Thao tác approve đã chuyển sang luồng GRN. "
+                                + "Vui lòng dùng: POST /v1/grns/{grnId}/approve");
         }
 
-        // ─── Reject ────────────────────────────────────────────────────────────────
+        // ─── Reject (deprecated — đã chuyển sang GRN flow) ───────────────────────────
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> reject(Long id, String reason, Long userId) {
-                throw new UnsupportedOperationException("Reject operation has been moved to GRN flow");
+                // BE-C4 FIX: Đổi UnsupportedOperationException → BusinessException (HTTP 400)
+                throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                        "Thao tác reject đã chuyển sang luồng GRN. "
+                                + "Vui lòng dùng: POST /v1/grns/{grnId}/reject");
         }
 
         // ─── Generate GRN ──────────────────────────────────────────────────────────
@@ -601,8 +608,20 @@ public class ReceivingOrderService {
 
                 if (!"QC_APPROVED".equals(order.getStatus())) {
                         throw new org.example.sep26management.infrastructure.exception.BusinessException(
-                                "Can only generate GRN from QC_APPROVED Receiving Order. Current status: "
+                                "Chỉ có thể tạo GRN từ Phiếu nhận hàng đã QC_APPROVED. Trạng thái hiện tại: "
                                         + order.getStatus());
+                }
+
+                // BE-C2 FIX: Guard chống tạo GRN trùng — mỗi receivingId chỉ được có 1 GRN active
+                List<GrnEntity> existingGrns = grnRepo.findByReceivingIdOrderByCreatedAtDesc(id);
+                boolean hasActiveGrn = existingGrns.stream()
+                        .anyMatch(g -> !"REJECTED".equals(g.getStatus()));
+                if (hasActiveGrn) {
+                        GrnEntity latestGrn = existingGrns.get(0);
+                        throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                                "Phiếu nhận hàng này đã có GRN (mã: " + latestGrn.getGrnCode()
+                                        + ", trạng thái: " + latestGrn.getStatus()
+                                        + "). Không thể tạo thêm GRN.");
                 }
 
                 // Kiểm tra xem có Incident nào chưa RESOLVED không
@@ -611,7 +630,7 @@ public class ReceivingOrderService {
                         .anyMatch(i -> "OPEN".equals(i.getStatus()) || "APPROVED".equals(i.getStatus()));
                 if (hasUnsettled) {
                         throw new org.example.sep26management.infrastructure.exception.BusinessException(
-                                "Cannot generate GRN: there are unsettled incidents.");
+                                "Không thể tạo GRN: vẫn còn sự cố chưa được xử lý.");
                 }
 
                 // Tính toán số lượng GRN (Pass/Nhập kho) cho từng SKU
@@ -659,7 +678,10 @@ public class ReceivingOrderService {
                         .sourceType(order.getSourceType())
                         .supplierId(order.getSupplierId())
                         .sourceReferenceCode(order.getSourceReferenceCode())
-                        .status("PENDING_APPROVAL")
+                        // BE-C1 FIX: GRN_CREATED là trạng thái ban đầu — Keeper phải gọi
+                        // submitToManager() để chuyển lên PENDING_APPROVAL cho Manager duyệt.
+                        // Trước đây set PENDING_APPROVAL ngay → submitToManager() luôn fail (BUG-04 context).
+                        .status("GRN_CREATED")
                         .createdBy(userId)
                         .build();
                 GrnEntity savedGrn = grnRepo.save(grn);
@@ -767,11 +789,14 @@ public class ReceivingOrderService {
                         grnResponse);
         }
 
-        // ─── Post ──────────────────────────────────────────────────────────────────
+        // ─── Post (deprecated — đã chuyển sang GRN flow) ──────────────────────────
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> post(Long id, Long accountantId) {
-                throw new UnsupportedOperationException("Post operation has been moved to GRN flow");
+                // BE-C4 FIX: Đổi UnsupportedOperationException → BusinessException (HTTP 400)
+                throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                        "Thao tác post đã chuyển sang luồng GRN. "
+                                + "Vui lòng dùng: POST /v1/grns/{grnId}/post");
         }
 
         // ─── Private helpers ───────────────────────────────────────────────────────
