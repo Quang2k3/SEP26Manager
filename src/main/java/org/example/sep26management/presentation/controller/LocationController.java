@@ -113,6 +113,19 @@ public class LocationController {
     // ─────────────────────────────────────────────────────────────
     // SCRUM-276: View Location List (UC-LOC-05)
     // GET
+    @PatchMapping("/{locationId}/reactivate")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Mở lại location (Manager)", description = "Kích hoạt lại location đã bị vô hiệu hóa. Zone cha phải đang active.")
+    public ResponseEntity<ApiResponse<Void>> reactivateLocation(
+            @PathVariable Long locationId,
+            HttpServletRequest httpRequest) {
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(locationService.reactivateLocation(
+                locationId, userId,
+                getClientIp(httpRequest),
+                httpRequest.getHeader("User-Agent")));
+    }
+
     // /v1/locations?warehouseId=1&zoneId=2&locationType=BIN&active=true&keyword=A01&page=0&size=20
     // ─────────────────────────────────────────────────────────────
 
