@@ -10,14 +10,10 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 
-/**
- * UC-OUT-06: View Outbound List queries
- * BR-OUT-24: default last 30 days
- * BR-OUT-25: 20 per page
- */
 @Repository
 public interface OutboundQueryRepository extends JpaRepository<SalesOrderEntity, Long> {
 
+    // ── List query — null-safe warehouseId (MANAGER có thể không có warehouse) ──
     @Query("""
             SELECT s FROM SalesOrderEntity s
             WHERE (:warehouseId IS NULL OR s.warehouseId = :warehouseId)
@@ -38,34 +34,7 @@ public interface OutboundQueryRepository extends JpaRepository<SalesOrderEntity,
             @Param("keyword") String keyword,
             Pageable pageable);
 
-    @Query("SELECT COUNT(s) FROM SalesOrderEntity s WHERE (:wh IS NULL OR s.warehouseId = :wh) AND s.createdAt >= :from")
-    long countTotal(@Param("wh") Long wh, @Param("from") LocalDateTime from);
-
-    @Query("SELECT COUNT(s) FROM SalesOrderEntity s WHERE (:wh IS NULL OR s.warehouseId = :wh) AND s.status = :status AND s.createdAt >= :from")
-    long countByStatus(@Param("wh") Long wh, @Param("status") String status, @Param("from") LocalDateTime from);
-
-    /**
-     * Fix: dùng range comparison thay vì DATE() function
-     * Hibernate không so sánh được LocalDateTime với java.sql.Date (CURRENT_DATE)
-     */
-    @Query("""
-        SELECT COUNT(s) FROM SalesOrderEntity s
-        WHERE s.warehouseId = :wh
-          AND s.status = 'CONFIRMED'
-          AND s.updatedAt >= :startOfDay
-          AND s.updatedAt < :endOfDay
-    """)
-    long countConfirmedToday(
-            @Param("wh") Long wh,
-            @Param("startOfDay") LocalDateTime startOfDay,
-            @Param("endOfDay") LocalDateTime endOfDay);
-
-    @Query("""
-        SELECT COUNT(s) FROM SalesOrderEntity s
-        WHERE (:wh IS NULL OR s.warehouseId = :wh)
-          AND s.status = :status
-    """)
-    long countByStatusAllTime(
-            @Param("wh") Long wh,
-            @Param("status") String status);
+    // ── Summary count queries — null-safe warehouseId ──────────────────────────
+    @Query("SELECT COUNT(s) FROM SalesOrderEntity s WHERE (:wh IS NULL OR s.warehouseId = :wh) AND s.status = :status")
+    long countByStatusAllTime(@Param("wh") Long wh, @Param("status") String status);
 }
