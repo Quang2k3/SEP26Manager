@@ -135,11 +135,10 @@ public class GrnService {
         List<ReceivingItemEntity> rcvItems =
                 receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
 
-        // FIX: bỏ .grnId() vì cột grn_id không tồn tại trong bảng putaway_tasks (schema)
-        // → DataIntegrityViolationException → HTTP 500
         PutawayTaskEntity task = PutawayTaskEntity.builder()
                 .warehouseId(grn.getWarehouseId())
                 .receivingId(grn.getReceivingId())
+                .grnId(grn.getGrnId())
                 .fromLocationId(stagingLocationId)
                 .status("PENDING")
                 .createdBy(userId)
