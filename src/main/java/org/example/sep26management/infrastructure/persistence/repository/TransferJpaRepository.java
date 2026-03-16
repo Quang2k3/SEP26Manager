@@ -14,7 +14,6 @@ public interface TransferJpaRepository extends JpaRepository<TransferEntity, Lon
 
     boolean existsByTransferCode(String transferCode);
 
-    /** Count today's transfers for document code — BR-OUT-05 */
     @Query("""
         SELECT COUNT(t) FROM TransferEntity t
         WHERE t.createdAt >= :startOfDay
@@ -24,11 +23,9 @@ public interface TransferJpaRepository extends JpaRepository<TransferEntity, Lon
     long countTodayByWarehouse(
             @Param("warehouseId") Long warehouseId,
             @Param("startOfDay") LocalDateTime startOfDay,
-            @Param("endOfDay") LocalDateTime endOfDay
-    );
+            @Param("endOfDay") LocalDateTime endOfDay);
 
     List<TransferEntity> findByFromWarehouseIdAndStatus(Long warehouseId, String status);
 
-    /** List all transfers for a warehouse (any status) */
     List<TransferEntity> findByFromWarehouseIdOrderByCreatedAtDesc(Long warehouseId);
 }
