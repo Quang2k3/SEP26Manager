@@ -316,9 +316,9 @@ public class OutboundService {
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
 
-        validateSufficientStock(so.getWarehouseId(), items.stream()
-                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
-                .toList());
+        // NOTE: Không check tồn kho tại đây.
+        // Submit chỉ chuyển DRAFT → PENDING_APPROVAL để Manager xem xét.
+        // Tồn kho sẽ được kiểm tra và khoá tại bước Allocate (sau khi Manager duyệt).
 
         if (req.getNote() != null) so.setNote(req.getNote());
         so.setStatus("PENDING_APPROVAL");
@@ -349,9 +349,7 @@ public class OutboundService {
 
         List<TransferItemEntity> items = transferItemRepository.findByTransferId(transferId);
 
-        validateSufficientStock(transfer.getFromWarehouseId(), items.stream()
-                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
-                .toList());
+        // NOTE: Không check tồn kho tại đây — check ở bước Allocate.
 
         if (req.getNote() != null) transfer.setNote(req.getNote());
 
