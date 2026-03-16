@@ -36,43 +36,43 @@ public class ZoneService {
 
         @Transactional
         public ApiResponse<ZoneResponse> createZone(
-                        CreateZoneRequest request,
-                        Long warehouseId,
-                        Long createdBy,
-                        String ipAddress,
-                        String userAgent) {
+                CreateZoneRequest request,
+                Long warehouseId,
+                Long createdBy,
+                String ipAddress,
+                String userAgent) {
 
                 log.info("Creating zone: code={}, warehouse={}", request.getZoneCode(), warehouseId);
 
                 // Validate warehouse exists
                 warehouseRepository.findById(warehouseId)
-                                .orElseThrow(() -> new ResourceNotFoundException(
-                                                String.format(MessageConstants.WAREHOUSE_NOT_FOUND,
-                                                                warehouseId)));
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                String.format(MessageConstants.WAREHOUSE_NOT_FOUND,
+                                        warehouseId)));
 
                 // BR-LOC-01: Duplicate zone code check within warehouse
                 String zoneCode = request.getZoneCode().toUpperCase().trim();
                 if (zoneRepository.existsByWarehouseIdAndZoneCode(warehouseId, zoneCode)) {
                         throw new BusinessException(
-                                        String.format(MessageConstants.ZONE_CODE_DUPLICATE, zoneCode));
+                                String.format(MessageConstants.ZONE_CODE_DUPLICATE, zoneCode));
                 }
 
                 ZoneEntity zone = ZoneEntity.builder()
-                                .warehouseId(warehouseId)
-                                .zoneCode(zoneCode)
-                                .zoneName(request.getZoneName() != null ? request.getZoneName().trim() : null)
-                                .active(true)
-                                .build();
+                        .warehouseId(warehouseId)
+                        .zoneCode(zoneCode)
+                        .zoneName(request.getZoneName() != null ? request.getZoneName().trim() : null)
+                        .active(true)
+                        .build();
 
                 ZoneEntity saved = zoneRepository.save(zone);
 
                 log.info("Zone created: zoneId={}, code={}", saved.getZoneId(), saved.getZoneCode());
 
                 auditLogService.logAction(
-                                createdBy, "ZONE_CREATED", "ZONE", saved.getZoneId(),
-                                String.format("Zone %s created in warehouse %d", saved.getZoneCode(),
-                                                warehouseId),
-                                ipAddress, userAgent);
+                        createdBy, "ZONE_CREATED", "ZONE", saved.getZoneId(),
+                        String.format("Zone %s created in warehouse %d", saved.getZoneCode(),
+                                warehouseId),
+                        ipAddress, userAgent);
 
                 return ApiResponse.success(MessageConstants.ZONE_CREATED_SUCCESS, toResponse(saved));
         }
@@ -80,33 +80,54 @@ public class ZoneService {
         // List zones by warehouse
         @Transactional(readOnly = true)
         public ApiResponse<PageResponse<ZoneResponse>> listZones(Long warehouseId, Boolean activeOnly, int page,
-                        int size) {
+                                                                 int size) {
                 Pageable pageable = PageRequest.of(page, size);
                 Page<ZoneEntity> zonesPage = Boolean.TRUE.equals(activeOnly)
-                                ? zoneRepository.findByWarehouseIdAndActiveTrue(warehouseId, pageable)
-                                : zoneRepository.findByWarehouseId(warehouseId, pageable);
+                        ? zoneRepository.findByWarehouseIdAndActiveTrue(warehouseId, pageable)
+                        : zoneRepository.findByWarehouseId(warehouseId, pageable);
 
                 List<ZoneResponse> content = zonesPage.getContent().stream().map(this::toResponse).toList();
                 PageResponse<ZoneResponse> pageResponse = PageResponse.<ZoneResponse>builder()
-                                .content(content)
-                                .page(zonesPage.getNumber())
-                                .size(zonesPage.getSize())
-                                .totalElements(zonesPage.getTotalElements())
-                                .totalPages(zonesPage.getTotalPages())
-                                .last(zonesPage.isLast())
-                                .build();
+                        .content(content)
+                        .page(zonesPage.getNumber())
+                        .size(zonesPage.getSize())
+                        .totalElements(zonesPage.getTotalElements())
+                        .totalPages(zonesPage.getTotalPages())
+                        .last(zonesPage.isLast())
+                        .build();
                 return ApiResponse.success("Zones retrieved", pageResponse);
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // Deactivate Zone
+        // ─────────────────────────────────────────────────────────────
+        @Transactional
+        public ApiResponse<Void> deactivateZone(Long zoneId) {
+                ZoneEntity zone = zoneRepository.findById(zoneId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                String.format(MessageConstants.ZONE_NOT_FOUND, zoneId)));
+
+                if (!Boolean.TRUE.equals(zone.getActive())) {
+                        throw new BusinessException("Zone đã bị vô hiệu hóa trước đó.");
+                }
+
+                zone.setActive(false);
+                zoneRepository.save(zone);
+
+                log.info("Zone deactivated: zoneId={}, code={}", zone.getZoneId(), zone.getZoneCode());
+
+                return ApiResponse.success("Zone đã được vô hiệu hóa.", null);
         }
 
         private ZoneResponse toResponse(ZoneEntity zone) {
                 return ZoneResponse.builder()
-                                .zoneId(zone.getZoneId())
-                                .warehouseId(zone.getWarehouseId())
-                                .zoneCode(zone.getZoneCode())
-                                .zoneName(zone.getZoneName())
-                                .active(zone.getActive())
-                                .createdAt(zone.getCreatedAt())
-                                .updatedAt(zone.getUpdatedAt())
-                                .build();
+                        .zoneId(zone.getZoneId())
+                        .warehouseId(zone.getWarehouseId())
+                        .zoneCode(zone.getZoneCode())
+                        .zoneName(zone.getZoneName())
+                        .active(zone.getActive())
+                        .createdAt(zone.getCreatedAt())
+                        .updatedAt(zone.getUpdatedAt())
+                        .build();
         }
 }

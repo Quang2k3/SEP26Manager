@@ -92,6 +92,18 @@ public class ZoneController {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Deactivate Zone — PATCH /v1/zones/{zoneId}/deactivate
+    // ─────────────────────────────────────────────────────────────
+
+    @PatchMapping("/{zoneId}/deactivate")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Vô hiệu hóa zone (Manager)",
+            description = "Vô hiệu hóa zone. Zone bị vô hiệu sẽ không xuất hiện trong putaway suggestion.")
+    public ResponseEntity<ApiResponse<Void>> deactivateZone(@PathVariable Long zoneId) {
+        return ResponseEntity.ok(zoneService.deactivateZone(zoneId));
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
 
