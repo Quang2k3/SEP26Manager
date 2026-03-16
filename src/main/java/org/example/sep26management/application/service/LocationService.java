@@ -210,6 +210,45 @@ public class LocationService {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Reactivate Location
+    // ─────────────────────────────────────────────────────────────
+    @Transactional
+    public ApiResponse<Void> reactivateLocation(
+            Long locationId,
+            Long reactivatedBy,
+            String ipAddress,
+            String userAgent) {
+
+        log.info("Reactivating location: locationId={}", locationId);
+
+        LocationEntity location = locationRepository.findById(locationId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.LOCATION_NOT_FOUND, locationId)));
+
+        if (Boolean.TRUE.equals(location.getActive())) {
+            throw new BusinessException(MessageConstants.LOCATION_ALREADY_ACTIVE);
+        }
+
+        // Kiểm tra zone cha còn active không
+        var zone = zoneRepository.findById(location.getZoneId()).orElse(null);
+        if (zone != null && !Boolean.TRUE.equals(zone.getActive())) {
+            throw new BusinessException("Không thể mở lại location vì zone '" + zone.getZoneCode() + "' đang bị vô hiệu hóa.");
+        }
+
+        location.setActive(true);
+        locationRepository.save(location);
+
+        log.info("Location reactivated: locationId={}, code={}", locationId, location.getLocationCode());
+
+        auditLogService.logAction(
+                reactivatedBy, "LOCATION_REACTIVATED", "LOCATION", locationId,
+                String.format("Location %s reactivated", location.getLocationCode()),
+                ipAddress, userAgent);
+
+        return ApiResponse.success(MessageConstants.LOCATION_REACTIVATED_SUCCESS, null);
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // UC-LOC-05: List Locations
     //
     // ─────────────────────────────────────────────────────────────

@@ -119,6 +119,24 @@ public class ZoneService {
                 return ApiResponse.success("Zone đã được vô hiệu hóa.", null);
         }
 
+        @Transactional
+        public ApiResponse<Void> reactivateZone(Long zoneId) {
+                ZoneEntity zone = zoneRepository.findById(zoneId)
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                String.format(MessageConstants.ZONE_NOT_FOUND, zoneId)));
+
+                if (Boolean.TRUE.equals(zone.getActive())) {
+                        throw new BusinessException("Zone đang hoạt động, không cần mở lại.");
+                }
+
+                zone.setActive(true);
+                zoneRepository.save(zone);
+
+                log.info("Zone reactivated: zoneId={}, code={}", zone.getZoneId(), zone.getZoneCode());
+
+                return ApiResponse.success("Zone đã được mở lại.", null);
+        }
+
         private ZoneResponse toResponse(ZoneEntity zone) {
                 return ZoneResponse.builder()
                         .zoneId(zone.getZoneId())

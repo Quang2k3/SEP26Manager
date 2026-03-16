@@ -103,6 +103,13 @@ public class ZoneController {
         return ResponseEntity.ok(zoneService.deactivateZone(zoneId));
     }
 
+    @PatchMapping("/{zoneId}/reactivate")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Mở lại zone (Manager)", description = "Kích hoạt lại zone đã bị vô hiệu hóa.")
+    public ResponseEntity<ApiResponse<Void>> reactivateZone(@PathVariable Long zoneId) {
+        return ResponseEntity.ok(zoneService.reactivateZone(zoneId));
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────

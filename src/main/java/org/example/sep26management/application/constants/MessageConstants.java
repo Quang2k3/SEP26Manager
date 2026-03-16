@@ -142,6 +142,8 @@ public final class MessageConstants {
     public static final String LOCATION_CODE_DUPLICATE         = "Location Code '%s' already exists in this zone.";
     public static final String LOCATION_ZONE_INACTIVE          = "Cannot create location under an inactive zone.";
     public static final String LOCATION_ALREADY_INACTIVE       = "Location is already inactive.";
+    public static final String LOCATION_ALREADY_ACTIVE         = "Location đang hoạt động, không cần mở lại.";
+    public static final String LOCATION_REACTIVATED_SUCCESS    = "Location đã được mở lại thành công.";
     public static final String LOCATION_HAS_INVENTORY          = "Cannot deactivate location: it still contains inventory.";
     public static final String LOCATION_HAS_ACTIVE_CHILDREN    = "Cannot deactivate location: it has active child locations. Deactivate children first.";
     public static final String LOCATION_CAPACITY_BELOW_CURRENT = "New capacity cannot be less than current occupied quantity.";
