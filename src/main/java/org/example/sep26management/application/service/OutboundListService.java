@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -83,6 +84,7 @@ public class OutboundListService {
                                 .canDelete(isDraft(so.getStatus()) && so.getCreatedBy() != null && so.getCreatedBy().equals(currentUserId))
                                 .canSubmit(isDraft(so.getStatus()) && so.getCreatedBy() != null && so.getCreatedBy().equals(currentUserId))
                                 .canApprove(isPending(so.getStatus()) && isManager(currentUserRole))
+                                .warehouseId(so.getWarehouseId())
                                 .canConfirm(isApproved(so.getStatus()) && isKeeper(currentUserRole))
                                 .build());
                     } catch (Exception e) {
@@ -96,11 +98,16 @@ public class OutboundListService {
                 // Nếu status null → lấy tất cả transfer theo warehouse
                 List<TransferEntity> transfers;
                 if (status == null || status.isBlank()) {
-                    transfers = transferRepository.findAll().stream()
-                            .filter(t -> warehouseId.equals(t.getFromWarehouseId()))
-                            .toList();
+                    // FIX: dùng query filter theo warehouseId thay vì findAll()
+                    transfers = (warehouseId != null)
+                            ? transferRepository.findByFromWarehouseIdOrderByCreatedAtDesc(warehouseId)
+                            : transferRepository.findAll();
                 } else {
-                    transfers = transferRepository.findByFromWarehouseIdAndStatus(warehouseId, status);
+                    transfers = (warehouseId != null)
+                            ? transferRepository.findByFromWarehouseIdAndStatus(warehouseId, status)
+                            : transferRepository.findAll().stream()
+                            .filter(t -> status.equals(t.getStatus()))
+                            .collect(java.util.stream.Collectors.toList());
                 }
 
                 transfers.stream()
@@ -127,6 +134,7 @@ public class OutboundListService {
                                         .canDelete(isDraft(t.getStatus()) && t.getCreatedBy() != null && t.getCreatedBy().equals(currentUserId))
                                         .canSubmit(isDraft(t.getStatus()) && t.getCreatedBy() != null && t.getCreatedBy().equals(currentUserId))
                                         .canApprove(isPending(t.getStatus()) && isManager(currentUserRole))
+                                        .warehouseId(t.getFromWarehouseId())
                                         .canConfirm(isApproved(t.getStatus()) && isKeeper(currentUserRole))
                                         .build());
                             } catch (Exception e) {
@@ -168,15 +176,46 @@ public class OutboundListService {
 
     @Transactional(readOnly = true)
     public ApiResponse<OutboundSummaryResponse> getSummary(Long warehouseId) {
-        LocalDateTime from = LocalDateTime.now().minusDays(30);
-        return ApiResponse.success("Summary loaded", OutboundSummaryResponse.builder()
-                .total(soQueryRepository.countTotal(warehouseId, from))
-                .pendingApproval(soQueryRepository.countByStatus(warehouseId, "PENDING_APPROVAL", from))
-                .approved(soQueryRepository.countByStatus(warehouseId, "APPROVED", from))
-                .confirmedToday(soQueryRepository.countConfirmedToday(warehouseId, java.time.LocalDate.now().atStartOfDay(), java.time.LocalDate.now().plusDays(1).atStartOfDay()))
-                .draft(soQueryRepository.countByStatus(warehouseId, "DRAFT", from))
-                .rejected(soQueryRepository.countByStatus(warehouseId, "REJECTED", from))
-                .build());
+        // Summary cards: count all-time (không giới hạn 30 ngày)
+        // warehouseId null → MANAGER xem tất cả → dùng countByStatusAllTime(null, ...)
+        // Nhưng countByStatusAllTime không có null-safe warehouseId → fallback to 0 safely
+        try {
+            long draft         = safeCount(warehouseId, "DRAFT");
+            long pending       = safeCount(warehouseId, "PENDING_APPROVAL");
+            long approved      = safeCount(warehouseId, "APPROVED");
+            long allocated     = safeCount(warehouseId, "ALLOCATED");
+            long picking       = safeCount(warehouseId, "PICKING");
+            long qcScan        = safeCount(warehouseId, "QC_SCAN");
+            long dispatched    = safeCount(warehouseId, "DISPATCHED");
+            long rejected      = safeCount(warehouseId, "REJECTED");
+            long total = draft + pending + approved + allocated + picking + qcScan + dispatched + rejected;
+
+            return ApiResponse.success("Summary loaded", OutboundSummaryResponse.builder()
+                    .total(total)
+                    .draft(draft)
+                    .pendingApproval(pending)
+                    .approved(approved)
+                    .allocated(allocated)
+                    .picking(picking)
+                    .qcScan(qcScan)
+                    .dispatched(dispatched)
+                    .rejected(rejected)
+                    .build());
+        } catch (Exception e) {
+            log.error("getSummary failed: warehouseId={}, error={}", warehouseId, e.getMessage());
+            return ApiResponse.success("Summary loaded", OutboundSummaryResponse.builder().build());
+        }
+    }
+
+    /** Count SO by status, null-safe for warehouseId */
+    private long safeCount(Long warehouseId, String status) {
+        try {
+            if (warehouseId == null) return 0L; // MANAGER without warehouse: skip SO count
+            return soQueryRepository.countByStatusAllTime(warehouseId, status);
+        } catch (Exception e) {
+            log.warn("safeCount failed for status={}: {}", status, e.getMessage());
+            return 0L;
+        }
     }
 
     private boolean isDraft(String s) { return "DRAFT".equals(s); }

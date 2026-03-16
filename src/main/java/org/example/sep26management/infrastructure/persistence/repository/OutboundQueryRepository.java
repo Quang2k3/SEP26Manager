@@ -20,7 +20,7 @@ public interface OutboundQueryRepository extends JpaRepository<SalesOrderEntity,
 
     @Query("""
             SELECT s FROM SalesOrderEntity s
-            WHERE s.warehouseId = :warehouseId
+            WHERE (:warehouseId IS NULL OR s.warehouseId = :warehouseId)
               AND (:status IS NULL OR s.status = :status)
               AND (:createdBy IS NULL OR s.createdBy = :createdBy)
               AND (:fromDate IS NULL OR s.createdAt >= :fromDate)
@@ -38,10 +38,10 @@ public interface OutboundQueryRepository extends JpaRepository<SalesOrderEntity,
             @Param("keyword") String keyword,
             Pageable pageable);
 
-    @Query("SELECT COUNT(s) FROM SalesOrderEntity s WHERE s.warehouseId = :wh AND s.createdAt >= :from")
+    @Query("SELECT COUNT(s) FROM SalesOrderEntity s WHERE (:wh IS NULL OR s.warehouseId = :wh) AND s.createdAt >= :from")
     long countTotal(@Param("wh") Long wh, @Param("from") LocalDateTime from);
 
-    @Query("SELECT COUNT(s) FROM SalesOrderEntity s WHERE s.warehouseId = :wh AND s.status = :status AND s.createdAt >= :from")
+    @Query("SELECT COUNT(s) FROM SalesOrderEntity s WHERE (:wh IS NULL OR s.warehouseId = :wh) AND s.status = :status AND s.createdAt >= :from")
     long countByStatus(@Param("wh") Long wh, @Param("status") String status, @Param("from") LocalDateTime from);
 
     /**
@@ -49,14 +49,23 @@ public interface OutboundQueryRepository extends JpaRepository<SalesOrderEntity,
      * Hibernate không so sánh được LocalDateTime với java.sql.Date (CURRENT_DATE)
      */
     @Query("""
-            SELECT COUNT(s) FROM SalesOrderEntity s
-            WHERE s.warehouseId = :wh
-              AND s.status = 'CONFIRMED'
-              AND s.updatedAt >= :startOfDay
-              AND s.updatedAt < :endOfDay
-            """)
+        SELECT COUNT(s) FROM SalesOrderEntity s
+        WHERE s.warehouseId = :wh
+          AND s.status = 'CONFIRMED'
+          AND s.updatedAt >= :startOfDay
+          AND s.updatedAt < :endOfDay
+    """)
     long countConfirmedToday(
             @Param("wh") Long wh,
             @Param("startOfDay") LocalDateTime startOfDay,
             @Param("endOfDay") LocalDateTime endOfDay);
+
+    @Query("""
+        SELECT COUNT(s) FROM SalesOrderEntity s
+        WHERE (:wh IS NULL OR s.warehouseId = :wh)
+          AND s.status = :status
+    """)
+    long countByStatusAllTime(
+            @Param("wh") Long wh,
+            @Param("status") String status);
 }

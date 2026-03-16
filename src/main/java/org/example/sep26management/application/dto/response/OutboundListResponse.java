@@ -43,6 +43,9 @@ public class OutboundListResponse {
     @Schema(description = "Tổng SỐ LƯỢNG s.phẩm", example = "150.0")
     private BigDecimal totalQty;
 
+    @Schema(description = "Kho xuất hàng", example = "1")
+    private Long warehouseId;
+
     @Schema(description = "User ID tạo phiếu", example = "1")
     private Long createdBy;
     @Schema(description = "Tên NV tạo phiếu", example = "Bui Quang")

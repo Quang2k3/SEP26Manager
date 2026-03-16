@@ -236,18 +236,6 @@ public class OutboundController {
         return ResponseEntity.ok(pickListService.getPickList(taskId));
     }
 
-    @PatchMapping("/pick-list/{taskId}/confirm-picked")
-    @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Xác nhận đã lấy hàng (KEEPER)",
-            description = "Keeper xác nhận đã lấy đủ hàng theo Pick List.\n\n"
-                    + "- Chuyển trạng thái picking task: `OPEN`/`IN_PROGRESS` → `PICKED`.\n"
-                    + "- Bước bắt buộc trước khi bắt đầu QC (`start-qc` yêu cầu task ở trạng thái `PICKED`).")
-    public ResponseEntity<ApiResponse<PickListResponse>> confirmPicked(
-            @PathVariable Long taskId,
-            HttpServletRequest http) {
-        return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http)));
-    }
-
     // ═════════════════════════════════════════════════════════════
     // NEW — QC Scan + Dispatch
     // ═════════════════════════════════════════════════════════════
@@ -331,7 +319,14 @@ public class OutboundController {
                 if (first != null)              return Long.parseLong(first.toString());
             }
         }
-        throw new RuntimeException("Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
+        // MANAGER có thể không có warehouse gán → trả null thay vì throw 500
+        // OutboundListService và getSummary() sẽ handle null warehouseId
+        String role = getCurrentRole();
+        if ("MANAGER".equals(role) || "ADMIN".equals(role)) {
+            return null; // null = query tất cả warehouse (MANAGER view)
+        }
+        throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                "Tài khoản của bạn chưa được gán kho. Liên hệ Admin để được phân công.");
     }
 
     private String getCurrentRole() {

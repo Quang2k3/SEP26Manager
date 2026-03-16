@@ -28,4 +28,7 @@ public interface TransferJpaRepository extends JpaRepository<TransferEntity, Lon
     );
 
     List<TransferEntity> findByFromWarehouseIdAndStatus(Long warehouseId, String status);
+
+    /** List all transfers for a warehouse (any status) */
+    List<TransferEntity> findByFromWarehouseIdOrderByCreatedAtDesc(Long warehouseId);
 }
