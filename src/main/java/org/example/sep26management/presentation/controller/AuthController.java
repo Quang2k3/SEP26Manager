@@ -26,7 +26,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 @Tag(name = "Authentication", description = "Đăng nhập, đăng xuất và lấy thông tin người dùng hiện tại. "
-                + "Login trả về JWT token hoặc yêu cầu OTP verification nếu email chưa được xác thực.")
+        + "Login trả về JWT token hoặc yêu cầu OTP verification nếu email chưa được xác thực.")
 public class AuthController {
 
         private final AuthService authService;
@@ -37,15 +37,15 @@ public class AuthController {
          */
         @PostMapping("/login")
         @Operation(summary = "Đăng nhập hệ thống", description = "Xác thực bằng email + password. Nếu email chưa verified → trả về pendingToken + requiresVerification=true "
-                        + "(cần gọi /verify-otp). Nếu đã verified → trả về JWT token để sử dụng cho các API khác.\n\n"
-                        + "📦 **Giải thích dữ liệu trả về (`data`):**\n"
-                        + "- `token`: Chuỗi mã token để nhét vào header (Authorization) cho các API sau.\n"
-                        + "- `requiresVerification`: Nếu `true` nghĩa là bắt buộc phải qua bước nhập OTP.\n"
-                        + "- `pendingToken`: Token tạm chứa thông tin xác thực để gọi màn verify OTP.\n"
-                        + "- `user`: Khối object chứa thông tin User đăng nhập.")
+                + "(cần gọi /verify-otp). Nếu đã verified → trả về JWT token để sử dụng cho các API khác.\n\n"
+                + "📦 **Giải thích dữ liệu trả về (`data`):**\n"
+                + "- `token`: Chuỗi mã token để nhét vào header (Authorization) cho các API sau.\n"
+                + "- `requiresVerification`: Nếu `true` nghĩa là bắt buộc phải qua bước nhập OTP.\n"
+                + "- `pendingToken`: Token tạm chứa thông tin xác thực để gọi màn verify OTP.\n"
+                + "- `user`: Khối object chứa thông tin User đăng nhập.")
         public ResponseEntity<ApiResponse<LoginResponse>> login(
-                        @Valid @RequestBody LoginRequest request,
-                        HttpServletRequest httpRequest) {
+                @Valid @RequestBody LoginRequest request,
+                HttpServletRequest httpRequest) {
                 String ipAddress = getClientIpAddress(httpRequest);
                 String userAgent = httpRequest.getHeader("User-Agent");
 
@@ -55,13 +55,13 @@ public class AuthController {
 
                 if (Boolean.TRUE.equals(response.getRequiresVerification())) {
                         return ResponseEntity.ok(ApiResponse.success(
-                                        MessageConstants.VERIFICATION_REQUIRED,
-                                        response));
+                                MessageConstants.VERIFICATION_REQUIRED,
+                                response));
                 }
 
                 return ResponseEntity.ok(ApiResponse.success(
-                                MessageConstants.LOGIN_SUCCESS,
-                                response));
+                        MessageConstants.LOGIN_SUCCESS,
+                        response));
         }
 
         /**
@@ -70,9 +70,9 @@ public class AuthController {
          */
         @PostMapping("/logout")
         @Operation(summary = "Đăng xuất", description = "Ghi log đăng xuất và xóa security context. Client nên xóa JWT token ở phía mình sau khi gọi API này.\n\n"
-                        + "📦 **Kết quả trả về:** Chỉ cần kiểm tra `success: true`.")
+                + "📦 **Kết quả trả về:** Chỉ cần kiểm tra `success: true`.")
         public ResponseEntity<ApiResponse<Void>> logout(
-                        HttpServletRequest httpRequest) {
+                HttpServletRequest httpRequest) {
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
                 if (authentication != null && authentication.getDetails() instanceof Map) {
@@ -85,7 +85,14 @@ public class AuthController {
 
                         log.info(LogMessages.AUTH_LOGOUT_REQUEST, userId);
 
-                        ApiResponse<Void> response = authService.logout(userId, ipAddress, userAgent);
+                        // BUG-02 FIX: trích token từ Authorization header để blacklist
+                        String rawToken = null;
+                        String authHeader = httpRequest.getHeader("Authorization");
+                        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                                rawToken = authHeader.substring(7);
+                        }
+
+                        ApiResponse<Void> response = authService.logout(userId, rawToken, ipAddress, userAgent);
 
                         // Clear security context
                         SecurityContextHolder.clearContext();
@@ -102,14 +109,14 @@ public class AuthController {
          */
         @GetMapping("/me")
         @Operation(summary = "Lấy thông tin người dùng hiện tại", description = "Trả về thông tin user đang đăng nhập dựa trên JWT token.\n\n"
-                        + "📦 **Giải thích dữ liệu trả về (`data`):**\n"
-                        + "- `userId`, `email`, `fullName`, `roleCodes` (danh sách quyền), `warehouseIds` (danh sách ID kho quản lý).")
+                + "📦 **Giải thích dữ liệu trả về (`data`):**\n"
+                + "- `userId`, `email`, `fullName`, `roleCodes` (danh sách quyền), `warehouseIds` (danh sách ID kho quản lý).")
         public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser() {
                 Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
                 if (authentication == null || !(authentication.getDetails() instanceof Map)) {
                         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                                        .body(ApiResponse.error(MessageConstants.NOT_AUTHENTICATED));
+                                .body(ApiResponse.error(MessageConstants.NOT_AUTHENTICATED));
                 }
 
                 @SuppressWarnings("unchecked")
@@ -119,8 +126,8 @@ public class AuthController {
                 UserResponse user = authService.getCurrentUser(userId);
 
                 return ResponseEntity.ok(ApiResponse.success(
-                                MessageConstants.CURRENT_USER_SUCCESS,
-                                user));
+                        MessageConstants.CURRENT_USER_SUCCESS,
+                        user));
         }
 
         // ============================================

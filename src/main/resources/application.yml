@@ -72,8 +72,8 @@ app:
 # JWT Configuration  
 jwt:
   secret: 9xUc3TNqLOYTH91rKxxXsjkNGaLwwGDXmm6BJiC+9iuNFuAHrWB4XLRcxTADA4mBwdm1Gv+YlQs4dXCOeY1H2w==
-  expiration-ms: 604800000              # 5 minutes 300000
-  remember-me-expiration-ms: 604800000  # 7 days
+  expiration-ms: 28800000              # 8 hours (default session, no rememberMe)
+  remember-me-expiration-ms: 604800000  # 7 days (rememberMe=true)
 
 # OTP Configuration
 otp:

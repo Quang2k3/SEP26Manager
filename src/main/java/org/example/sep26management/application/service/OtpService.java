@@ -9,8 +9,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.Random;
 
 @Service
 @RequiredArgsConstructor
@@ -39,7 +39,7 @@ public class OtpService {
 
     /**
      * Generate and send OTP to email
-     * 
+     *
      * @param email User email
      * @throws BusinessException if in cooldown period or locked out
      */
@@ -86,7 +86,7 @@ public class OtpService {
 
     /**
      * Verify OTP entered by user
-     * 
+     *
      * @param email    User email
      * @param inputOtp OTP entered by user
      * @return true if OTP is valid, false otherwise
@@ -129,12 +129,15 @@ public class OtpService {
 
     // ==================== Helper Methods ====================
 
+    // BUG-05 FIX: dùng SecureRandom (cryptographically strong) thay vì java.util.Random
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     /**
-     * Generate random 6-digit OTP
+     * Generate random 6-digit OTP — dùng SecureRandom để đảm bảo entropy
      */
     private String generateOtp() {
-        Random random = new Random();
-        int otp = 100000 + random.nextInt(900000);
+        // BUG-05 FIX: SecureRandom thay vì new Random()
+        int otp = 100000 + SECURE_RANDOM.nextInt(900000);
         return String.valueOf(otp);
     }
 
