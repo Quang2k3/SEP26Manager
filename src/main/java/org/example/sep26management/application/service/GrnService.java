@@ -125,8 +125,6 @@ public class GrnService {
             throw new BusinessException("GRN không có dòng hàng nào để nhập kho.");
         }
 
-        // BUG FIX 1: stagingLocationId có thể null nếu warehouse chưa có staging location
-        // -> locationId NOT NULL trong inventory_transactions -> DataIntegrityViolationException
         Long stagingLocationId = getFirstStagingLocation(grn.getWarehouseId());
         if (stagingLocationId == null) {
             throw new BusinessException(
@@ -137,10 +135,11 @@ public class GrnService {
         List<ReceivingItemEntity> rcvItems =
                 receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
 
+        // FIX: bỏ .grnId() vì cột grn_id không tồn tại trong bảng putaway_tasks (schema)
+        // → DataIntegrityViolationException → HTTP 500
         PutawayTaskEntity task = PutawayTaskEntity.builder()
                 .warehouseId(grn.getWarehouseId())
                 .receivingId(grn.getReceivingId())
-                .grnId(grn.getGrnId())
                 .fromLocationId(stagingLocationId)
                 .status("PENDING")
                 .createdBy(userId)
@@ -148,7 +147,6 @@ public class GrnService {
         task = putawayTaskRepo.save(task);
 
         for (GrnItemEntity item : items) {
-            // Match receiving item by SKU + lot + expiry, fallback to SKU only
             ReceivingItemEntity matchedReceivingItem = rcvItems.stream()
                     .filter(r -> r.getSkuId().equals(item.getSkuId())
                             && java.util.Objects.equals(r.getLotNumber(), item.getLotNumber())
@@ -159,8 +157,6 @@ public class GrnService {
                             .findFirst()
                             .orElse(null));
 
-            // BUG FIX 3: recItemId = null -> receiving_item_id NOT NULL violation
-            // Throw BusinessException ro rang thay vi de DB throw constraint error
             if (matchedReceivingItem == null) {
                 throw new BusinessException(
                         "Không tìm thấy receiving item cho SKU " + item.getSkuId()
@@ -190,10 +186,13 @@ public class GrnService {
                 lotId = lot.getLotId();
             }
 
+            // FIX: thêm .lotId(lotId) để ghi đúng lot vào inventory_transactions
+            // Trước đây bỏ sót → DB ghi lotId=null → FEFO query sai
             InventoryTransactionEntity tx = InventoryTransactionEntity.builder()
                     .warehouseId(grn.getWarehouseId())
                     .locationId(stagingLocationId)
                     .skuId(item.getSkuId())
+                    .lotId(lotId)
                     .txnType("RECEIVING")
                     .quantity(item.getQuantity())
                     .referenceTable("GRN")
