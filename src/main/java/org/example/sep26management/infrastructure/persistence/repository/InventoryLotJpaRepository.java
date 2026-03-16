@@ -13,8 +13,7 @@ public interface InventoryLotJpaRepository extends JpaRepository<InventoryLotEnt
 
     List<InventoryLotEntity> findBySkuId(Long skuId);
 
-    Optional<InventoryLotEntity> findBySkuIdAndLotNumberAndExpiryDate(
+    Optional<InventoryLotEntity> findBySkuIdAndLotNumber(
             Long skuId,
-            String lotNumber,
-            LocalDate expiryDate);
+            String lotNumber);
 }
