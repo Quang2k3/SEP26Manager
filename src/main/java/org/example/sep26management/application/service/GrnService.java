@@ -170,10 +170,9 @@ public class GrnService {
             Long lotId = null;
             if (item.getLotNumber() != null && !item.getLotNumber().isBlank()) {
                 Optional<InventoryLotEntity> lotOpt = inventoryLotRepo
-                        .findBySkuIdAndLotNumberAndExpiryDate(
+                        .findBySkuIdAndLotNumber(
                                 item.getSkuId(),
-                                item.getLotNumber(),
-                                item.getExpiryDate());
+                                item.getLotNumber());
 
                 InventoryLotEntity lot = lotOpt.orElseGet(() -> {
                     InventoryLotEntity newLot = InventoryLotEntity.builder()
