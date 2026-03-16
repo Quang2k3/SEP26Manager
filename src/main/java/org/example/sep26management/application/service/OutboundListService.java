@@ -45,7 +45,9 @@ public class OutboundListService {
         log.info("listOutbound: warehouseId={}, status={}, orderType={}, page={}", warehouseId, status, orderType, page);
 
         try {
-            final LocalDateTime effectiveFromDate = (fromDate != null) ? fromDate : LocalDateTime.now().minusDays(30);
+            // FIX: Khi không có fromDate filter, lấy từ đầu (không cắt 30 ngày)
+            // Summary đếm từ 30 ngày nhưng list nên hiển thị TẤT CẢ theo mặc định
+            final LocalDateTime effectiveFromDate = fromDate; // null = không filter ngày
             final LocalDateTime effectiveToDate = toDate;
             final String effectiveKeyword = keyword;
             if (size <= 0) size = 20;
@@ -61,8 +63,11 @@ public class OutboundListService {
                 soPage.getContent().forEach(so -> {
                     try {
                         List<?> items = soItemRepository.findBySoId(so.getSoId());
-                        String destination = customerRepository.findById(so.getCustomerId())
-                                .map(c -> c.getCustomerName()).orElse("N/A");
+                        // Null-safe: customerId có thể null nếu data không nhất quán
+                        String destination = (so.getCustomerId() != null)
+                                ? customerRepository.findById(so.getCustomerId())
+                                .map(c -> c.getCustomerName()).orElse("Khách hàng #" + so.getCustomerId())
+                                : "N/A";
 
                         combined.add(OutboundListResponse.builder()
                                 .documentId(so.getSoId())
@@ -99,7 +104,8 @@ public class OutboundListService {
                 }
 
                 transfers.stream()
-                        .filter(t -> t.getCreatedAt() != null && t.getCreatedAt().isAfter(effectiveFromDate))
+                        // Chỉ filter ngày nếu user chọn fromDate
+                        .filter(t -> effectiveFromDate == null || (t.getCreatedAt() != null && t.getCreatedAt().isAfter(effectiveFromDate)))
                         .filter(t -> effectiveKeyword == null || effectiveKeyword.isBlank()
                                 || t.getTransferCode().toLowerCase().contains(effectiveKeyword.toLowerCase()))
                         .forEach(t -> {
