@@ -178,6 +178,7 @@ public class OutboundQcService {
                 .failCount(fail)
                 .holdCount(hold)
                 .pendingCount(pending)
+                .allScanned(pending == 0 && total > 0)
                 .build();
 
         return ApiResponse.success("QC summary retrieved", summary);

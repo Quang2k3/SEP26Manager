@@ -356,6 +356,11 @@ public class ReceivingOrderService {
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
 
+                // ── Z-INB: Cộng tồn vào staging khi PENDING_COUNT ──────────────────────
+                // Theo nghiệp vụ: khi đơn hàng inbound → PENDING_COUNT thì cộng tồn vào
+                // Z-INB (staging location). Tồn sẽ bị trừ khỏi Z-INB sau khi confirm putaway.
+                addInboundStockToStaging(order, userId);
+
                 log.info("Receiving Order {} submitted (DRAFT → PENDING_COUNT) by userId={}",
                         order.getReceivingCode(), userId);
                 return ApiResponse.success("Submitted successfully. Status: PENDING_COUNT. Keeper can now start scanning.",
@@ -910,4 +915,75 @@ public class ReceivingOrderService {
                         .reasonCode(item.getReasonCode())
                         .build();
         }
+
+        // ─── Z-INB helper ─────────────────────────────────────────────────────────────
+        /**
+         * Khi đơn hàng inbound chuyển sang PENDING_COUNT:
+         * Cộng tồn kho vào staging location (Z-INB) cho từng mặt hàng trong đơn.
+         * Tồn này sẽ được trừ khỏi staging và cộng vào BIN đích khi Keeper confirm putaway.
+         *
+         * Nghiệp vụ:
+         *   PENDING_COUNT  → upsertInventory(stagingLocation, +qty)   [Z-INB]
+         *   confirmPutaway → decrementQuantity(stagingLocation, -qty)  [trừ Z-INB]
+         *                  + upsertInventory(binLocation, +qty)        [cộng vào BIN]
+         */
+        private void addInboundStockToStaging(ReceivingOrderEntity order, Long userId) {
+                try {
+                        Long stagingLocationId = getFirstStagingLocationId(order.getWarehouseId());
+                        if (stagingLocationId == null) {
+                                log.warn("Z-INB: No staging location found for warehouse {}. Skipping Z-INB stock addition.",
+                                        order.getWarehouseId());
+                                return;
+                        }
+
+                        List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(order.getReceivingId());
+                        if (items == null || items.isEmpty()) return;
+
+                        for (ReceivingItemEntity item : items) {
+                                if (item.getExpectedQty() == null || item.getExpectedQty().compareTo(BigDecimal.ZERO) <= 0) continue;
+
+                                // Upsert vào inventory_snapshot tại staging location
+                                jdbcTemplate.update(
+                                        "INSERT INTO inventory_snapshot (warehouse_id, sku_id, lot_id, location_id, quantity, reserved_qty) " +
+                                                "VALUES (?, ?, NULL, ?, ?, 0) " +
+                                                "ON CONFLICT (warehouse_id, sku_id, COALESCE(lot_id, 0), location_id) " +
+                                                "DO UPDATE SET quantity = inventory_snapshot.quantity + EXCLUDED.quantity, " +
+                                                "updated_at = NOW()",
+                                        order.getWarehouseId(), item.getSkuId(), stagingLocationId, item.getExpectedQty()
+                                );
+
+                                // Ghi inventory transaction type = RECEIVING_PENDING
+                                jdbcTemplate.update(
+                                        "INSERT INTO inventory_transactions " +
+                                                "(warehouse_id, sku_id, lot_id, location_id, quantity, txn_type, reference_table, reference_id, created_by) " +
+                                                "VALUES (?, ?, NULL, ?, ?, 'RECEIVING_PENDING', 'receiving_orders', ?, ?)",
+                                        order.getWarehouseId(), item.getSkuId(), stagingLocationId,
+                                        item.getExpectedQty(), order.getReceivingId(), userId
+                                );
+                        }
+                        log.info("Z-INB: Added {} items to staging location {} for receiving order {}",
+                                items.size(), stagingLocationId, order.getReceivingCode());
+                } catch (Exception e) {
+                        log.error("Z-INB: Failed to add inbound stock to staging for order {}: {}",
+                                order.getReceivingCode(), e.getMessage());
+                        // Không throw — lỗi Z-INB không nên block submit
+                }
+        }
+
+        private Long getFirstStagingLocationId(Long warehouseId) {
+                try {
+                        List<Long> ids = jdbcTemplate.queryForList(
+                                "SELECT location_id FROM locations WHERE warehouse_id = ? AND is_staging = TRUE AND active = TRUE LIMIT 1",
+                                Long.class, warehouseId);
+                        if (!ids.isEmpty()) return ids.get(0);
+                        ids = jdbcTemplate.queryForList(
+                                "SELECT location_id FROM locations WHERE warehouse_id = ? AND active = TRUE LIMIT 1",
+                                Long.class, warehouseId);
+                        return ids.isEmpty() ? null : ids.get(0);
+                } catch (Exception e) {
+                        log.error("getFirstStagingLocationId error: {}", e.getMessage());
+                        return null;
+                }
+        }
+
 }
