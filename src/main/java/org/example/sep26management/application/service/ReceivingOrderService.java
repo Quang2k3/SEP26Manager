@@ -418,7 +418,10 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<ReceivingOrderResponse> qcApprove(Long id, Long qcUserId) {
                 ReceivingOrderEntity order = findOrder(id);
-                validateStatus(order, "qc-approve", "SUBMITTED", "PENDING_INCIDENT");
+                // FIX: Keeper submit → PENDING_COUNT là trạng thái QC cần xử lý.
+                // SUBMITTED là trạng thái sau khi Keeper finalizeCount (ít dùng trên FE).
+                // Cho phép cả PENDING_COUNT, SUBMITTED, PENDING_INCIDENT.
+                validateStatus(order, "qc-approve", "PENDING_COUNT", "SUBMITTED", "PENDING_INCIDENT");
 
                 order.setStatus("QC_APPROVED");
                 order.setApprovedBy(qcUserId);
@@ -444,7 +447,7 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<Map<String, Object>> qcSubmitSession(Long id, String sessionId, Long qcUserId) {
                 ReceivingOrderEntity order = findOrder(id);
-                validateStatus(order, "qc-submit-session", "SUBMITTED", "PENDING_INCIDENT");
+                validateStatus(order, "qc-submit-session", "PENDING_COUNT", "SUBMITTED", "PENDING_INCIDENT");
 
                 ScanSessionData session = sessionRedis.findById(sessionId)
                         .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
