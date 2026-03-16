@@ -154,6 +154,23 @@ public class AllocateStockService {
         boolean fullyAllocated = shortages.isEmpty();
         String allocStatus = fullyAllocated ? "ALLOCATED" : "PARTIALLY_ALLOCATED";
 
+        // ─── Update document status → ALLOCATED ─────────────────────────────────
+        if (fullyAllocated) {
+            if (request.getOrderType() == OutboundType.SALES_ORDER) {
+                soRepository.findById(request.getDocumentId()).ifPresent(so -> {
+                    so.setStatus("ALLOCATED");
+                    soRepository.save(so);
+                    log.info("Sales order {} status updated to ALLOCATED", so.getSoCode());
+                });
+            } else {
+                transferRepository.findById(request.getDocumentId()).ifPresent(t -> {
+                    t.setStatus("ALLOCATED");
+                    transferRepository.save(t);
+                    log.info("Transfer {} status updated to ALLOCATED", t.getTransferCode());
+                });
+            }
+        }
+
         auditLogService.logAction(userId,
                 fullyAllocated ? "STOCK_ALLOCATED" : "STOCK_PARTIALLY_ALLOCATED",
                 request.getOrderType() == OutboundType.SALES_ORDER ? "SALES_ORDER" : "TRANSFER",

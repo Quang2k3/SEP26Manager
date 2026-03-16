@@ -216,13 +216,15 @@ public class PutawayTaskService {
             Long fromLocationId = task.getFromLocationId();
             BigDecimal qty = alloc.getAllocatedQty();
 
-            // Decrease from staging
+            // ── Z-INB: Trừ tồn khỏi staging location (Z-INB) khi confirm putaway ──────
+            // Theo nghiệp vụ: tồn đã được cộng vào staging khi PENDING_COUNT (Z-INB).
+            // Khi Keeper confirm putaway → trừ Z-INB và cộng vào BIN đích.
             if (fromLocationId != null) {
                 inventorySnapshotRepo.decrementQuantity(
                         task.getWarehouseId(), item.getSkuId(), item.getLotId(), fromLocationId, qty);
             }
 
-            // Upsert to target bin
+            // Upsert to target BIN (the actual shelf/rack location)
             inventorySnapshotRepo.upsertInventory(
                     task.getWarehouseId(), item.getSkuId(), item.getLotId(), alloc.getLocationId(), qty);
 

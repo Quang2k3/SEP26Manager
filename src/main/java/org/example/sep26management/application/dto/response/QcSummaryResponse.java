@@ -17,4 +17,5 @@ public class QcSummaryResponse {
     private int failCount;
     private int holdCount;
     private int pendingCount;
+    private boolean allScanned;
 }

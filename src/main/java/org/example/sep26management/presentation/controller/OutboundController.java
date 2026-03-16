@@ -236,6 +236,18 @@ public class OutboundController {
         return ResponseEntity.ok(pickListService.getPickList(taskId));
     }
 
+    @PatchMapping("/pick-list/{taskId}/confirm-picked")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Xác nhận đã lấy hàng (KEEPER)",
+            description = "Keeper xác nhận đã lấy đủ hàng theo Pick List.\n\n"
+                    + "- Chuyển trạng thái picking task: `OPEN`/`IN_PROGRESS` → `PICKED`.\n"
+                    + "- Bước bắt buộc trước khi bắt đầu QC (`start-qc` yêu cầu task ở trạng thái `PICKED`).")
+    public ResponseEntity<ApiResponse<PickListResponse>> confirmPicked(
+            @PathVariable Long taskId,
+            HttpServletRequest http) {
+        return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http)));
+    }
+
     // ═════════════════════════════════════════════════════════════
     // NEW — QC Scan + Dispatch
     // ═════════════════════════════════════════════════════════════
