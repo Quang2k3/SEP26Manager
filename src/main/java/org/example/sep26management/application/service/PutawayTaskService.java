@@ -8,6 +8,8 @@ import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.PutawayAllocationResponse;
 import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
+import org.example.sep26management.infrastructure.exception.BusinessException;
+import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.LocationEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayAllocationEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskEntity;
@@ -93,8 +95,9 @@ public class PutawayTaskService {
 
     @Transactional(readOnly = true)
     public ApiResponse<PutawayTaskResponse> getTaskByGrnId(Long grnId) {
+        // BUG-09 FIX: ResourceNotFoundException → HTTP 404 thay vì 500
         PutawayTaskEntity task = putawayTaskRepo.findByGrnId(grnId)
-                .orElseThrow(() -> new RuntimeException("No putaway task found for GRN: " + grnId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy putaway task cho GRN: " + grnId));
         return getTask(task.getPutawayTaskId());
     }
 
@@ -139,30 +142,36 @@ public class PutawayTaskService {
 
         for (PutawayAllocateRequest.AllocateItem alloc : request.getItems()) {
             // Find matching task item by skuId
+            // BUG-09 FIX: ResourceNotFoundException → HTTP 404
             PutawayTaskItemEntity taskItem = taskItems.stream()
                     .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()))
                     .findFirst()
-                    .orElseThrow(() -> new RuntimeException("SKU " + alloc.getSkuId() + " not found in putaway task " + taskId));
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "SKU " + alloc.getSkuId() + " không tồn tại trong putaway task " + taskId));
 
             // Check: allocated + putawayQty + newQty <= totalQty
             BigDecimal alreadyAllocated = allocationRepo.sumReservedQtyByTaskAndSku(taskId, alloc.getSkuId());
             BigDecimal totalUsed = taskItem.getPutawayQty().add(alreadyAllocated).add(alloc.getQty());
             if (totalUsed.compareTo(taskItem.getQuantity()) > 0) {
                 BigDecimal remaining = taskItem.getQuantity().subtract(taskItem.getPutawayQty()).subtract(alreadyAllocated);
-                throw new RuntimeException("Cannot allocate " + alloc.getQty() + " units of SKU " + alloc.getSkuId()
-                        + ". Remaining to allocate: " + remaining);
+                // BUG-09 FIX: BusinessException → HTTP 400
+                throw new BusinessException("Không thể phân bổ " + alloc.getQty() + " đơn vị SKU " + alloc.getSkuId()
+                        + ". Số lượng còn có thể phân bổ: " + remaining);
             }
 
-            // Check: bin capacity (occupied + putaway_reserved + newQty <= maxCapacity)
+            // Check: bin capacity
+            // BUG-09 FIX: ResourceNotFoundException → HTTP 404
             LocationEntity bin = locationRepo.findById(alloc.getLocationId())
-                    .orElseThrow(() -> new RuntimeException("Location not found: " + alloc.getLocationId()));
+                    .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy location: " + alloc.getLocationId()));
             if (bin.getMaxWeightKg() != null) {
                 BigDecimal occupied = inventorySnapshotRepo.sumQuantityByLocationId(alloc.getLocationId());
                 BigDecimal binReserved = allocationRepo.sumReservedQtyByLocation(alloc.getLocationId());
                 BigDecimal totalInBin = occupied.add(binReserved).add(alloc.getQty());
                 if (totalInBin.compareTo(bin.getMaxWeightKg()) > 0) {
                     BigDecimal binAvailable = bin.getMaxWeightKg().subtract(occupied).subtract(binReserved);
-                    throw new RuntimeException("Bin " + bin.getLocationCode() + " does not have enough capacity. Available: " + binAvailable);
+                    // BUG-09 FIX: BusinessException → HTTP 400
+                    throw new BusinessException("Bin " + bin.getLocationCode()
+                            + " không đủ sức chứa. Sức chứa còn lại: " + binAvailable);
                 }
             }
 
@@ -202,7 +211,8 @@ public class PutawayTaskService {
 
         List<PutawayAllocationEntity> reservations = allocationRepo.findByPutawayTaskIdAndStatus(taskId, "RESERVED");
         if (reservations.isEmpty()) {
-            throw new RuntimeException("No RESERVED allocations to confirm for task " + taskId);
+            // BUG-09 FIX: BusinessException → HTTP 400
+            throw new BusinessException("Không có allocation ở trạng thái RESERVED để confirm cho task " + taskId);
         }
 
         List<PutawayTaskItemEntity> taskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
@@ -223,10 +233,12 @@ public class PutawayTaskService {
         }
 
         for (PutawayAllocationEntity alloc : reservations) {
+            // BUG-09 FIX: ResourceNotFoundException → HTTP 404
             PutawayTaskItemEntity item = taskItems.stream()
                     .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()))
                     .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Task item not found for SKU: " + alloc.getSkuId()));
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Không tìm thấy task item cho SKU: " + alloc.getSkuId()));
 
             Long fromLocationId = task.getFromLocationId();
             BigDecimal qty = alloc.getAllocatedQty();
@@ -274,13 +286,16 @@ public class PutawayTaskService {
 
     @Transactional
     public ApiResponse<Void> cancelAllocation(Long taskId, Long allocationId) {
+        // BUG-09 FIX: ResourceNotFoundException → HTTP 404
         PutawayAllocationEntity alloc = allocationRepo.findById(allocationId)
-                .orElseThrow(() -> new RuntimeException("Allocation not found: " + allocationId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy allocation: " + allocationId));
+        // BUG-09 FIX: BusinessException → HTTP 400
         if (!alloc.getPutawayTaskId().equals(taskId)) {
-            throw new RuntimeException("Allocation " + allocationId + " does not belong to task " + taskId);
+            throw new BusinessException("Allocation " + allocationId + " không thuộc task " + taskId);
         }
         if (!"RESERVED".equals(alloc.getStatus())) {
-            throw new RuntimeException("Cannot cancel allocation in status: " + alloc.getStatus());
+            throw new BusinessException("Không thể huỷ allocation ở trạng thái: " + alloc.getStatus()
+                    + ". Chỉ có thể huỷ allocation ở trạng thái RESERVED.");
         }
         alloc.setStatus("CANCELLED");
         allocationRepo.save(alloc);
@@ -304,13 +319,16 @@ public class PutawayTaskService {
     private void validateTaskStatus(PutawayTaskEntity task) {
         if (!"PENDING".equals(task.getStatus()) && !"OPEN".equals(task.getStatus())
                 && !"IN_PROGRESS".equals(task.getStatus())) {
-            throw new RuntimeException("Putaway task " + task.getPutawayTaskId() + " is in invalid status: " + task.getStatus());
+            // BUG-09 FIX: BusinessException → HTTP 400
+            throw new BusinessException("Putaway task " + task.getPutawayTaskId()
+                    + " ở trạng thái không hợp lệ để thực hiện thao tác này: " + task.getStatus());
         }
     }
 
     private PutawayTaskEntity findTask(Long id) {
+        // BUG-09 FIX: ResourceNotFoundException → HTTP 404
         return putawayTaskRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Putaway task not found: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy putaway task: " + id));
     }
 
     private PutawayTaskResponse toResponse(PutawayTaskEntity t) {

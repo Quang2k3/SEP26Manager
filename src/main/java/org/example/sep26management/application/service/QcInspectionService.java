@@ -7,9 +7,14 @@ import org.example.sep26management.application.dto.request.UpdateQcInspectionReq
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.QcInspectionResponse;
+import org.example.sep26management.infrastructure.exception.BusinessException;
+import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
+import org.example.sep26management.infrastructure.persistence.entity.InventoryLotEntity;
 import org.example.sep26management.infrastructure.persistence.entity.QcInspectionEntity;
 import org.example.sep26management.infrastructure.persistence.entity.QuarantineHoldEntity;
+import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
 import org.example.sep26management.infrastructure.persistence.entity.UserEntity;
+import org.example.sep26management.infrastructure.persistence.repository.InventoryLotJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.QcInspectionJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.QuarantineHoldJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
@@ -33,6 +38,8 @@ public class QcInspectionService {
     private final QuarantineHoldJpaRepository quarantineRepo;
     private final SkuJpaRepository skuRepo;
     private final UserJpaRepository userRepo;
+    // BUG-07 FIX: inject InventoryLotJpaRepository để enrich lot → SKU info
+    private final InventoryLotJpaRepository lotRepo;
 
     // ─── List QC Inspections ────────────────────────────────────────────────
 
@@ -63,8 +70,9 @@ public class QcInspectionService {
 
     @Transactional(readOnly = true)
     public ApiResponse<QcInspectionResponse> getInspection(Long id) {
+        // BUG-08 FIX: đổi RuntimeException → ResourceNotFoundException (HTTP 404)
         QcInspectionEntity inspection = qcRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("QC Inspection not found: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("QC Inspection not found: " + id));
         return ApiResponse.success("OK", toResponse(inspection));
     }
 
@@ -72,11 +80,14 @@ public class QcInspectionService {
 
     @Transactional
     public ApiResponse<QcInspectionResponse> submitReport(Long id, UpdateQcInspectionRequest request, Long qcUserId) {
+        // BUG-08 FIX: đổi RuntimeException → ResourceNotFoundException (HTTP 404)
         QcInspectionEntity inspection = qcRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("QC Inspection not found: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("QC Inspection not found: " + id));
 
+        // BUG-08 FIX: đổi RuntimeException → BusinessException (HTTP 400)
         if (!"PENDING".equals(inspection.getStatus())) {
-            throw new RuntimeException("QC Inspection is not in PENDING status. Current: " + inspection.getStatus());
+            throw new BusinessException(
+                    "QC Inspection không ở trạng thái PENDING. Trạng thái hiện tại: " + inspection.getStatus());
         }
 
         inspection.setRemarks(request.getRemarks());
@@ -96,17 +107,22 @@ public class QcInspectionService {
 
     @Transactional
     public ApiResponse<QcInspectionResponse> makeDecision(Long id, QcDecisionRequest request, Long managerId) {
+        // BUG-08 FIX: đổi RuntimeException → ResourceNotFoundException (HTTP 404)
         QcInspectionEntity inspection = qcRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("QC Inspection not found: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("QC Inspection not found: " + id));
 
+        // BUG-08 FIX: đổi RuntimeException → BusinessException (HTTP 400)
         if (!"INSPECTED".equals(inspection.getStatus())) {
-            throw new RuntimeException(
-                    "QC Inspection must be in INSPECTED status before decision. Current: " + inspection.getStatus());
+            throw new BusinessException(
+                    "QC Inspection phải ở trạng thái INSPECTED trước khi ra quyết định. Trạng thái hiện tại: "
+                            + inspection.getStatus());
         }
 
         String decision = request.getDecision().toUpperCase();
+        // BUG-08 FIX: đổi RuntimeException → BusinessException (HTTP 400)
         if (!"SCRAP".equals(decision) && !"RETURN".equals(decision) && !"DOWNGRADE".equals(decision)) {
-            throw new RuntimeException("Invalid decision. Must be SCRAP, RETURN, or DOWNGRADE.");
+            throw new BusinessException("Quyết định không hợp lệ: " + decision
+                    + ". Chỉ chấp nhận SCRAP, RETURN, hoặc DOWNGRADE.");
         }
 
         // Update inspection status
@@ -132,8 +148,6 @@ public class QcInspectionService {
         log.info("Manager decision for inspection {}: {} by managerId={}", inspection.getInspectionCode(), decision,
                 managerId);
 
-        // If RETURN → generate return order (to be implemented in
-        // ReceivingOrderService)
         if ("RETURN".equals(decision)) {
             log.info("RETURN decision → Return order should be generated for lotId={}", inspection.getLotId());
             // TODO: Call ReceivingOrderService.generateDamagedReturn() or similar
@@ -152,14 +166,26 @@ public class QcInspectionService {
                 ? userRepo.findById(e.getInspectedBy()).map(UserEntity::getFullName).orElse(null)
                 : null;
 
-        // Lookup lot → SKU info
+        // BUG-07 FIX: enrich lot → SKU info từ InventoryLotJpaRepository
         String lotNumber = null;
         Long skuId = null;
         String skuCode = null;
         String skuName = null;
 
-        // We don't have InventoryLotJpaRepository yet, so we leave lot info for now
-        // TODO: Add lot info enrichment when InventoryLotJpaRepository is created
+        if (e.getLotId() != null) {
+            InventoryLotEntity lot = lotRepo.findById(e.getLotId()).orElse(null);
+            if (lot != null) {
+                lotNumber = lot.getLotNumber();
+                skuId = lot.getSkuId();
+                if (skuId != null) {
+                    SkuEntity sku = skuRepo.findById(skuId).orElse(null);
+                    if (sku != null) {
+                        skuCode = sku.getSkuCode();
+                        skuName = sku.getSkuName();
+                    }
+                }
+            }
+        }
 
         return QcInspectionResponse.builder()
                 .inspectionId(e.getInspectionId())
@@ -167,6 +193,10 @@ public class QcInspectionService {
                 .lotId(e.getLotId())
                 .inspectionCode(e.getInspectionCode())
                 .status(e.getStatus())
+                .lotNumber(lotNumber)
+                .skuId(skuId)
+                .skuCode(skuCode)
+                .skuName(skuName)
                 .inspectedBy(e.getInspectedBy())
                 .inspectedByName(inspectedByName)
                 .inspectedAt(e.getInspectedAt())
