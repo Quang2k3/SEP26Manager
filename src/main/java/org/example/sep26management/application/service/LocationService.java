@@ -255,22 +255,23 @@ public class LocationService {
 
     @Transactional(readOnly = true)
     public ApiResponse<PageResponse<LocationResponse>> listLocations(
-            Long warehouseId,       // ← nhận từ controller, extract từ JWT
+            Long warehouseId,
             Long zoneId,
             LocationType locationType,
             Boolean active,
+            Long parentLocationId,
             String keyword,
             int page,
             int size) {
 
-        log.info("Listing locations: warehouse={}, zone={}, type={}, active={}, keyword={}",
-                warehouseId, zoneId, locationType, active, keyword);
+        log.info("Listing locations: warehouse={}, zone={}, type={}, active={}, parent={}, keyword={}",
+                warehouseId, zoneId, locationType, active, parentLocationId, keyword);
 
         Pageable pageable = PageRequest.of(page, size > 0 ? size : 20);
         String kw = (keyword != null && !keyword.isBlank()) ? keyword.trim() : null;
 
         Page<LocationEntity> locationPage = locationRepository.searchLocations(
-                warehouseId, zoneId, locationType, active, kw, pageable);
+                warehouseId, zoneId, locationType, active, parentLocationId, kw, pageable);
 
         // Batch-resolve zone codes and parent codes
         Set<Long> zoneIds = locationPage.getContent().stream()

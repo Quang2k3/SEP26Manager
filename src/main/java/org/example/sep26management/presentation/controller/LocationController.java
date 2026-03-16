@@ -133,9 +133,10 @@ public class LocationController {
     @PreAuthorize("hasAnyRole('MANAGER', 'KEEPER')")   // KEEPER cần đọc locations để xem bin map
     @Operation(summary = "Danh sách locations", description = "Lấy danh sách locations với filter: zoneId, locationType (AISLE/RACK/BIN/STAGING), active, keyword. Phân trang. ")
     public ResponseEntity<ApiResponse<PageResponse<LocationResponse>>> listLocations(
-            @RequestParam(required = false) Long zoneId, // ← bỏ @RequestParam Long warehouseId
+            @RequestParam(required = false) Long zoneId,
             @RequestParam(required = false) LocationType locationType,
             @RequestParam(required = false) Boolean active,
+            @RequestParam(required = false) Long parentLocationId,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
@@ -143,7 +144,7 @@ public class LocationController {
         Long warehouseId = getCurrentWarehouseId(); // ← tự lấy từ JWT
 
         return ResponseEntity.ok(locationService.listLocations(
-                warehouseId, zoneId, locationType, active, keyword, page, size));
+                warehouseId, zoneId, locationType, active, parentLocationId, keyword, page, size));
     }
 
     // ─────────────────────────────────────────────────────────────

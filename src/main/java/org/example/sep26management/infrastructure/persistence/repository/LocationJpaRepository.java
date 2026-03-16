@@ -45,17 +45,19 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
                           AND (:zoneId IS NULL OR l.zoneId = :zoneId)
                           AND (:locationType IS NULL OR l.locationType = :locationType)
                           AND (:active IS NULL OR l.active = :active)
+                          AND (:parentLocationId IS NULL OR l.parentLocationId = :parentLocationId)
                           AND (:keyword IS NULL OR :keyword = ''
                                OR LOWER(l.locationCode) LIKE LOWER(CONCAT('%', :keyword, '%')))
                         ORDER BY l.locationCode ASC
                         """)
         Page<LocationEntity> searchLocations(
-                        @Param("warehouseId") Long warehouseId,
-                        @Param("zoneId") Long zoneId,
-                        @Param("locationType") LocationType locationType,
-                        @Param("active") Boolean active,
-                        @Param("keyword") String keyword,
-                        Pageable pageable);
+                @Param("warehouseId") Long warehouseId,
+                @Param("zoneId") Long zoneId,
+                @Param("locationType") LocationType locationType,
+                @Param("active") Boolean active,
+                @Param("parentLocationId") Long parentLocationId,
+                @Param("keyword") String keyword,
+                Pageable pageable);
 
         /**
          * UC-LOC-07: Search Empty Bin — active BIN locations only [BR-LOC-24]
@@ -70,8 +72,8 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
                         ORDER BY l.locationCode ASC
                         """)
         List<LocationEntity> findActiveBinsByWarehouse(
-                        @Param("warehouseId") Long warehouseId,
-                        @Param("zoneId") Long zoneId);
+                @Param("warehouseId") Long warehouseId,
+                @Param("zoneId") Long zoneId);
 
         /**
          * Find active BINs within a specific zone (for putaway suggestion).
