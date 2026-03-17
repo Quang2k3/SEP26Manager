@@ -199,6 +199,7 @@ public class AllocateStockService {
                 .documentId(request.getDocumentId())
                 .documentCode(documentCode)
                 .status(allocStatus)
+                .fullyAllocated(fullyAllocated)
                 .totalSkus(required.size())
                 .allocatedSkus(required.size() - shortages.size())
                 .allocations(allocations)
