@@ -43,10 +43,11 @@ public class ScannerPageController {
                                               @RequestParam(value = "taskId", required = false) Long taskId,
                                               @RequestParam(value = "mode", required = false) String mode) {
         boolean outboundQcMode = "outbound_qc".equals(mode);
+        boolean outboundPickingMode = "outbound_picking".equals(mode);
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 .header("Pragma", "no-cache")
-                .body(buildHtml(escapeForJs(token), receivingId, taskId, outboundQcMode));
+                .body(buildHtml(escapeForJs(token), receivingId, taskId, outboundQcMode, outboundPickingMode));
     }
 
     private static String escapeForJs(String s) {
@@ -59,9 +60,12 @@ public class ScannerPageController {
         return buildHtml(token, receivingId, null, false);
     }
     private String buildHtml(String token, Long receivingId, Long taskId, boolean outboundQcMode) {
+        return buildHtml(token, receivingId, taskId, outboundQcMode, false);
+    }
+    private String buildHtml(String token, Long receivingId, Long taskId, boolean outboundQcMode, boolean outboundPickingMode) {
         String receivingIdJs = receivingId != null ? String.valueOf(receivingId) : "null";
         String taskIdJs = taskId != null ? String.valueOf(taskId) : "null";
-        String modeJs = outboundQcMode ? "outbound_qc" : "inbound";
+        String modeJs = outboundPickingMode ? "outbound_picking" : outboundQcMode ? "outbound_qc" : "inbound";
         return "<!DOCTYPE html>" +
                 "<html lang='vi'><head>" +
                 "<meta charset='UTF-8'>" +
@@ -260,6 +264,12 @@ public class ScannerPageController {
                 "   Báo có hàng FAIL / HOLD (Tạm dừng xuất kho)" +
                 "</button>" +
                 "</div>" +
+                "<div class='card' id='outbound-picking-card' style='display:none'>" +
+                "<div class='card-title' style='color:#60a5fa'>📋 Picking — Xác nhận lấy hàng</div>" +
+                "<div id='picking-items-list'></div>" +
+                "<div id='picking-status' style='font-size:12px;color:#94a3b8;margin:8px 0'>Đang tải danh sách...</div>" +
+                "<button class='btn success' id='confirmPickedBtn' disabled onclick='confirmPicked()'> Gửi sang QC — Đã lấy đủ hàng</button>" +
+                "</div>" +
                 "<div class='card'><button class='btn danger' id='closeBtn'>🛑 Kết thúc Scan</button></div>" +
                 "</div>" +
 
@@ -291,6 +301,88 @@ public class ScannerPageController {
                 "  document.getElementById('qc-mode-indicator').style.display = '';\n" +
                 "  document.getElementById('qc-mode-indicator').textContent = '(CHẾ ĐỘ QC XUẤT KHO)';\n" +
                 "  updateOutboundQcSummary();\n" +
+                "}\n" +
+                "\n" +
+                "// ── OUTBOUND PICKING MODE ──\n" +
+                "var pickItems = [];\n" +
+                "var scannedPickSkus = {};\n" +
+                "function initOutboundPickingMode() {\n" +
+                "  if (SCAN_MODE !== 'outbound_picking') return;\n" +
+                "  document.getElementById('outbound-picking-card').style.display = '';\n" +
+                "  document.getElementById('confirm-card').style.display = 'none';\n" +
+                "  document.getElementById('outbound-qc-card').style.display = 'none';\n" +
+                "  document.getElementById('qc-mode-indicator').style.display = '';\n" +
+                "  document.getElementById('qc-mode-indicator').textContent = '(CHẾ ĐỘ PICKING)';\n" +
+                "  if (TASK_ID) loadPickItems();\n" +
+                "}\n" +
+                "function loadPickItems() {\n" +
+                "  fetch(window.location.origin+'/v1/outbound/pick-list/'+TASK_ID,{headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "  .then(function(r){return r.json();})\n" +
+                "  .then(function(d){\n" +
+                "    if(d && d.success && d.data){\n" +
+                "      pickItems = d.data.items || [];\n" +
+                "      renderPickItems();\n" +
+                "      document.getElementById('picking-status').textContent = pickItems.length + ' mặt hàng cần lấy. Scan barcode để xác nhận.'\n" +
+                "    } else {\n" +
+                "      document.getElementById('picking-status').textContent = 'Lỗi tải Pick List: '+(d&&d.message?d.message:'unknown')\n" +
+                "    }\n" +
+                "  })\n" +
+                "  .catch(function(e){ document.getElementById('picking-status').textContent = 'Lỗi kết nối: '+e; });\n" +
+                "}\n" +
+                "function renderPickItems() {\n" +
+                "  var html = '';\n" +
+                "  var allDone = pickItems.length > 0;\n" +
+                "  var sBase = 'border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between';\n" +
+                "  for (var i=0;i<pickItems.length;i++) {\n" +
+                "    var it = pickItems[i];\n" +
+                "    var done = !!scannedPickSkus[it.skuCode];\n" +
+                "    if (!done) allDone = false;\n" +
+                "    var bg = done ? 'background:rgba(16,185,129,.08)' : 'background:#1e293b';\n" +
+                "    var bl = done ? 'border-left:3px solid #10b981' : 'border-left:3px solid #334155';\n" +
+                "    html += '<div style=\"'+(bg+';'+bl+';'+sBase)+'\">';\n" +
+                "    html += '<div><div style=\"font-size:13px;font-weight:700;color:#e2e8f0\">'+it.skuCode+'</div>';\n" +
+                "    var lot = it.lotNumber ? ' LOT '+it.lotNumber : '';\n" +
+                "    html += '<div style=\"font-size:11px;color:#64748b\">'+it.skuName+' '+it.locationCode+lot+'</div></div>';\n" +
+                "    html += '<div style=\"text-align:right\"><div style=\"font-size:15px;font-weight:800;color:#60a5fa\">&times;'+it.requiredQty+'</div>';\n" +
+                "    html += done ? '<div style=\"font-size:10px;color:#10b981;font-weight:700\">&#10003; DA LAY</div>' : '<div style=\"font-size:10px;color:#64748b\">Cho scan</div>';\n" +
+                "    html += '</div></div>';\n" +
+                "  }\n" +
+                "  document.getElementById('picking-items-list').innerHTML = html;\n" +
+                "  var btn = document.getElementById('confirmPickedBtn');\n" +
+                "  if (btn) { btn.disabled = !allDone; btn.style.opacity = allDone ? '1' : '0.4'; }\n" +
+                "  var dc = Object.keys(scannedPickSkus).length;\n" +
+                "  document.getElementById('picking-status').textContent = dc+'/'+pickItems.length+' SKU da scan.'+(allDone?' San sang gui QC!': '');\n" +
+                "}\n" +
+                "function handlePickingScan(skuCode) {\n" +
+                "  var matched = pickItems.filter(function(it){ return it.skuCode.toUpperCase() === skuCode.toUpperCase(); });\n" +
+                "  if (matched.length === 0) { toast('SKU '+skuCode+' không có trong Pick List!', true); return; }\n" +
+                "  if (scannedPickSkus[skuCode.toUpperCase()]) { toast('✓ '+skuCode+' đã được scan rồi'); return; }\n" +
+                "  scannedPickSkus[skuCode.toUpperCase()] = true;\n" +
+                "  toast('✓ Xác nhận: '+skuCode);\n" +
+                "  if(navigator.vibrate) navigator.vibrate(80);\n" +
+                "  renderPickItems();\n" +
+                "}\n" +
+                "function confirmPicked() {\n" +
+                "  if (!TASK_ID) { toast('Không có Task ID!', true); return; }\n" +
+                "  if (!confirm('Xác nhận đã lấy đủ toàn bộ hàng?\\nĐơn sẽ chuyển sang bước QC.')) return;\n" +
+                "  var btn = document.getElementById('confirmPickedBtn');\n" +
+                "  btn.disabled = true; btn.textContent = 'Đang gửi...';\n" +
+                "  fetch(window.location.origin+'/v1/outbound/pick-list/'+TASK_ID+'/confirm-picked',{\n" +
+                "    method:'PATCH', headers:{'Authorization':'Bearer '+TOKEN, 'Content-Type':'application/json'}\n" +
+                "  })\n" +
+                "  .then(function(r){ return r.json(); })\n" +
+                "  .then(function(d){\n" +
+                "    if (d && d.success) {\n" +
+                "      toast(' Đã gửi QC! Chờ QC kiểm tra.');\n" +
+                "      btn.textContent = ' Đã gửi QC'; btn.style.background = '#475569';\n" +
+                "      document.getElementById('picking-status').textContent = 'Hoàn tất picking — Đã chuyển sang QC.';\n" +
+                "      stopQr();\n" +
+                "    } else {\n" +
+                "      toast((d&&d.message)?d.message:'Lỗi confirm picked', true);\n" +
+                "      btn.disabled = false; btn.textContent = ' Gửi sang QC — Đã lấy đủ hàng';\n" +
+                "    }\n" +
+                "  })\n" +
+                "  .catch(function(e){ toast('Lỗi kết nối: '+e, true); btn.disabled=false; btn.textContent=' Gửi sang QC — Đã lấy đủ hàng'; });\n" +
                 "}\n" +
                 "\n" +
                 "function updateOutboundQcSummary() {\n" +
@@ -495,6 +587,8 @@ public class ScannerPageController {
                 "}\n" +
 
                 "function sendBarcode(barcode,qty){\n" +
+                "  // In picking mode — just do local scan confirmation, no server call\n" +
+                "  if(SCAN_MODE === 'outbound_picking') { handlePickingScan(barcode); return; }\n" +
                 "  if(inflight) return;\n" +
                 "  inflight=true;\n" +
                 "  setStatus('Đang gửi: '+barcode);\n" +
@@ -544,7 +638,7 @@ public class ScannerPageController {
                 "function closeScan(){\n" +
                 "  if(!SESSION_ID){toast('Không tìm thấy session',true);return;}\n" +
                 "  if(!confirm('Kết thúc phiên scan?')) return;\n" +
-                "  fetch(window.location.origin+'/v1/receiving-sessions/'+SESSION_ID,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}})\n"
+                "  fetch(window.location.origin+'/api/v1/receiving-sessions/'+SESSION_ID,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}})\n"
                 +
                 "   .then(function(r){return r.text().then(function(t){try{return JSON.parse(t);}catch(e){return {success:false,message:t};}});})\n"
                 +
@@ -655,9 +749,6 @@ public class ScannerPageController {
                 "          document.getElementById('qc-mode-indicator').style.display = 'inline';\n" +
                 "          document.getElementById('confirmBtn').style.display = 'none';\n" +
                 "          document.getElementById('qcSubmitBtn').style.display = 'block';\n" +
-                "      } else {\n" +
-                "          document.getElementById('qcSubmitBtn').style.display = 'none';\n" +
-                "          document.getElementById('confirmBtn').style.display = 'block';\n" +
                 "      }\n" +
                 "  }\n" +
                 "  // Auto-populate receiving ID từ URL param (truyền qua khi FE tạo scan URL)\n" +
@@ -680,6 +771,7 @@ public class ScannerPageController {
                 "});\n" +
                 "window.addEventListener('load', function(){\n" +
                 "  waitForHtml5Qrcode(startQr, 25);\n" +
+                "  initOutboundPickingMode();\n" +
                 "});\n" +
 
                 "</script></body></html>";
