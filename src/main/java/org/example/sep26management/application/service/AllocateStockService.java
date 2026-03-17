@@ -4,8 +4,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.AllocateStockRequest;
+import org.example.sep26management.application.dto.request.CreateIncidentRequest;
 import org.example.sep26management.application.dto.response.AllocateStockResponse;
 import org.example.sep26management.application.dto.response.ApiResponse;
+import org.example.sep26management.application.dto.response.IncidentResponse;
+import org.example.sep26management.application.enums.IncidentCategory;
+import org.example.sep26management.application.enums.IncidentType;
+import org.example.sep26management.infrastructure.persistence.entity.SalesOrderEntity;
 import org.example.sep26management.application.enums.OutboundType;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
@@ -40,6 +45,8 @@ public class AllocateStockService {
     private final ReservationJpaRepository reservationRepository;
     private final SkuJpaRepository skuRepository;
     private final AuditLogService auditLogService;
+    private final IncidentService incidentService;
+    private final WarehouseJpaRepository warehouseRepository;
 
     @Transactional
     public ApiResponse<AllocateStockResponse> allocateStock(
@@ -192,4 +199,80 @@ public class AllocateStockService {
     }
 
     private record SkuQtyPair(Long skuId, BigDecimal qty) {}
+
+    /**
+     * Keeper báo thiếu hàng sau khi allocate thất bại.
+     * Tạo incident type=SHORTAGE, category=QUALITY, gửi lên Manager xử lý.
+     */
+    @Transactional
+    public ApiResponse<IncidentResponse> reportShortage(
+            Long documentId,
+            OutboundType orderType,
+            Long userId, String ip, String ua) {
+
+        Long warehouseId;
+        String documentCode;
+        List<SkuQtyPair> required = new ArrayList<>();
+
+        if (orderType == OutboundType.SALES_ORDER) {
+            SalesOrderEntity so = soRepository.findById(documentId)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            String.format(MessageConstants.OUTBOUND_NOT_FOUND, documentId)));
+            warehouseId = so.getWarehouseId();
+            documentCode = so.getSoCode();
+            soItemRepository.findBySoId(so.getSoId())
+                    .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getOrderedQty())));
+        } else {
+            TransferEntity transfer = transferRepository.findById(documentId)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            String.format(MessageConstants.OUTBOUND_NOT_FOUND, documentId)));
+            warehouseId = transfer.getFromWarehouseId();
+            documentCode = transfer.getTransferCode();
+            transferItemRepository.findByTransferId(transfer.getTransferId())
+                    .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getQuantity())));
+        }
+
+        // Build incident items — chỉ ghi các SKU thực sự thiếu
+        List<CreateIncidentRequest.IncidentItemDto> incidentItems = new ArrayList<>();
+        StringBuilder desc = new StringBuilder("Thiếu tồn kho khi phân bổ lệnh xuất " + documentCode + ": ");
+        for (SkuQtyPair pair : required) {
+            BigDecimal available = getAvailableQty(warehouseId, pair.skuId);
+            if (available.compareTo(pair.qty) < 0) {
+                BigDecimal shortage = pair.qty.subtract(available);
+                String skuCode = skuRepository.findById(pair.skuId)
+                        .map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
+                incidentItems.add(new CreateIncidentRequest.IncidentItemDto(
+                        pair.skuId, shortage, pair.qty, available, "SHORTAGE",
+                        skuCode + ": cần " + pair.qty + ", còn " + available));
+                desc.append(skuCode).append(" thiếu ").append(shortage).append("; ");
+            }
+        }
+
+        if (incidentItems.isEmpty()) {
+            throw new BusinessException("Không có SKU nào thiếu hàng để báo cáo.");
+        }
+
+        CreateIncidentRequest req = CreateIncidentRequest.builder()
+                .warehouseId(warehouseId)
+                .category(IncidentCategory.QUALITY)
+                .incidentType(IncidentType.SHORTAGE)
+                .description(desc.toString().trim())
+                .items(incidentItems)
+                .build();
+
+        log.info("Reporting shortage incident for document {} ({})", documentCode, orderType);
+        auditLogService.logAction(userId, "SHORTAGE_REPORTED",
+                orderType == OutboundType.SALES_ORDER ? "SALES_ORDER" : "TRANSFER",
+                documentId, "Shortage reported for " + documentCode, ip, ua);
+
+        return incidentService.createIncident(req, userId);
+    }
+
+    private BigDecimal getAvailableQty(Long warehouseId, Long skuId) {
+        BigDecimal total = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, skuId);
+        BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, skuId);
+        if (total == null) total = BigDecimal.ZERO;
+        if (reserved == null) reserved = BigDecimal.ZERO;
+        return total.subtract(reserved).max(BigDecimal.ZERO);
+    }
 }

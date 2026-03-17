@@ -211,6 +211,19 @@ public class OutboundController {
                 request, getUserId(), getIp(http), ua(http)));
     }
 
+    @PostMapping("/allocate/report-shortage")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Báo thiếu hàng lên Manager",
+            description = "Khi allocate không đủ tồn kho, Keeper tạo incident SHORTAGE để Manager xử lý. "
+                    + "Đơn hàng tạm dừng chờ bổ sung hàng hoặc huỷ.")
+    public ResponseEntity<ApiResponse<org.example.sep26management.application.dto.response.IncidentResponse>> reportShortage(
+            @Valid @RequestBody AllocateStockRequest request,
+            HttpServletRequest http) {
+        return ResponseEntity.ok(allocateStockService.reportShortage(
+                request.getDocumentId(), request.getOrderType(),
+                getUserId(), getIp(http), ua(http)));
+    }
+
     // ─────────────────────────────────────────────────────────────
     // SCRUM-511: Pick List
     // generatePickList(GeneratePickListRequest, userId, ip, ua)
