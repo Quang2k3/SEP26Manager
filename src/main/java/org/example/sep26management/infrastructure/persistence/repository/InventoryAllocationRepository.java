@@ -36,7 +36,7 @@ public interface InventoryAllocationRepository
               AND s.skuId = :skuId
               AND (s.quantity - s.reservedQty) > 0
               AND loc.active = true
-              AND loc.locationType = 'BIN'
+              AND (loc.locationType = 'BIN' OR loc.isStaging = true)
             ORDER BY l.expiryDate ASC NULLS LAST, loc.locationCode ASC
             """)
     List<FEFOAllocationProjection> findAvailableStockFEFO(
@@ -58,7 +58,7 @@ public interface InventoryAllocationRepository
               AND s.skuId = :skuId
               AND (s.quantity - s.reservedQty) > 0
               AND loc.active = true
-              AND loc.locationType = 'BIN'
+              AND (loc.locationType = 'BIN' OR loc.isStaging = true)
             ORDER BY l.expiryDate ASC NULLS LAST, loc.locationCode ASC
             """)
     List<FEFOAllocationProjection> findAvailableStockFEFONoLot(
