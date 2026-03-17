@@ -374,18 +374,6 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<ReceivingOrderResponse> finalizeCount(Long id, Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
-
-                // FIX: Neu don con DRAFT (Keeper chua submit tu desktop),
-                // tu dong submit truoc khi finalize de scan page khong bi loi status.
-                if ("DRAFT".equals(order.getStatus())) {
-                        order.setStatus("PENDING_COUNT");
-                        order.setUpdatedAt(java.time.LocalDateTime.now());
-                        receivingOrderRepo.save(order);
-                        addInboundStockToStaging(order, userId);
-                        log.info("Auto-submitted DRAFT order {} to PENDING_COUNT before finalizeCount"
-                                + " (from scan page) userId={}", order.getReceivingCode(), userId);
-                }
-
                 validateStatus(order, "finalize-count", "PENDING_COUNT");
 
                 // --- Sync from active scan session if exists ---
@@ -420,6 +408,22 @@ public class ReceivingOrderService {
                                         }
                                 }
                         });
+                }
+
+                // FIX: Fallback — nếu receivedQty vẫn là 0 sau sync (session đã expire
+                // hoặc Keeper scan từ xa mà session không còn), dùng expectedQty làm
+                // receivedQty để GRN items không bị trống khi generate GRN.
+                List<ReceivingItemEntity> allItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
+                for (ReceivingItemEntity ri : allItems) {
+                        boolean noReceivedQty = ri.getReceivedQty() == null
+                                || ri.getReceivedQty().compareTo(java.math.BigDecimal.ZERO) == 0;
+                        if (noReceivedQty && ri.getExpectedQty() != null
+                                && ri.getExpectedQty().compareTo(java.math.BigDecimal.ZERO) > 0) {
+                                ri.setReceivedQty(ri.getExpectedQty());
+                                receivingItemRepo.save(ri);
+                                log.info("Fallback: SKU {} receivedQty set from expectedQty={}",
+                                        ri.getSkuId(), ri.getExpectedQty());
+                        }
                 }
 
                 order.setStatus("SUBMITTED");
