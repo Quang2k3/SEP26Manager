@@ -374,6 +374,18 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<ReceivingOrderResponse> finalizeCount(Long id, Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
+
+                // FIX: Keeper tạo đơn DRAFT rồi quét ngay trên phone (không bấm Submit
+                // trên desktop trước) → auto-submit DRAFT → PENDING_COUNT trước khi finalize.
+                if ("DRAFT".equals(order.getStatus())) {
+                        order.setStatus("PENDING_COUNT");
+                        order.setUpdatedAt(java.time.LocalDateTime.now());
+                        receivingOrderRepo.save(order);
+                        addInboundStockToStaging(order, userId);
+                        log.info("Auto-submitted DRAFT order {} to PENDING_COUNT before finalizeCount"
+                                + " (from scan page) userId={}", order.getReceivingCode(), userId);
+                }
+
                 validateStatus(order, "finalize-count", "PENDING_COUNT");
 
                 // --- Sync from active scan session if exists ---
