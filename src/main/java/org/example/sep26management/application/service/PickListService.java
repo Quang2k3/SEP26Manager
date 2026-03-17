@@ -185,6 +185,21 @@ public class PickListService {
             responseItems.get(i).setSequence(i + 1);
         }
 
+        // ── Update document status → PICKING ──────────────────────────────────────
+        if (request.getOrderType() == OutboundType.SALES_ORDER) {
+            soRepository.findById(request.getDocumentId()).ifPresent(so -> {
+                so.setStatus("PICKING");
+                soRepository.save(so);
+                log.info("SO {} status → PICKING after pick list generated", so.getSoCode());
+            });
+        } else {
+            transferRepository.findById(request.getDocumentId()).ifPresent(t -> {
+                t.setStatus("PICKING");
+                transferRepository.save(t);
+                log.info("Transfer {} status → PICKING after pick list generated", t.getTransferCode());
+            });
+        }
+
         auditLogService.logAction(userId, "PICK_LIST_GENERATED",
                 request.getOrderType() == OutboundType.SALES_ORDER ? "SALES_ORDER" : "TRANSFER",
                 request.getDocumentId(),
@@ -250,68 +265,6 @@ public class PickListService {
                 .assignedTo(task.getAssignedTo())
                 .items(responseItems)
                 .build());
-    }
-
-
-    /**
-     * Keeper xác nhận đã lấy đủ hàng → picking task OPEN/IN_PROGRESS → PICKED.
-     * Bắt buộc trước khi QC có thể gọi start-qc (start-qc yêu cầu task PICKED).
-     */
-    @Transactional
-    public ApiResponse<PickListResponse> confirmPicked(Long taskId, Long userId, String ip, String ua) {
-        log.info("confirmPicked: taskId={}, userId={}", taskId, userId);
-
-        PickingTaskEntity task = pickingTaskRepository.findById(taskId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.PICKLIST_NOT_FOUND, taskId)));
-
-        if (!("OPEN".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()))) {
-            throw new BusinessException(
-                    "Không thể xác nhận: task phải ở trạng thái OPEN hoặc IN_PROGRESS. Hiện tại: " + task.getStatus());
-        }
-
-        // Set pickedQty = requiredQty cho các item chưa được đánh dấu
-        List<PickingTaskItemEntity> items = pickingTaskItemExtendedRepository.findByPickingTaskId(taskId);
-        for (PickingTaskItemEntity item : items) {
-            if (item.getPickedQty() == null || item.getPickedQty().compareTo(java.math.BigDecimal.ZERO) == 0) {
-                item.setPickedQty(item.getRequiredQty());
-                pickingTaskItemRepository.save(item);
-            }
-        }
-
-        // Chuyển task sang PICKED
-        task.setStatus("PICKED");
-        if (task.getStartedAt() == null) task.setStartedAt(java.time.LocalDateTime.now());
-        pickingTaskRepository.save(task);
-
-        auditLogService.logAction(userId, "PICKING_CONFIRMED", "picking_tasks", taskId,
-                "Pick task " + taskId + " confirmed PICKED by keeper", ip, ua);
-
-        log.info("confirmPicked OK: taskId={} → PICKED", taskId);
-        return getPickList(taskId);
-    }
-
-
-    /**
-     * Lấy pick list đang active (OPEN / IN_PROGRESS / PICKED) theo documentId (soId).
-     * Dùng khi FE mở lại modal và không có taskId trong state.
-     */
-    @Transactional(readOnly = true)
-    public ApiResponse<PickListResponse> getPickListByDocument(Long documentId, Long warehouseId) {
-        List<PickingTaskEntity> tasks = pickingTaskRepository
-                .findByWarehouseIdAndSoId(warehouseId, documentId);
-
-        // Lấy task active nhất (không phải CANCELLED/COMPLETED)
-        PickingTaskEntity active = tasks.stream()
-                .filter(t -> !"CANCELLED".equals(t.getStatus()) && !"COMPLETED".equals(t.getStatus()))
-                .findFirst()
-                .orElse(tasks.isEmpty() ? null : tasks.get(tasks.size() - 1));
-
-        if (active == null) {
-            throw new ResourceNotFoundException("Không tìm thấy Pick List cho đơn #" + documentId);
-        }
-
-        return getPickList(active.getPickingTaskId());
     }
 
     private Long resolveLocationForReservation(ReservationEntity res, Long warehouseId) {
