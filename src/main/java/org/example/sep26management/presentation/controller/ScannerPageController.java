@@ -300,9 +300,9 @@ public class ScannerPageController {
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
                 "    if(d&&d.success){\n" +
-                "      toast('✅ Đã gửi QC kiểm tra! QR bị khoá.');\n" +
-                "      lockUI('Keeper đã chốt kiểm đếm — chờ QC xử lý');\n" +
-                "      if(document.getElementById('oi-status')) document.getElementById('oi-status').textContent='SUBMITTED';\n" +
+                "      toast('✅ Đã gửi QC kiểm đếm! Trạng thái: Chờ kiểm đếm. QR bị khoá.');\n" +
+                "      lockUI('Đã gửi QC — Chờ kiểm đếm (PENDING_COUNT)');\n" +
+                "      if(document.getElementById('oi-status')) document.getElementById('oi-status').textContent='PENDING_COUNT';\n" +
                 "    } else {\n" +
                 "      toast((d&&d.message)?d.message:'Lỗi submit',true);\n" +
                 "      btn.disabled=false;btn.textContent=' Xác nhận kiểm đếm — Gửi QC';\n" +
