@@ -20,15 +20,15 @@ public class ScannerPageController {
             + "- `receivingId` *(Tùy chọn)*: ID Phiếu Nhận Hàng (GRN), lấy từ response của `POST /v1/receiving-sessions/{sessionId}/create-grn` (field `receivingId`). "
             + "Nếu truyền vào, trang scan sẽ **tự động hiển thị** ID phiếu nhận mà không cần nhập tay.")
     public String getScanUrl(@RequestParam("token") String token,
-            @RequestParam(value = "receivingId", required = false) Long receivingId,
-            HttpServletRequest request) {
+                             @RequestParam(value = "receivingId", required = false) Long receivingId,
+                             @RequestParam(value = "taskId", required = false) Long taskId,
+                             HttpServletRequest request) {
         String base = request.getScheme() + "://" + request.getServerName()
                 + (request.getServerPort() == 80 || request.getServerPort() == 443 ? ""
-                        : ":" + request.getServerPort());
+                : ":" + request.getServerPort());
         String url = base + "/v1/scan?token=" + token + "&v=qr3";
-        if (receivingId != null) {
-            url += "&receivingId=" + receivingId;
-        }
+        if (receivingId != null) url += "&receivingId=" + receivingId;
+        if (taskId != null)      url += "&taskId=" + taskId + "&mode=outbound_qc";
         return url;
     }
 
@@ -39,11 +39,13 @@ public class ScannerPageController {
             + "- `receivingId` *(Tùy chọn)*: Nếu được truyền qua URL (do FE nhúng từ bước `create-grn`), "
             + "trường **PHIẾU NHẬN HÀNG** trên trang sẽ **tự động điền sẵn** — người dùng không cần nhập tay nữa.")
     public ResponseEntity<String> scannerPage(@RequestParam("token") String token,
-            @RequestParam(value = "receivingId", required = false) Long receivingId) {
+                                              @RequestParam(value = "receivingId", required = false) Long receivingId,
+                                              @RequestParam(value = "taskId", required = false) Long taskId,
+                                              @RequestParam(value = "mode", required = false) String mode) {
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 .header("Pragma", "no-cache")
-                .body(buildHtml(escapeForJs(token), receivingId));
+                .body(buildHtml(escapeForJs(token), receivingId, taskId, "outbound_qc".equals(mode)));
     }
 
     private static String escapeForJs(String s) {
@@ -52,8 +54,11 @@ public class ScannerPageController {
         return s.replace("\\", "\\\\").replace("'", "\\'");
     }
 
-    private String buildHtml(String token, Long receivingId) {
+    private String buildHtml(String token, Long receivingId) { return buildHtml(token, receivingId, null, false); }
+    private String buildHtml(String token, Long receivingId, Long taskId, boolean outboundQcMode) {
         String receivingIdJs = receivingId != null ? String.valueOf(receivingId) : "null";
+        String taskIdJs = taskId != null ? String.valueOf(taskId) : "null";
+        String modeJs = outboundQcMode ? "outbound_qc" : "inbound";
         return "<!DOCTYPE html>" +
                 "<html lang='vi'><head>" +
                 "<meta charset='UTF-8'>" +
@@ -250,6 +255,8 @@ public class ScannerPageController {
 
                 "<script>\n" +
                 "var TOKEN='" + token + "';\n" +
+                "var TASK_ID=" + taskIdJs + ";\n" +
+                "var SCAN_MODE='" + modeJs + "';\n" +
                 "var RECEIVING_ID=" + receivingIdJs + ";\n" +
                 "var API=window.location.origin+'/v1/scan-events';\n" +
                 "var ORDER_API=window.location.origin+'/v1/receiving-orders';\n" +
@@ -428,7 +435,7 @@ public class ScannerPageController {
                 "  if(inflight) return;\n" +
                 "  inflight=true;\n" +
                 "  setStatus('Đang gửi: '+barcode);\n" +
-                "  fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify({barcode:barcode,qty:qty,condition:currentCondition})})\n"
+                "  fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify({barcode:barcode,qty:qty,condition:currentCondition,taskId:TASK_ID,mode:SCAN_MODE})})\n"
                 +
                 "  .then(function(r){return r.text().then(function(txt){try{return JSON.parse(txt);}catch(e){return {success:false,message:'HTTP '+r.status+': '+txt.substring(0,140)};}});})\n"
                 +
@@ -441,7 +448,7 @@ public class ScannerPageController {
                 "  .catch(function(e){toast('Mất kết nối',true);setStatus('Lỗi mạng: '+e);})\n" +
                 "  .finally(function(){setTimeout(function(){inflight=false;},600);});\n" +
                 "} \n" +
-                
+
                 "function decrementItem(lineKey){\n" +
                 "  if(inflight) return;\n" +
                 "  var item=lineData[lineKey];\n" +

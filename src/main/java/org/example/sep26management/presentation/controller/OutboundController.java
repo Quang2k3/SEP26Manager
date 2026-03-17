@@ -230,14 +230,14 @@ public class OutboundController {
     }
 
     @GetMapping("/pick-list/{taskId}")
-    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER','QC')")
     @Operation(summary = "Chi tiết Pick List theo taskId")
     public ResponseEntity<ApiResponse<PickListResponse>> getPickList(@PathVariable Long taskId) {
         return ResponseEntity.ok(pickListService.getPickList(taskId));
     }
 
     @GetMapping("/pick-list/by-document/{documentId}")
-    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER','QC')")
     @Operation(summary = "Lấy Pick List theo documentId (soId)",
             description = "Tự động tìm picking task đang active cho đơn hàng. "
                     + "Dùng khi FE mở lại modal và không có taskId trong state.")
@@ -259,16 +259,16 @@ public class OutboundController {
     // ═════════════════════════════════════════════════════════════
 
     @PostMapping("/pick-list/{taskId}/start-qc")
-    @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Bắt đầu phiên QC (KEEPER)",
+    @PreAuthorize("hasAnyRole('KEEPER','QC')")
+    @Operation(summary = "Bắt đầu phiên QC",
             description = "Chuyển picking task `PICKED` → `QC_IN_PROGRESS`, Sales Order `PICKING` → `QC_SCAN`.")
     public ResponseEntity<ApiResponse<Void>> startQcSession(@PathVariable Long taskId) {
         return ResponseEntity.ok(outboundQcService.startQcSession(taskId, getUserId()));
     }
 
     @PostMapping("/qc-scan")
-    @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "QC Scan từng item (KEEPER)",
+    @PreAuthorize("hasAnyRole('KEEPER','QC')")
+    @Operation(summary = "QC Scan từng item",
             description = "Ghi nhận kết quả QC: `PASS` / `FAIL` / `HOLD`.\n\n"
                     + "- **FAIL**: bắt buộc có `reason`.\n"
                     + "- Task phải ở trạng thái `QC_IN_PROGRESS`.")
@@ -277,7 +277,7 @@ public class OutboundController {
     }
 
     @GetMapping("/pick-list/{taskId}/qc-summary")
-    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER','QC')")
     @Operation(summary = "Tóm tắt kết quả QC",
             description = "Trả về: `totalItems`, `passCount`, `failCount`, `holdCount`, `pendingCount`.")
     public ResponseEntity<ApiResponse<QcSummaryResponse>> getQcSummary(@PathVariable Long taskId) {

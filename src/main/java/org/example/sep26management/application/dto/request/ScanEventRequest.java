@@ -37,4 +37,10 @@ public class ScanEventRequest {
     @Schema(description = "ID Phiếu nhận hàng (Receiving Order) để map scan trực tiếp vào phiếu (tăng receivedQty theo thùng).",
             example = "123")
     private Long receivingId;
+
+    /** Outbound QC: ID của picking task — khi mode=outbound_qc */
+    private Long taskId;
+
+    /** outbound_qc | inbound */
+    private String mode;
 }
