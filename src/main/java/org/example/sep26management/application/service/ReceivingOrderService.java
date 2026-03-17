@@ -363,8 +363,10 @@ public class ReceivingOrderService {
 
                 log.info("Receiving Order {} submitted (DRAFT → PENDING_COUNT) by userId={}",
                         order.getReceivingCode(), userId);
+                // FIX: dùng toSummaryResponse thay vì getOrder() để tránh lazy-load lỗi
+                // trong @Transactional scope làm rollback toàn bộ submit khi getOrder throw.
                 return ApiResponse.success("Submitted successfully. Status: PENDING_COUNT. Keeper can now start scanning.",
-                        getOrder(id).getData());
+                        toSummaryResponse(order));
         }
 
         // ─── Finalize Count (PENDING_COUNT → SUBMITTED) ─────────────────────────
