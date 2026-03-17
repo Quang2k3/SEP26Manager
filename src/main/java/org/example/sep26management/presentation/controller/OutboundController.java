@@ -18,6 +18,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.example.sep26management.application.service.ReceivingSessionService;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -57,6 +58,7 @@ public class OutboundController {
     private final AllocateStockService allocateStockService;
     private final PickListService pickListService;
     private final OutboundQcService outboundQcService;
+    private final ReceivingSessionService receivingSessionService;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
@@ -265,6 +267,44 @@ public class OutboundController {
     public ResponseEntity<ApiResponse<PickListResponse>> confirmPicked(
             @PathVariable Long taskId, HttpServletRequest http) {
         return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http)));
+    }
+
+    @PostMapping("/pick-list/{taskId}/scan-url")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Tạo scan URL cho Picking (KEEPER)",
+            description = "Tạo phiên scan và trả về URL + token để Keeper mở trên điện thoại quét mã hàng trong Pick List.\n\n"
+                    + "- Mode `outbound_picking`: Keeper quét từng SKU trong pick list, khi đủ bấm **'Gửi sang QC'** — task sẽ chuyển PICKED → QC_IN_PROGRESS.\n"
+                    + "- URL trả về dùng để tạo QR code hiển thị trên màn hình Keeper.")
+    public ResponseEntity<ApiResponse<Map<String, String>>> getPickingScanUrl(
+            @PathVariable Long taskId,
+            Authentication auth,
+            HttpServletRequest http) {
+        Long userId = getUserId();
+        Long warehouseId = getWarehouseId();
+
+        // Tạo hoặc reuse scan session
+        var sessionResp = receivingSessionService.createSession(warehouseId, userId);
+        String sessionId = sessionResp.getData().getSessionId();
+
+        // Sinh scan token với role KEEPER
+        String role = getCurrentRole();
+        var tokenResp = receivingSessionService.generateScanToken(sessionId, userId, role);
+        String scanToken = tokenResp.getData().get("scanToken");
+
+        // Build URL trang scanner với mode=outbound_picking&taskId=...
+        String base = http.getScheme() + "://" + http.getServerName()
+                + (http.getServerPort() == 80 || http.getServerPort() == 443 ? ""
+                : ":" + http.getServerPort());
+        String scanUrl = base + "/v1/scan?token=" + scanToken
+                + "&mode=outbound_picking&taskId=" + taskId + "&v=qr3";
+
+        Map<String, String> result = new java.util.LinkedHashMap<>();
+        result.put("scanUrl", scanUrl);
+        result.put("scanToken", scanToken);
+        result.put("sessionId", sessionId);
+        result.put("taskId", String.valueOf(taskId));
+
+        return ResponseEntity.ok(ApiResponse.success("Scan URL created for picking task " + taskId, result));
     }
 
     // ═════════════════════════════════════════════════════════════

@@ -37,16 +37,20 @@ public class ScannerPageController {
             + "**Data yêu cầu:**\n"
             + "- `token`: JWT scan token.\n"
             + "- `receivingId` *(Tùy chọn)*: Nếu được truyền qua URL (do FE nhúng từ bước `create-grn`), "
-            + "trường **PHIẾU NHẬN HÀNG** trên trang sẽ **tự động điền sẵn** — người dùng không cần nhập tay nữa.")
+            + "trường **PHIẾU NHẬN HÀNG** trên trang sẽ **tự động điền sẵn** — người dùng không cần nhập tay nữa.\n"
+            + "- `mode=outbound_picking` + `taskId`: Chế độ quét hàng outbound — hiện pick list và nút Gửi sang QC.")
     public ResponseEntity<String> scannerPage(@RequestParam("token") String token,
                                               @RequestParam(value = "receivingId", required = false) Long receivingId,
                                               @RequestParam(value = "taskId", required = false) Long taskId,
                                               @RequestParam(value = "mode", required = false) String mode) {
         boolean outboundQcMode = "outbound_qc".equals(mode);
+        boolean outboundPickingMode = "outbound_picking".equals(mode);
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 .header("Pragma", "no-cache")
-                .body(buildHtml(escapeForJs(token), receivingId, taskId, outboundQcMode));
+                .body(outboundPickingMode
+                        ? buildPickingHtml(escapeForJs(token), taskId)
+                        : buildHtml(escapeForJs(token), receivingId, taskId, outboundQcMode));
     }
 
     private static String escapeForJs(String s) {
@@ -681,4 +685,261 @@ public class ScannerPageController {
 
                 "</script></body></html>";
     }
+
+    // ── OUTBOUND PICKING MODE ────────────────────────────────────────────────────
+    private String buildPickingHtml(String token, Long taskId) {
+        String taskIdJs = taskId != null ? String.valueOf(taskId) : "null";
+        return "<!DOCTYPE html>" +
+                "<html lang='vi'><head>" +
+                "<meta charset='UTF-8'>" +
+                "<meta name='viewport' content='width=device-width,initial-scale=1.0,user-scalable=no'>" +
+                "<title>Warehouse Scanner — Picking</title>" +
+                "<script src='/js/html5-qrcode.min.js'></script>" +
+                "<style>" +
+                "*{box-sizing:border-box;margin:0;padding:0}" +
+                "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}" +
+                "header{background:linear-gradient(135deg,#1e3a8a,#7c3aed);padding:14px 16px;display:flex;align-items:center;gap:10px}" +
+                "header h1{font-size:17px;font-weight:700;flex:1}" +
+                ".badge{border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700}" +
+                ".badge-cnt{background:#dbeafe;color:#1e3a8a}" +
+                ".badge-pick{background:#f59e0b;color:#000}" +
+                ".container{padding:12px;max-width:520px;margin:0 auto}" +
+                "#cam-wrap{position:relative;border-radius:14px;overflow:hidden;border:2px solid #f59e0b;background:#111;margin-bottom:8px}" +
+                "#reader{width:100%}" +
+                "#scan-line{position:absolute;left:8%;right:8%;height:2px;background:linear-gradient(90deg,transparent,#fbbf24,transparent);top:50%;animation:scan 1.8s ease-in-out infinite;pointer-events:none;z-index:10}" +
+                "@keyframes scan{0%,100%{top:20%}50%{top:80%}}" +
+                "#cam-status{background:#1e293b;color:#94a3b8;font-size:11px;padding:6px 12px;text-align:center;border-radius:0 0 12px 12px}" +
+                ".card{background:#1e293b;border-radius:12px;padding:14px;margin-top:10px}" +
+                ".card-title{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;font-weight:600}" +
+                "table{width:100%;border-collapse:collapse;font-size:13px}" +
+                "th{text-align:left;color:#475569;padding:5px 4px;font-size:11px;font-weight:600}" +
+                "td{padding:9px 4px;border-bottom:1px solid #263347}" +
+                ".qty-req{text-align:right;color:#94a3b8;font-size:13px}" +
+                ".qty-scan{text-align:right;font-weight:800;font-size:15px}" +
+                ".qty-ok{color:#22c55e}" +
+                ".qty-partial{color:#f59e0b}" +
+                ".qty-zero{color:#475569}" +
+                ".row{display:flex;gap:8px}" +
+                "input{flex:1;padding:11px 14px;background:#0f172a;border:1.5px solid #334155;border-radius:8px;color:#e2e8f0;font-size:16px;-webkit-appearance:none}" +
+                "input:focus{outline:none;border-color:#f59e0b}" +
+                ".qty-in{max-width:90px;text-align:center;flex:none}" +
+                ".btn{padding:12px 18px;border:none;border-radius:10px;font-size:16px;font-weight:800;cursor:pointer;color:#fff}" +
+                ".btn.full{width:100%}" +
+                ".btn.scan-btn{background:#f59e0b;color:#000}" +
+                ".btn.submit-btn{background:linear-gradient(135deg,#22c55e,#16a34a);font-size:17px;padding:14px 18px;margin-top:10px;width:100%}" +
+                ".btn.submit-btn:disabled{opacity:.4;cursor:not-allowed}" +
+                ".btn.danger{background:#ef4444;width:100%}" +
+                ".progress-bar{background:#0f172a;border-radius:8px;height:10px;margin:8px 0;overflow:hidden;border:1px solid #1e293b}" +
+                ".progress-fill{height:100%;border-radius:8px;background:linear-gradient(90deg,#22c55e,#16a34a);transition:width .4s ease}" +
+                ".hint{color:#94a3b8;font-size:12px;line-height:1.35}" +
+                ".toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;padding:11px 24px;border-radius:28px;font-weight:800;font-size:14px;display:none;white-space:nowrap;box-shadow:0 4px 24px rgba(0,0,0,.5)}" +
+                ".toast.err{background:#ef4444}" +
+                ".sc{color:#94a3b8;font-size:11px}" +
+                "</style></head><body>" +
+
+                "<header>" +
+                "  <span style='font-size:20px'>📦</span>" +
+                "  <h1>Picking Scanner</h1>" +
+                "  <span class='badge badge-pick'>PICKING</span>" +
+                "  <span class='badge badge-cnt' id='cnt' style='margin-left:4px'>0/0</span>" +
+                "</header>" +
+
+                "<div class='container'>" +
+                "<div id='cam-wrap'><div id='reader'></div><div id='scan-line'></div></div>" +
+                "<div id='cam-status'>Đang khởi động camera…</div>" +
+
+                "<div class='card'>" +
+                "  <div class='card-title'>📋 Pick List <span id='task-label' style='color:#f59e0b'></span></div>" +
+                "  <div class='progress-bar'><div class='progress-fill' id='progress-fill' style='width:0%'></div></div>" +
+                "  <div style='display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:8px'>" +
+                "    <span>Đã pick: <b id='scanned-count' style='color:#22c55e'>0</b></span>" +
+                "    <span>Tổng cần: <b id='total-count' style='color:#e2e8f0'>0</b></span>" +
+                "  </div>" +
+                "  <table><thead><tr><th>SKU</th><th>Vị trí</th><th style='text-align:right'>Y/C</th><th style='text-align:right'>Đã pick</th></tr></thead>" +
+                "  <tbody id='pick-lines'><tr><td colspan='4' style='text-align:center;color:#475569;padding:16px'>Đang tải...</td></tr></tbody>" +
+                "  </table>" +
+                "</div>" +
+
+                "<div class='card'>" +
+                "  <div class='card-title'>Quét QR / Nhập thủ công</div>" +
+                "  <div class='hint'>Đưa mã QR vào khung. Mã vừa quét: <b id='last'>-</b></div>" +
+                "  <div class='row' style='margin-top:10px'>" +
+                "    <input type='text' id='bc' placeholder='SKU Code' autocapitalize='characters' autocomplete='off'/>" +
+                "    <input type='number' id='qty' class='qty-in' value='1' min='1' step='1'/>" +
+                "  </div>" +
+                "  <button class='btn full scan-btn' id='manualBtn' style='margin-top:10px'>📦 Ghi nhận pick</button>" +
+                "</div>" +
+
+                "<div class='card'>" +
+                "  <div class='hint' style='margin-bottom:10px'>Sau khi lấy đủ toàn bộ hàng trong Pick List, bấm nút bên dưới để gửi QC kiểm tra chất lượng.</div>" +
+                "  <button class='btn submit-btn' id='submitBtn' disabled>✅ Gửi sang QC kiểm hàng</button>" +
+                "</div>" +
+
+                "<div class='card'><button class='btn danger' id='closeBtn'>🛑 Thoát</button></div>" +
+                "</div>" +
+
+                "<div class='toast' id='toast'></div>" +
+
+                "<script>\n" +
+                "var TOKEN='" + token + "';\n" +
+                "var TASK_ID=" + taskIdJs + ";\n" +
+                "var API=window.location.origin+'/v1/scan-events';\n" +
+                "var OUTBOUND_API=window.location.origin+'/v1/outbound';\n" +
+                "var pickItems=[];\n" +
+                "var scannedMap={};\n" +
+                "var inflight=false;\n" +
+                "var lastCode=null;\n" +
+                "var lastAt=0;\n" +
+                "\n" +
+                "function toast(msg,err){var t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(err?' err':'');t.style.display='block';clearTimeout(t._t);t._t=setTimeout(function(){t.style.display='none';},2800);}\n" +
+                "function setStatus(msg){document.getElementById('cam-status').textContent=msg;}\n" +
+                "\n" +
+                "function base64UrlDecode(str){str=(str||'').replace(/-/g,'+').replace(/_/g,'/');while(str.length%4)str+='=';return atob(str);}\n" +
+                "function getSessionId(){try{var p=TOKEN.split('.')[1];var d=JSON.parse(base64UrlDecode(p));return d.sessionId||null;}catch(e){return null;}}\n" +
+                "var SESSION_ID=getSessionId();\n" +
+                "\n" +
+                "function loadPickList(){\n" +
+                "  if(!TASK_ID){document.getElementById('pick-lines').innerHTML='<tr><td colspan=\'4\' style=\'color:#ef4444;text-align:center;padding:16px\'>Không tìm thấy Task ID!</td></tr>';return;}\n" +
+                "  fetch(OUTBOUND_API+'/pick-list/'+TASK_ID,{headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "  .then(function(r){return r.json();})\n" +
+                "  .then(function(resp){\n" +
+                "    if(resp&&resp.success&&resp.data){\n" +
+                "      pickItems=resp.data.items||[];\n" +
+                "      document.getElementById('task-label').textContent='#'+TASK_ID+' ('+resp.data.status+')';\n" +
+                "      renderPickList();\n" +
+                "    } else {\n" +
+                "      document.getElementById('pick-lines').innerHTML='<tr><td colspan=\'4\' style=\'color:#ef4444;text-align:center\'>Lỗi tải pick list</td></tr>';\n" +
+                "    }\n" +
+                "  }).catch(function(){\n" +
+                "    document.getElementById('pick-lines').innerHTML='<tr><td colspan=\'4\' style=\'color:#ef4444;text-align:center\'>Lỗi kết nối</td></tr>';\n" +
+                "  });\n" +
+                "}\n" +
+                "\n" +
+                "function renderPickList(){\n" +
+                "  var rows='';\n" +
+                "  var doneCount=0;\n" +
+                "  var total=pickItems.length;\n" +
+                "  for(var i=0;i<pickItems.length;i++){\n" +
+                "    var it=pickItems[i];\n" +
+                "    var sku=it.skuCode||'';\n" +
+                "    var loc=(it.zoneCode?it.zoneCode+'/':'')+it.locationCode;\n" +
+                "    var req=parseFloat(it.requiredQty)||0;\n" +
+                "    var scanned=parseFloat(scannedMap[sku]||0);\n" +
+                "    var qcls=scanned>=req?'qty-ok':(scanned>0?'qty-partial':'qty-zero');\n" +
+                "    if(scanned>=req&&req>0)doneCount++;\n" +
+                "    rows+='<tr>'\n" +
+                "      +'<td class=\'sc\'>'+sku+(it.lotNumber?'<br><span style=\'font-size:9px;color:#f59e0b\'>'+it.lotNumber+'</span>':'')+'</td>'\n" +
+                "      +'<td style=\'font-size:11px;color:#64748b\'>'+loc+'</td>'\n" +
+                "      +'<td class=\'qty-req\'>'+req+'</td>'\n" +
+                "      +'<td class=\'qty-scan '+qcls+'\'>'+scanned+'</td>'\n" +
+                "      +'</tr>';\n" +
+                "  }\n" +
+                "  document.getElementById('pick-lines').innerHTML=rows||'<tr><td colspan=\'4\' style=\'color:#475569;text-align:center\'>Chưa có items</td></tr>';\n" +
+                "  document.getElementById('scanned-count').textContent=doneCount;\n" +
+                "  document.getElementById('total-count').textContent=total;\n" +
+                "  document.getElementById('cnt').textContent=doneCount+'/'+total;\n" +
+                "  var pct=total>0?Math.round(doneCount/total*100):0;\n" +
+                "  document.getElementById('progress-fill').style.width=pct+'%';\n" +
+                "  document.getElementById('submitBtn').disabled=(doneCount<total);\n" +
+                "}\n" +
+                "\n" +
+                "function recordPick(barcode,qty){\n" +
+                "  if(inflight)return;\n" +
+                "  inflight=true;\n" +
+                "  setStatus('Đang ghi nhận: '+barcode);\n" +
+                "  fetch(API,{method:'POST',\n" +
+                "    headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},\n" +
+                "    body:JSON.stringify({barcode:barcode,qty:qty,condition:'PASS'})})\n" +
+                "  .then(function(r){return r.text().then(function(t){try{return JSON.parse(t);}catch(e){return {success:false,message:'HTTP '+r.status};}});})\n" +
+                "  .then(function(d){\n" +
+                "    if(d&&d.success){\n" +
+                "      var sku=d.data.skuCode||barcode;\n" +
+                "      scannedMap[sku]=(parseFloat(scannedMap[sku]||0)+parseFloat(qty||1));\n" +
+                "      toast('✓ '+sku+' +'+qty);\n" +
+                "      renderPickList();\n" +
+                "      document.getElementById('bc').value='';\n" +
+                "      if(navigator.vibrate)navigator.vibrate(60);\n" +
+                "    } else { toast((d&&d.message)||'SKU không tìm thấy',true); }\n" +
+                "    setStatus('Camera sẵn sàng — đưa QR vào khung');\n" +
+                "  })\n" +
+                "  .catch(function(e){toast('Lỗi mạng',true);setStatus('Lỗi: '+e);})\n" +
+                "  .finally(function(){setTimeout(function(){inflight=false;},600);});\n" +
+                "}\n" +
+                "\n" +
+                "function submitToQc(){\n" +
+                "  if(!TASK_ID){toast('Không tìm thấy Task ID!',true);return;}\n" +
+                "  if(!confirm('Xác nhận đã lấy đủ hàng?\\nHệ thống sẽ chuyển sang QC kiểm tra chất lượng.'))return;\n" +
+                "  var btn=document.getElementById('submitBtn');\n" +
+                "  btn.disabled=true;btn.textContent='Đang gửi...';\n" +
+                "  fetch(OUTBOUND_API+'/pick-list/'+TASK_ID+'/confirm-picked',{method:'PATCH',headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "  .then(function(r){return r.json();})\n" +
+                "  .then(function(d){\n" +
+                "    if(!d||!d.success){toast((d&&d.message)||'Lỗi confirm-picked',true);btn.disabled=false;btn.textContent='✅ Gửi sang QC kiểm hàng';return;}\n" +
+                "    return fetch(OUTBOUND_API+'/pick-list/'+TASK_ID+'/start-qc',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "    .then(function(r2){return r2.json();})\n" +
+                "    .then(function(d2){\n" +
+                "      if(d2&&d2.success){\n" +
+                "        toast('✅ Đã gửi QC! Task đang kiểm tra chất lượng.');\n" +
+                "        btn.textContent='✅ Đã gửi QC';btn.style.background='#475569';\n" +
+                "        stopQr();\n" +
+                "      } else { toast((d2&&d2.message)||'Lỗi start-qc',true);btn.disabled=false;btn.textContent='✅ Gửi sang QC kiểm hàng'; }\n" +
+                "    });\n" +
+                "  })\n" +
+                "  .catch(function(e){toast('Lỗi: '+e,true);btn.disabled=false;btn.textContent='✅ Gửi sang QC kiểm hàng';});\n" +
+                "}\n" +
+                "\n" +
+                "function submitManual(){\n" +
+                "  var b=(document.getElementById('bc').value||'').trim().toUpperCase();\n" +
+                "  var q=parseFloat(document.getElementById('qty').value)||1;\n" +
+                "  if(!b){toast('Nhập mã SKU!',true);return;}\n" +
+                "  document.getElementById('last').textContent=b;\n" +
+                "  recordPick(b,q);\n" +
+                "}\n" +
+                "\n" +
+                "var qr=null;var qrRunning=false;\n" +
+                "function stopQr(){try{if(qr&&qrRunning){qr.stop().then(function(){qrRunning=false;}).catch(function(){});}}catch(e){}}\n" +
+                "function waitForHtml5Qrcode(cb,retries){\n" +
+                "  if(typeof Html5Qrcode!=='undefined'){cb();return;}\n" +
+                "  if(retries<=0){setStatus('Lỗi: Thư viện QR chưa tải');return;}\n" +
+                "  setTimeout(function(){waitForHtml5Qrcode(cb,retries-1);},200);\n" +
+                "}\n" +
+                "function startQr(){\n" +
+                "  if(window.location.protocol!=='https:'&&window.location.hostname!=='localhost'&&window.location.hostname!=='127.0.0.1'){\n" +
+                "    setStatus('Lỗi: Cần HTTPS để truy cập camera');return;\n" +
+                "  }\n" +
+                "  try{\n" +
+                "    Html5Qrcode.getCameras().then(function(cameras){\n" +
+                "      if(cameras&&cameras.length){\n" +
+                "        var cameraId=null;\n" +
+                "        for(var i=0;i<cameras.length;i++){var l=cameras[i].label.toLowerCase();if(l.includes('back')||l.includes('rear')||l.includes('environment')){cameraId=cameras[i].id;break;}}\n" +
+                "        if(!cameraId)cameraId=cameras[cameras.length-1].id;\n" +
+                "        qr=new Html5Qrcode('reader');\n" +
+                "        qr.start(cameraId,{fps:10,qrbox:{width:250,height:250},videoConstraints:{facingMode:'environment'}},\n" +
+                "          function(decodedText){\n" +
+                "            var code=(decodedText||'').trim().toUpperCase();\n" +
+                "            if(code.length<2)return;\n" +
+                "            var now=Date.now();\n" +
+                "            if(code===lastCode&&(now-lastAt)<1500)return;\n" +
+                "            lastCode=code;lastAt=now;\n" +
+                "            document.getElementById('last').textContent=code;\n" +
+                "            recordPick(code,1);\n" +
+                "          },function(){}\n" +
+                "        ).then(function(){qrRunning=true;setStatus('Camera sẵn sàng — đưa QR vào khung');})\n" +
+                "         .catch(function(e){toast('Không mở được camera: '+e,true);setStatus('Camera lỗi');});\n" +
+                "      } else {setStatus('Không tìm thấy camera');}\n" +
+                "    }).catch(function(e){setStatus('Lỗi camera: '+e);});\n" +
+                "  }catch(e){setStatus('Lỗi: '+e);}\n" +
+                "}\n" +
+                "\n" +
+                "document.addEventListener('DOMContentLoaded',function(){\n" +
+                "  document.getElementById('manualBtn').addEventListener('click',submitManual);\n" +
+                "  document.getElementById('submitBtn').addEventListener('click',submitToQc);\n" +
+                "  document.getElementById('closeBtn').addEventListener('click',function(){if(confirm('Thoát trang scan?')){stopQr();}});\n" +
+                "  document.getElementById('bc').addEventListener('keydown',function(e){if(e.key==='Enter')submitManual();});\n" +
+                "  loadPickList();\n" +
+                "});\n" +
+                "window.addEventListener('load',function(){waitForHtml5Qrcode(startQr,25);});\n" +
+                "</script></body></html>";
+    }
+
 }
