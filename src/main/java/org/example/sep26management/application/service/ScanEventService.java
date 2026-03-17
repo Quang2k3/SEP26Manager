@@ -289,13 +289,27 @@ public class ScanEventService {
             if (sessionId != null) {
                 try {
                     var sessionOpt = sessionRedis.findById(sessionId);
-                    sessionOpt.ifPresent(s -> sseRegistry.send(sessionId, Map.of(
-                            "type", "qc_scan",
-                            "skuCode", sku.getSkuCode(),
-                            "skuName", sku.getSkuName(),
-                            "result", condition,
-                            "taskItemId", taskItem.getPickingTaskItemId()
-                    )));
+                    if (sessionOpt.isPresent()) {
+                        // Check if all items are now scanned
+                        var allItems = pickingTaskItemRepository.findByPickingTaskId(taskId);
+                        long pendingCount = allItems.stream().filter(i -> i.getQcScannedAt() == null).count();
+                        boolean allScanned = pendingCount == 0 && !allItems.isEmpty();
+                        long passCount = allItems.stream().filter(i -> "PASS".equals(i.getQcResult())).count();
+                        long failCount = allItems.stream().filter(i -> "FAIL".equals(i.getQcResult())).count();
+                        long holdCount = allItems.stream().filter(i -> "HOLD".equals(i.getQcResult())).count();
+                        sseRegistry.send(sessionId, Map.of(
+                                "type", "qc_scan",
+                                "skuCode", sku.getSkuCode(),
+                                "skuName", sku.getSkuName() != null ? sku.getSkuName() : "",
+                                "result", condition,
+                                "taskItemId", taskItem.getPickingTaskItemId(),
+                                "allScanned", allScanned,
+                                "passCount", passCount,
+                                "failCount", failCount,
+                                "holdCount", holdCount,
+                                "pendingCount", pendingCount
+                        ));
+                    }
                 } catch (Exception ignored) {}
             }
 
