@@ -596,6 +596,12 @@ public class ScannerPageController {
                 "function sendBarcode(barcode,qty){\n" +
                 "  // In picking mode — just do local scan confirmation, no server call\n" +
                 "  if(SCAN_MODE === 'outbound_picking') { handlePickingScan(barcode); return; }\n" +
+                "  // In outbound_qc mode — ignore URL-like codes (camera reads QR on screen)\n" +
+                "  if(SCAN_MODE === 'outbound_qc') {\n" +
+                "    var isUrl = barcode.indexOf('http') === 0 || barcode.indexOf('//') !== -1;\n" +
+                "    var isTooLong = barcode.length > 60;\n" +
+                "    if(isUrl || isTooLong) { toast('⚠️ Đưa barcode sản phẩm vào khung, không phải QR', true); return; }\n" +
+                "  }\n" +
                 "  if(inflight) return;\n" +
                 "  inflight=true;\n" +
                 "  setStatus('Đang gửi: '+barcode);\n" +
@@ -713,7 +719,15 @@ public class ScannerPageController {
                 +
                 "        \n" +
                 "        qr.start(cameraId, config, function(decodedText){\n" +
-                "          var code=(decodedText||'').trim().toUpperCase();\n" +
+                "          var raw=(decodedText||'').trim();\n" +
+                "          // Skip URL-like codes (camera picks up QR on screen/poster)\n" +
+                "          var lc=raw.toLowerCase();\n" +
+                "          if(lc.indexOf('http')===0 || lc.indexOf('//')!==-1 || raw.length>80){\n" +
+                "            if(SCAN_MODE==='outbound_qc'||SCAN_MODE==='outbound_picking')\n" +
+                "              setStatus('⚠️ Phát hiện QR/URL — đưa barcode sản phẩm vào khung');\n" +
+                "            return;\n" +
+                "          }\n" +
+                "          var code=raw.toUpperCase();\n" +
                 "          if(code.length<2) return;\n" +
                 "          var now=Date.now();\n" +
                 "          if(code===lastCode && (now-lastAt)<1500) return;\n" +
