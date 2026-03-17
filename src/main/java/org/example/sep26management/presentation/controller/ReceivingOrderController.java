@@ -177,10 +177,14 @@ public class ReceivingOrderController {
     private Long extractUserId(Authentication auth) {
         if (auth != null && auth.getDetails() instanceof Map) {
             Object uid = ((Map<?, ?>) auth.getDetails()).get("userId");
-            if (uid instanceof Long)
-                return (Long) uid;
-            if (uid instanceof Integer)
-                return ((Integer) uid).longValue();
+            if (uid instanceof Long) return (Long) uid;
+            if (uid instanceof Integer) return ((Integer) uid).longValue();
+            if (uid instanceof Number) return ((Number) uid).longValue();
+            if (uid != null) { try { return Long.parseLong(uid.toString()); } catch (Exception ignored) {} }
+        }
+        // Fallback: try to parse from authentication name (scanner:sessionId won't have userId — use 0L)
+        if (auth != null && auth.getName() != null && auth.getName().startsWith("scanner:")) {
+            return 0L;
         }
         throw new RuntimeException("Cannot extract userId from authentication");
     }
