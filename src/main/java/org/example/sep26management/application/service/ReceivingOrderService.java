@@ -345,48 +345,37 @@ public class ReceivingOrderService {
                 return ApiResponse.success("OK", response);
         }
 
-        // ─── Submit (DRAFT → PENDING_COUNT) ─────────────────────────────────────
+        // ─── Submit (DRAFT → SUBMITTED) ──────────────────────────────────────────
+        // Keeper bấm "Submit" trên desktop → đơn chuyển sang SUBMITTED.
+        // Ở trạng thái SUBMITTED, Keeper mở modal Quét QR trên desktop,
+        // dùng điện thoại scan barcode hàng hoá, rồi bấm "Xác nhận gửi QC" trên phone
+        // → gọi /finalize-count → SUBMITTED → PENDING_COUNT (chờ QC kiểm đếm).
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> submit(Long id, Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
                 validateStatus(order, "submit", "DRAFT");
 
-                order.setStatus("PENDING_COUNT");
+                order.setStatus("SUBMITTED");
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
 
-                // ── Z-INB: Cộng tồn vào staging khi PENDING_COUNT ──────────────────────
-                // Theo nghiệp vụ: khi đơn hàng inbound → PENDING_COUNT thì cộng tồn vào
-                // Z-INB (staging location). Tồn sẽ bị trừ khỏi Z-INB sau khi confirm putaway.
-                addInboundStockToStaging(order, userId);
-
-                log.info("Receiving Order {} submitted (DRAFT → PENDING_COUNT) by userId={}",
+                log.info("Receiving Order {} submitted (DRAFT → SUBMITTED) by userId={}",
                         order.getReceivingCode(), userId);
-                // FIX: dùng toSummaryResponse thay vì getOrder() để tránh lazy-load
-                // throw exception bên trong @Transactional làm rollback toàn bộ submit
-                return ApiResponse.success("Submitted successfully. Status: PENDING_COUNT. Keeper can now start scanning.",
+                return ApiResponse.success("Submitted successfully. Status: SUBMITTED. Keeper can now scan QR.",
                         toSummaryResponse(order));
         }
 
-        // ─── Finalize Count (PENDING_COUNT → SUBMITTED) ─────────────────────────
+        // ─── Finalize Count (SUBMITTED → PENDING_COUNT) ──────────────────────────
+        // Keeper bấm "Xác nhận gửi QC" trên phone (sau khi scan xong) →
+        // đơn chuyển SUBMITTED → PENDING_COUNT (chờ QC kiểm đếm).
+        // Đây cũng là lúc cộng tồn vào staging (Z-INB).
 
         @Transactional
         public ApiResponse<ReceivingOrderResponse> finalizeCount(Long id, Long userId) {
                 ReceivingOrderEntity order = findOrder(id);
 
-                // FIX: Keeper tạo đơn DRAFT rồi quét ngay trên phone (không bấm Submit
-                // trên desktop trước) → auto-submit DRAFT → PENDING_COUNT trước khi finalize.
-                if ("DRAFT".equals(order.getStatus())) {
-                        order.setStatus("PENDING_COUNT");
-                        order.setUpdatedAt(java.time.LocalDateTime.now());
-                        receivingOrderRepo.save(order);
-                        addInboundStockToStaging(order, userId);
-                        log.info("Auto-submitted DRAFT order {} to PENDING_COUNT before finalizeCount"
-                                + " (from scan page) userId={}", order.getReceivingCode(), userId);
-                }
-
-                validateStatus(order, "finalize-count", "PENDING_COUNT");
+                validateStatus(order, "finalize-count", "SUBMITTED");
 
                 // --- Sync from active scan session if exists ---
                 Optional<String> activeSessionId = sessionRedis.findActiveSession(order.getWarehouseId(), userId);
@@ -422,13 +411,17 @@ public class ReceivingOrderService {
                         });
                 }
 
-                order.setStatus("SUBMITTED");
+                order.setStatus("PENDING_COUNT");
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
 
-                log.info("Receiving Order {} finalized (PENDING_COUNT → SUBMITTED) by userId={}",
+                // ── Z-INB: Cộng tồn vào staging khi PENDING_COUNT ────────────────────
+                // Tồn sẽ bị trừ khỏi Z-INB sau khi confirm putaway.
+                addInboundStockToStaging(order, userId);
+
+                log.info("Receiving Order {} finalized (SUBMITTED → PENDING_COUNT) by userId={}",
                         order.getReceivingCode(), userId);
-                return ApiResponse.success("Count finalized. Status: SUBMITTED. Ready for QC review.",
+                return ApiResponse.success("Count finalized. Status: PENDING_COUNT. Ready for QC review.",
                         getOrder(id).getData());
         }
 
@@ -437,10 +430,9 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<ReceivingOrderResponse> qcApprove(Long id, Long qcUserId) {
                 ReceivingOrderEntity order = findOrder(id);
-                // FIX: Keeper submit → PENDING_COUNT là trạng thái QC cần xử lý.
-                // SUBMITTED là trạng thái sau khi Keeper finalizeCount (ít dùng trên FE).
-                // Cho phép cả PENDING_COUNT, SUBMITTED, PENDING_INCIDENT.
-                validateStatus(order, "qc-approve", "PENDING_COUNT", "SUBMITTED", "PENDING_INCIDENT");
+                // QC chỉ xử lý đơn ở PENDING_COUNT (Keeper đã scan xong, gửi QC)
+                // hoặc PENDING_INCIDENT (xử lý sự cố tiếp theo).
+                validateStatus(order, "qc-approve", "PENDING_COUNT", "PENDING_INCIDENT");
 
                 order.setStatus("QC_APPROVED");
                 order.setApprovedBy(qcUserId);
@@ -466,7 +458,7 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<Map<String, Object>> qcSubmitSession(Long id, String sessionId, Long qcUserId) {
                 ReceivingOrderEntity order = findOrder(id);
-                validateStatus(order, "qc-submit-session", "PENDING_COUNT", "SUBMITTED", "PENDING_INCIDENT");
+                validateStatus(order, "qc-submit-session", "PENDING_COUNT", "PENDING_INCIDENT");
 
                 ScanSessionData session = sessionRedis.findById(sessionId)
                         .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
