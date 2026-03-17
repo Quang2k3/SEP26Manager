@@ -383,6 +383,26 @@ public class ScannerPageController {
                 "} \n" +
 
                 // ── Load order details from API ──
+                "function lockScanUI(){\n" +
+                "  stopQr();\n" +
+                "  document.getElementById('manualBtn').disabled=true;\n" +
+                "  document.getElementById('bc').disabled=true;\n" +
+                "  document.getElementById('qty').disabled=true;\n" +
+                "  document.getElementById('cam-wrap').style.opacity='0.3';\n" +
+                "  document.getElementById('cam-wrap').style.pointerEvents='none';\n" +
+                "  setStatus('🔒 Đã gửi QC — không thể quét thêm');\n" +
+                "  var confirmBtn=document.getElementById('confirmBtn');\n" +
+                "  if(confirmBtn){confirmBtn.disabled=true;confirmBtn.textContent='✅ Đã gửi QC';confirmBtn.style.background='#475569';}\n" +
+                "  var locked=document.getElementById('scan-locked-banner');\n" +
+                "  if(!locked){\n" +
+                "    locked=document.createElement('div');\n" +
+                "    locked.id='scan-locked-banner';\n" +
+                "    locked.style.cssText='background:#1e3a5f;border:1.5px solid #3b82f6;border-radius:12px;padding:14px 16px;margin-top:10px;color:#93c5fd;font-size:13px;font-weight:600;text-align:center';\n" +
+                "    locked.textContent='🔒 Đã gửi sang QC kiểm hàng — Phiếu đang chờ kiểm đếm';\n" +
+                "    var container=document.querySelector('.container');\n" +
+                "    if(container) container.insertBefore(locked, container.firstChild.nextSibling);\n" +
+                "  }\n" +
+                "}\n" +
                 "function loadOrderDetails(){\n" +
                 "  if(!RECEIVING_ID) return;\n" +
                 "  document.getElementById('order-info-card').style.display='block';\n" +
@@ -399,13 +419,14 @@ public class ScannerPageController {
                 "      document.getElementById('oi-code').textContent=orderData.receivingCode||'N/A';\n" +
                 "      document.getElementById('oi-status').textContent=orderData.status||'N/A';\n" +
                 "      document.getElementById('oi-supplier').textContent=orderData.supplierName||'N/A';\n" +
-                "      document.getElementById('oi-expected').textContent=(orderData.totalExpectedQty||0)+' sp / '+(orderData.totalLines||0)+' dòng';\n"
-                +
+                "      document.getElementById('oi-expected').textContent=(orderData.totalExpectedQty||0)+' sp / '+(orderData.totalLines||0)+' dòng';\n" +
                 "      if(orderData.note){document.getElementById('oi-note').textContent='📝 '+orderData.note;}\n" +
                 "      updateComparisonTable();\n" +
+                "      var st=(orderData.status||'').toUpperCase();\n" +
+                "      var lockedStatuses=['PENDING_COUNT','SUBMITTED','PENDING_INCIDENT','POSTED','PUTAWAY_DONE','CANCELLED','REJECTED'];\n" +
+                "      if(lockedStatuses.indexOf(st)>=0){ lockScanUI(); }\n" +
                 "    } else {\n" +
-                "      document.getElementById('order-loading').textContent='Không tải được thông tin đơn: '+(resp&&resp.message?resp.message:'Lỗi');\n"
-                +
+                "      document.getElementById('order-loading').textContent='Không tải được thông tin đơn: '+(resp&&resp.message?resp.message:'Lỗi');\n" +
                 "    }\n" +
                 "  })\n" +
                 "  .catch(function(e){document.getElementById('order-loading').textContent='Lỗi kết nối: '+e;});\n" +
@@ -440,27 +461,31 @@ public class ScannerPageController {
                 // ── Confirm and submit to QC ──
                 "function confirmAndSubmit(){\n" +
                 "  if(!RECEIVING_ID){toast('Không có ID phiếu!',true);return;}\n" +
-                "  if(!confirm('Xác nhận kiểm đếm xong?\\nPhiếu sẽ được gửi cho QC kiểm tra chất lượng.')) return;\n" +
+                "  if(!confirm('Xác nhận đã quét xong?\\nPhiếu sẽ gửi sang QC — bạn sẽ không quét thêm được nữa.')) return;\n" +
                 "  var btn=document.getElementById('confirmBtn');\n" +
                 "  btn.disabled=true;btn.textContent='Đang gửi...';\n" +
-                "  fetch(ORDER_API+'/'+RECEIVING_ID+'/finalize-count',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})\n"
-                +
+                "  var st=orderData?(orderData.status||''). toUpperCase():'';\n" +
+                "  if(st!=='DRAFT'){\n" +
+                "    toast('Đơn không còn ở DRAFT (hiện: '+st+')',true);\n" +
+                "    btn.disabled=false;btn.textContent=' Xác nhận kiểm đếm — Gửi QC';\n" +
+                "    return;\n" +
+                "  }\n" +
+                "  fetch(ORDER_API+'/'+RECEIVING_ID+'/submit',{method:'PATCH',headers:{'Authorization':'Bearer '+TOKEN}})\n" +
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
                 "    if(d && d.success){\n" +
-                "      toast(' Đã gửi QC kiểm tra!');\n" +
-                "      btn.textContent=' Đã gửi QC';\n" +
-                "      btn.style.background='#475569';\n" +
-                "      if(document.getElementById('oi-status')){document.getElementById('oi-status').textContent='SUBMITTED';}\n"
-                +
+                "      if(orderData) orderData.status='PENDING_COUNT';\n" +
+                "      if(document.getElementById('oi-status')){document.getElementById('oi-status').textContent='PENDING_COUNT';}\n" +
+                "      toast('✅ Đã gửi QC! Phiếu đang chờ kiểm đếm.');\n" +
+                "      lockScanUI();\n" +
                 "    } else {\n" +
-                "      toast((d&&d.message)?d.message:'Lỗi submit',true);\n" +
+                "      toast((d&&d.message)?d.message:'Lỗi gửi QC',true);\n" +
                 "      btn.disabled=false;btn.textContent=' Xác nhận kiểm đếm — Gửi QC';\n" +
                 "    }\n" +
                 "  })\n" +
-                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent=' Xác nhận kiểm đếm — Gửi QC';});\n"
-                +
+                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent=' Xác nhận kiểm đếm — Gửi QC';});\n" +
                 "} \n" +
+
 
                 // ── QC Submit Session ──
                 "function qcSubmit(){\n" +
