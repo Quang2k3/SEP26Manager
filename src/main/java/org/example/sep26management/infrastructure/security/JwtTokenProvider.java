@@ -96,7 +96,12 @@ public class JwtTokenProvider {
                 .parseClaimsJws(token)
                 .getBody();
 
-        return claims.get("userId", Long.class);
+        Object uid = claims.get("userId");
+        if (uid == null) return null;
+        if (uid instanceof Long) return (Long) uid;
+        if (uid instanceof Integer) return ((Integer) uid).longValue();
+        if (uid instanceof Number) return ((Number) uid).longValue();
+        try { return Long.parseLong(uid.toString()); } catch (Exception e) { return null; }
     }
 
     /**
