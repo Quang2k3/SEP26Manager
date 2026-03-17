@@ -148,8 +148,10 @@ public class PickListService {
                         .map(LocationEntity::getLocationCode).orElse(null);
             }
 
-            String skuCode = skuRepository.findById(item.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
-            String skuName = skuRepository.findById(item.getSkuId()).map(s -> s.getSkuName()).orElse(null);
+            var skuOpt = skuRepository.findById(item.getSkuId());
+            String skuCode   = skuOpt.map(s -> s.getSkuCode()).orElse(null);
+            String skuName   = skuOpt.map(s -> s.getSkuName()).orElse(null);
+            String skuBarcode = skuOpt.map(s -> s.getBarcode()).orElse(null);
             String lotNumber = null;
             java.time.LocalDate expiryDate = null;
             if (item.getLotId() != null) {
@@ -167,7 +169,7 @@ public class PickListService {
                     .locationCode(loc != null ? loc.getLocationCode() : null)
                     .zoneCode(zoneCode)
                     .rackCode(rackCode)
-                    .skuId(item.getSkuId()).skuCode(skuCode).skuName(skuName)
+                    .skuId(item.getSkuId()).skuCode(skuCode).skuName(skuName).barcode(skuBarcode)
                     .lotId(item.getLotId()).lotNumber(lotNumber).expiryDate(expiryDate)
                     .requiredQty(item.getRequiredQty())
                     .pickedQty(item.getPickedQty())
@@ -232,8 +234,10 @@ public class PickListService {
             String zoneCode = (loc != null && loc.getZoneId() != null)
                     ? zoneRepository.findById(loc.getZoneId()).map(z -> z.getZoneCode()).orElse(null)
                     : null;
-            String skuCode = skuRepository.findById(item.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
-            String skuName = skuRepository.findById(item.getSkuId()).map(s -> s.getSkuName()).orElse(null);
+            var skuOpt = skuRepository.findById(item.getSkuId());
+            String skuCode   = skuOpt.map(s -> s.getSkuCode()).orElse(null);
+            String skuName   = skuOpt.map(s -> s.getSkuName()).orElse(null);
+            String skuBarcode = skuOpt.map(s -> s.getBarcode()).orElse(null);
             String lotNumber = null;
             java.time.LocalDate expiryDate = null;
             if (item.getLotId() != null) {
@@ -246,7 +250,7 @@ public class PickListService {
                     .locationId(item.getFromLocationId())
                     .locationCode(loc != null ? loc.getLocationCode() : null)
                     .zoneCode(zoneCode)
-                    .skuId(item.getSkuId()).skuCode(skuCode).skuName(skuName)
+                    .skuId(item.getSkuId()).skuCode(skuCode).skuName(skuName).barcode(skuBarcode)
                     .lotId(item.getLotId()).lotNumber(lotNumber).expiryDate(expiryDate)
                     .requiredQty(item.getRequiredQty()).pickedQty(item.getPickedQty())
                     .status(item.getPickedQty().compareTo(item.getRequiredQty()) >= 0 ? "PICKED" : "PENDING")

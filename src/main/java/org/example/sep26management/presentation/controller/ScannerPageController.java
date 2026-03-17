@@ -335,14 +335,15 @@ public class ScannerPageController {
                 "  var sBase = 'border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between';\n" +
                 "  for (var i=0;i<pickItems.length;i++) {\n" +
                 "    var it = pickItems[i];\n" +
-                "    var done = !!scannedPickSkus[it.skuCode];\n" +
+                "    var done = !!scannedPickSkus[(it.skuCode||''). toUpperCase()];\n" +
                 "    if (!done) allDone = false;\n" +
                 "    var bg = done ? 'background:rgba(16,185,129,.08)' : 'background:#1e293b';\n" +
                 "    var bl = done ? 'border-left:3px solid #10b981' : 'border-left:3px solid #334155';\n" +
                 "    html += '<div style=\"'+(bg+';'+bl+';'+sBase)+'\">';\n" +
                 "    html += '<div><div style=\"font-size:13px;font-weight:700;color:#e2e8f0\">'+it.skuCode+'</div>';\n" +
-                "    var lot = it.lotNumber ? ' LOT '+it.lotNumber : '';\n" +
-                "    html += '<div style=\"font-size:11px;color:#64748b\">'+it.skuName+' '+it.locationCode+lot+'</div></div>';\n" +
+                "    var lot = it.lotNumber ? ' · LOT '+it.lotNumber : '';\n" +
+                "    var bc = it.barcode ? ' · '+it.barcode : '';\n" +
+                "    html += '<div style=\"font-size:11px;color:#64748b\">'+it.skuName+' · '+it.locationCode+lot+bc+'</div></div>';\n" +
                 "    html += '<div style=\"text-align:right\"><div style=\"font-size:15px;font-weight:800;color:#60a5fa\">&times;'+it.requiredQty+'</div>';\n" +
                 "    html += done ? '<div style=\"font-size:10px;color:#10b981;font-weight:700\">&#10003; DA LAY</div>' : '<div style=\"font-size:10px;color:#64748b\">Cho scan</div>';\n" +
                 "    html += '</div></div>';\n" +
@@ -353,12 +354,18 @@ public class ScannerPageController {
                 "  var dc = Object.keys(scannedPickSkus).length;\n" +
                 "  document.getElementById('picking-status').textContent = dc+'/'+pickItems.length+' SKU da scan.'+(allDone?' San sang gui QC!': '');\n" +
                 "}\n" +
-                "function handlePickingScan(skuCode) {\n" +
-                "  var matched = pickItems.filter(function(it){ return it.skuCode.toUpperCase() === skuCode.toUpperCase(); });\n" +
-                "  if (matched.length === 0) { toast('SKU '+skuCode+' không có trong Pick List!', true); return; }\n" +
-                "  if (scannedPickSkus[skuCode.toUpperCase()]) { toast('✓ '+skuCode+' đã được scan rồi'); return; }\n" +
-                "  scannedPickSkus[skuCode.toUpperCase()] = true;\n" +
-                "  toast('✓ Xác nhận: '+skuCode);\n" +
+                "function handlePickingScan(input) {\n" +
+                "  var code = (input||''). trim().toUpperCase();\n" +
+                "  // Match by skuCode OR barcode (physical label on box)\n" +
+                "  var matched = pickItems.filter(function(it){\n" +
+                "    return (it.skuCode||''). toUpperCase() === code\n" +
+                "        || (it.barcode||''). toUpperCase() === code;\n" +
+                "  });\n" +
+                "  if (matched.length === 0) { toast('Mã '+input+' không có trong Pick List!', true); return; }\n" +
+                "  var key = matched[0].skuCode.toUpperCase();\n" +
+                "  if (scannedPickSkus[key]) { toast('✓ '+matched[0].skuCode+' đã được scan rồi'); return; }\n" +
+                "  scannedPickSkus[key] = true;\n" +
+                "  toast('✓ Xác nhận: '+matched[0].skuCode+(matched[0].barcode?' ['+matched[0].barcode+']':'')); \n" +
                 "  if(navigator.vibrate) navigator.vibrate(80);\n" +
                 "  renderPickItems();\n" +
                 "}\n" +

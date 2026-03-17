@@ -85,6 +85,9 @@ public class PickListResponse {
         @Schema(description = "Tên Sản Phẩm", example = "Iphone 15 Pro")
         private String skuName;
 
+        @Schema(description = "Barcode vật lý trên hộp sản phẩm (dùng để quét trên điện thoại)", example = "0001-1012")
+        private String barcode;
+
         // Lot info
         @Schema(description = "ID của Lô hàng mà lô này được phân bổ", example = "10")
         private Long lotId;
