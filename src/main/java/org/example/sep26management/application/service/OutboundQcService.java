@@ -423,4 +423,83 @@ public class OutboundQcService {
                 .quantity(qty)
                 .build();
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 6) FINALIZE QC — Auto-PASS all unscanned items, mark task complete
+    // POST /v1/outbound/pick-list/{taskId}/finalize-qc
+    // Role: KEEPER / QC
+    // Called from mobile "Kết thúc Scan" button
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Finalises the QC scan session from mobile:
+     *  - Ensures task is in QC_IN_PROGRESS (calls startQcSession if still PICKED)
+     *  - Auto-marks all still-unscanned items as PASS
+     *  - Updates task status → COMPLETED
+     *  - Updates sales_order status → QC_SCAN (so web can dispatch)
+     */
+    @Transactional
+    public ApiResponse<QcSummaryResponse> finalizeQc(Long taskId, Long userId) {
+        log.info("Finalizing QC for taskId={}, userId={}", taskId, userId);
+
+        PickingTaskEntity task = findPickingTask(taskId);
+
+        // Auto-start QC if task is still PICKED
+        if ("PICKED".equals(task.getStatus())) {
+            log.info("Task {} still in PICKED — auto-starting QC", taskId);
+            startQcSession(taskId, userId);
+            // Re-fetch after status change
+            task = findPickingTask(taskId);
+        }
+
+        if (!"QC_IN_PROGRESS".equals(task.getStatus())) {
+            throw new BusinessException(
+                    "Cannot finalize QC: task status is " + task.getStatus() + ". Expected QC_IN_PROGRESS.");
+        }
+
+        // Auto-PASS all items that were not manually scanned
+        List<PickingTaskItemEntity> unscanned = pickingTaskItemRepository.findUnscannedByTaskId(taskId);
+        LocalDateTime now = LocalDateTime.now();
+        for (PickingTaskItemEntity item : unscanned) {
+            item.setQcResult("PASS");
+            item.setQcScannedAt(now);
+            item.setQcNote("Auto-PASS by finalize-qc");
+            pickingTaskItemRepository.save(item);
+        }
+        log.info("Auto-PASSed {} unscanned items for taskId={}", unscanned.size(), taskId);
+
+        // Compute summary
+        List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findByPickingTaskId(taskId);
+        int total   = allItems.size();
+        int pass    = (int) allItems.stream().filter(i -> "PASS".equals(i.getQcResult())).count();
+        int fail    = (int) allItems.stream().filter(i -> "FAIL".equals(i.getQcResult())).count();
+        int hold    = (int) allItems.stream().filter(i -> "HOLD".equals(i.getQcResult())).count();
+        int pending = (int) allItems.stream().filter(i -> i.getQcScannedAt() == null).count();
+
+        // Update SO → QC_SCAN so web knows QC is done and can dispatch
+        if (task.getSoId() != null) {
+            salesOrderRepository.findById(task.getSoId()).ifPresent(so -> {
+                if ("PICKING".equals(so.getStatus()) || "QC_SCAN".equals(so.getStatus())) {
+                    so.setStatus("QC_SCAN");
+                    so.setUpdatedAt(LocalDateTime.now());
+                    salesOrderRepository.save(so);
+                    log.info("SO {} status → QC_SCAN", so.getSoCode());
+                }
+            });
+        }
+
+        QcSummaryResponse summary = QcSummaryResponse.builder()
+                .pickingTaskId(taskId)
+                .totalItems(total)
+                .passCount(pass)
+                .failCount(fail)
+                .holdCount(hold)
+                .pendingCount(pending)
+                .allScanned(pending == 0 && total > 0)
+                .build();
+
+        log.info("QC finalized for taskId={}: pass={}, fail={}, hold={}", taskId, pass, fail, hold);
+        return ApiResponse.success("QC finalized. All items processed.", summary);
+    }
+
 }
