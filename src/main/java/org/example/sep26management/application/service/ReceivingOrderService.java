@@ -363,8 +363,8 @@ public class ReceivingOrderService {
 
                 log.info("Receiving Order {} submitted (DRAFT → PENDING_COUNT) by userId={}",
                         order.getReceivingCode(), userId);
-                // FIX: dùng toSummaryResponse thay vì getOrder() để tránh lazy-load lỗi
-                // trong @Transactional scope làm rollback toàn bộ submit khi getOrder throw.
+                // FIX: dùng toSummaryResponse thay vì getOrder() để tránh lazy-load
+                // throw exception bên trong @Transactional làm rollback toàn bộ submit
                 return ApiResponse.success("Submitted successfully. Status: PENDING_COUNT. Keeper can now start scanning.",
                         toSummaryResponse(order));
         }
@@ -948,9 +948,11 @@ public class ReceivingOrderService {
                                 jdbcTemplate.update(
                                         "INSERT INTO inventory_snapshot (warehouse_id, sku_id, lot_id, location_id, quantity, reserved_qty) " +
                                                 "VALUES (?, ?, NULL, ?, ?, 0) " +
-                                                "ON CONFLICT (warehouse_id, sku_id, COALESCE(lot_id, 0), location_id) " +
+                                                // FIX: phải dùng generated column lot_id_safe thay vì expression COALESCE(lot_id,0)
+                                                // vì ON CONFLICT phải khớp đúng tên cột trong PRIMARY KEY constraint
+                                                "ON CONFLICT (warehouse_id, sku_id, lot_id_safe, location_id) " +
                                                 "DO UPDATE SET quantity = inventory_snapshot.quantity + EXCLUDED.quantity, " +
-                                                "updated_at = NOW()",
+                                                "last_updated = NOW()",
                                         order.getWarehouseId(), item.getSkuId(), stagingLocationId, item.getExpectedQty()
                                 );
 
