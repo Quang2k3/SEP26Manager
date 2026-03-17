@@ -21,14 +21,14 @@ public class ScannerPageController {
             + "Nếu truyền vào, trang scan sẽ **tự động hiển thị** ID phiếu nhận mà không cần nhập tay.")
     public String getScanUrl(@RequestParam("token") String token,
                              @RequestParam(value = "receivingId", required = false) Long receivingId,
-                             @RequestParam(value = "taskId", required = false) Long taskId,
                              HttpServletRequest request) {
         String base = request.getScheme() + "://" + request.getServerName()
                 + (request.getServerPort() == 80 || request.getServerPort() == 443 ? ""
                 : ":" + request.getServerPort());
         String url = base + "/v1/scan?token=" + token + "&v=qr3";
-        if (receivingId != null) url += "&receivingId=" + receivingId;
-        if (taskId != null)      url += "&taskId=" + taskId + "&mode=outbound_qc";
+        if (receivingId != null) {
+            url += "&receivingId=" + receivingId;
+        }
         return url;
     }
 
@@ -42,10 +42,11 @@ public class ScannerPageController {
                                               @RequestParam(value = "receivingId", required = false) Long receivingId,
                                               @RequestParam(value = "taskId", required = false) Long taskId,
                                               @RequestParam(value = "mode", required = false) String mode) {
+        boolean outboundQcMode = "outbound_qc".equals(mode);
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 .header("Pragma", "no-cache")
-                .body(buildHtml(escapeForJs(token), receivingId, taskId, "outbound_qc".equals(mode)));
+                .body(buildHtml(escapeForJs(token), receivingId, taskId, outboundQcMode));
     }
 
     private static String escapeForJs(String s) {
@@ -54,7 +55,9 @@ public class ScannerPageController {
         return s.replace("\\", "\\\\").replace("'", "\\'");
     }
 
-    private String buildHtml(String token, Long receivingId) { return buildHtml(token, receivingId, null, false); }
+    private String buildHtml(String token, Long receivingId) {
+        return buildHtml(token, receivingId, null, false);
+    }
     private String buildHtml(String token, Long receivingId, Long taskId, boolean outboundQcMode) {
         String receivingIdJs = receivingId != null ? String.valueOf(receivingId) : "null";
         String taskIdJs = taskId != null ? String.valueOf(taskId) : "null";
@@ -243,11 +246,20 @@ public class ScannerPageController {
 
                 // ── NÚT XÁC NHẬN KIỂM ĐẾM (chỉ hiện khi có receivingId) ──
                 "<div class='card' id='confirm-card' style='display:none'>" +
-                "<button class='btn success' id='confirmBtn'>✅ Xác nhận kiểm đếm — Gửi QC</button>" +
-                "<button class='btn warning' id='qcSubmitBtn' style='display:none; color:#fff;'>✅ QC HOÀN TẤT CHECK</button>"
+                "<button class='btn success' id='confirmBtn'> Xác nhận kiểm đếm — Gửi QC</button>" +
+                "<button class='btn warning' id='qcSubmitBtn' style='display:none; color:#fff;'> QC HOÀN TẤT CHECK</button>"
                 +
                 "</div>" +
 
+                "<div class='card' id='outbound-qc-card' style='display:none'>" +
+                "<div class='card-title' style='color:#a78bfa'>📦 Kết quả QC Xuất kho</div>" +
+                "<div id='outbound-qc-summary' style='font-size:13px;color:#94a3b8;margin-bottom:12px'>Đang scan...</div>" +
+                "<button class='btn success' id='qcPassAllBtn' onclick='submitOutboundQcResult(true)'" +
+                "  style='background:#22c55e;margin-bottom:8px'> Xác nhận — Tất cả PASS (Cho xuất kho)</button>" +
+                "<button class='btn danger' id='qcRejectBtn' onclick='submitOutboundQcResult(false)'>" +
+                "   Báo có hàng FAIL / HOLD (Tạm dừng xuất kho)" +
+                "</button>" +
+                "</div>" +
                 "<div class='card'><button class='btn danger' id='closeBtn'>🛑 Kết thúc Scan</button></div>" +
                 "</div>" +
 
@@ -267,6 +279,57 @@ public class ScannerPageController {
                 "var lastCode=null;\n" +
                 "var lastAt=0;\n" +
                 "var currentCondition='PASS';\n" +
+                "var outboundQcItems = [];\n" +
+                "var outboundPassCount = 0;\n" +
+                "var outboundFailCount = 0;\n" +
+                "\n" +
+                "function initOutboundQcMode() {\n" +
+                "  if (SCAN_MODE !== 'outbound_qc') return;\n" +
+                "  document.getElementById('outbound-qc-card').style.display = '';\n" +
+                "  document.getElementById('confirm-card').style.display = 'none';\n" +
+                "  document.getElementById('qc-toggle-panel').style.display = '';\n" +
+                "  document.getElementById('qc-mode-indicator').style.display = '';\n" +
+                "  document.getElementById('qc-mode-indicator').textContent = '(CHẾ ĐỘ QC XUẤT KHO)';\n" +
+                "  updateOutboundQcSummary();\n" +
+                "}\n" +
+                "\n" +
+                "function updateOutboundQcSummary() {\n" +
+                "  if (SCAN_MODE !== 'outbound_qc') return;\n" +
+                "  var lines = Object.values(lineData);\n" +
+                "  var pass = lines.filter(function(l){return l.condition==='PASS';}).length;\n" +
+                "  var fail = lines.filter(function(l){return l.condition==='FAIL';}).length;\n" +
+                "  var total = lines.length;\n" +
+                "  var html = '<span style=\"color:#22c55e;font-weight:700\">✓ '+pass+' PASS</span>';\n" +
+                "  if(fail>0) html += ' &nbsp; <span style=\"color:#ef4444;font-weight:700\">✗ '+fail+' FAIL</span>';\n" +
+                "  html += ' / '+total+' đã scan';\n" +
+                "  document.getElementById('outbound-qc-summary').innerHTML = html;\n" +
+                "  var passBtn = document.getElementById('qcPassAllBtn');\n" +
+                "  if(passBtn) { passBtn.textContent = fail>0 ? '⚠️ Vẫn xác nhận PASS tất cả?' : ' Xác nhận — Tất cả PASS (Cho xuất kho)'; }\n" +
+                "}\n" +
+                "\n" +
+                "function submitOutboundQcResult(allPass) {\n" +
+                "  if (!TASK_ID) { toast('Không tìm thấy Task ID!', true); return; }\n" +
+                "  var msg = allPass ? 'Xác nhận tất cả hàng ĐẠT CHUẨN và cho phép xuất kho?' : 'Xác nhận có hàng KHÔNG ĐẠT — tạm dừng xuất kho?';\n" +
+                "  if(!confirm(msg)) return;\n" +
+                "  var btn = allPass ? document.getElementById('qcPassAllBtn') : document.getElementById('qcRejectBtn');\n" +
+                "  btn.disabled = true;\n" +
+                "  btn.textContent = 'Đang gửi...';\n" +
+                "  var closeUrl = window.location.origin+'/v1/receiving-sessions/'+SESSION_ID;\n" +
+                "  fetch(closeUrl, {method:'DELETE', headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "  .then(function(r){ return r.json(); })\n" +
+                "  .then(function(d) {\n" +
+                "    if(allPass) {\n" +
+                "      toast(' QC xác nhận PASS — Keeper có thể xuất kho!');\n" +
+                "      btn.textContent = ' Đã gửi xác nhận';\n" +
+                "    } else {\n" +
+                "      toast(' Đã báo cáo hàng lỗi — PC sẽ nhận thông báo');\n" +
+                "      btn.textContent = ' Đã báo cáo';\n" +
+                "    }\n" +
+                "    stopQr();\n" +
+                "  })\n" +
+                "  .catch(function(e){ toast('Lỗi: '+e, true); btn.disabled=false; });\n" +
+                "}\n" +
+                "\n" +
                 "var html5QrcodeLoaded = typeof Html5Qrcode !== 'undefined';\n" +
 
                 "function waitForHtml5Qrcode(callback, retries) {\n" +
@@ -381,17 +444,17 @@ public class ScannerPageController {
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
                 "    if(d && d.success){\n" +
-                "      toast('✅ Đã gửi QC kiểm tra!');\n" +
-                "      btn.textContent='✅ Đã gửi QC';\n" +
+                "      toast(' Đã gửi QC kiểm tra!');\n" +
+                "      btn.textContent=' Đã gửi QC';\n" +
                 "      btn.style.background='#475569';\n" +
                 "      if(document.getElementById('oi-status')){document.getElementById('oi-status').textContent='SUBMITTED';}\n"
                 +
                 "    } else {\n" +
                 "      toast((d&&d.message)?d.message:'Lỗi submit',true);\n" +
-                "      btn.disabled=false;btn.textContent='✅ Xác nhận kiểm đếm — Gửi QC';\n" +
+                "      btn.disabled=false;btn.textContent=' Xác nhận kiểm đếm — Gửi QC';\n" +
                 "    }\n" +
                 "  })\n" +
-                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent='✅ Xác nhận kiểm đếm — Gửi QC';});\n"
+                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent=' Xác nhận kiểm đếm — Gửi QC';});\n"
                 +
                 "} \n" +
 
@@ -406,7 +469,7 @@ public class ScannerPageController {
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
                 "    if(d && d.success){\n" +
-                "      var msg = d.data.hasFailItems ? '⚠️ QC Hoàn Tấn: Đã phát hiện hàng Lỗi. Đã chuyển tạo Incident.' : '✅ QC Hoàn Tất: 100% Pass!';\n"
+                "      var msg = d.data.hasFailItems ? '⚠️ QC Hoàn Tấn: Đã phát hiện hàng Lỗi. Đã chuyển tạo Incident.' : ' QC Hoàn Tất: 100% Pass!';\n"
                 +
                 "      toast(msg);\n" +
                 "      btn.textContent='Đã Đóng Session';\n" +
@@ -416,10 +479,10 @@ public class ScannerPageController {
                 "      setTimeout(function(){window.location.reload();}, 2000);\n" +
                 "    } else {\n" +
                 "      toast((d&&d.message)?d.message:'Lỗi QC Submit',true);\n" +
-                "      btn.disabled=false;btn.textContent='✅ QC HOÀN TẤT CHECK';\n" +
+                "      btn.disabled=false;btn.textContent=' QC HOÀN TẤT CHECK';\n" +
                 "    }\n" +
                 "  })\n" +
-                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent='✅ QC HOÀN TẤT CHECK';});\n"
+                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;btn.textContent=' QC HOÀN TẤT CHECK';});\n"
                 +
                 "} \n" +
 
@@ -435,12 +498,12 @@ public class ScannerPageController {
                 "  if(inflight) return;\n" +
                 "  inflight=true;\n" +
                 "  setStatus('Đang gửi: '+barcode);\n" +
-                "  fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify({barcode:barcode,qty:qty,condition:currentCondition,taskId:TASK_ID,mode:SCAN_MODE})})\n"
+                "  fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify({barcode:barcode,qty:qty,condition:currentCondition})})\n"
                 +
                 "  .then(function(r){return r.text().then(function(txt){try{return JSON.parse(txt);}catch(e){return {success:false,message:'HTTP '+r.status+': '+txt.substring(0,140)};}});})\n"
                 +
                 "  .then(function(d){\n" +
-                "    if(d && d.success){toast('✓ '+d.data.skuCode+' — qty:'+d.data.newQty);updateTable(d.data);document.getElementById('bc').value='';if(navigator.vibrate)navigator.vibrate(60);} \n"
+                "    if(d && d.success){toast('✓ '+d.data.skuCode+' — qty:'+d.data.newQty);updateTable(d.data);updateOutboundQcSummary();document.getElementById('bc').value='';if(navigator.vibrate)navigator.vibrate(60);} \n"
                 +
                 "    else{toast((d&&d.message)?d.message:'Lỗi không xác định',true);} \n" +
                 "    setStatus('Camera sẵn sàng (QR) — đưa QR vào khung');\n" +
