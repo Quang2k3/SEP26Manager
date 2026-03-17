@@ -179,12 +179,6 @@ public class ScannerPageController {
                 "var RECEIVING_ID=" + receivingIdJs + ";\n" +
                 "var API=window.location.origin+'/v1/scan-events';\n" +
                 "var ORDER_API=window.location.origin+'/v1/receiving-orders';\n" +
-                "var TOKEN='' + token + '';\n" +
-                "var TASK_ID=' + taskIdJs + ';\n" +
-                "var SCAN_MODE='' + modeJs + '';\n" +
-                "var RECEIVING_ID=' + receivingIdJs + ';\n" +
-                "var API=window.location.origin+'/v1/scan-events';\n" +
-                "var ORDER_API=window.location.origin+'/v1/receiving-orders';\n" +
                 "var lineData={};\n" +
                 "var orderItems=[];\n" +
                 "var orderData=null;\n" +
