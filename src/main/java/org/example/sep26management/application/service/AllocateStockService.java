@@ -19,6 +19,7 @@ import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.*;
 import org.example.sep26management.infrastructure.persistence.repository.*;
+import org.example.sep26management.infrastructure.persistence.repository.InventoryLotJpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +48,7 @@ public class AllocateStockService {
     private final InventorySnapshotJpaRepository snapshotRepository;
     private final ReservationJpaRepository reservationRepository;
     private final SkuJpaRepository skuRepository;
+    private final InventoryLotJpaRepository lotRepository;
     private final AuditLogService auditLogService;
     private final IncidentService incidentService;
     private final WarehouseJpaRepository warehouseRepository;
@@ -140,7 +142,10 @@ public class AllocateStockService {
                 // BR-WXE-21: record allocation line with lot + expiry
                 allocations.add(AllocateStockResponse.AllocationLine.builder()
                         .skuId(pair.skuId).skuCode(skuCode).skuName(skuName)
-                        .lotId(stock.getLotId()).lotNumber(null) // resolved from lot entity
+                        .lotId(stock.getLotId()).lotNumber(
+                                stock.getLotId() != null
+                                        ? lotRepository.findById(stock.getLotId()).map(l -> l.getLotNumber()).orElse(null)
+                                        : null)
                         .expiryDate(stock.getExpiryDate())
                         .locationId(stock.getLocationId()).locationCode(stock.getLocationCode())
                         .zoneCode(stock.getZoneCode())

@@ -146,7 +146,7 @@ public interface InventorySnapshotJpaRepository
             SET reserved_qty = reserved_qty + :qty, last_updated = NOW()
             WHERE location_id = :locationId
               AND sku_id = :skuId
-              AND (:lotId IS NULL OR lot_id = :lotId OR (lot_id IS NULL AND :lotId IS NULL))
+              AND (CASE WHEN :lotId IS NULL THEN lot_id IS NULL ELSE lot_id = :lotId END)
             """, nativeQuery = true)
         void incrementReservedByLocationAndSku(
                 @Param("locationId") Long locationId,
