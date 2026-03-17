@@ -15,6 +15,11 @@ import org.example.sep26management.infrastructure.persistence.repository.Receivi
 import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.example.sep26management.infrastructure.security.JwtTokenProvider;
+import org.example.sep26management.application.service.OutboundQcService;
+import org.example.sep26management.application.dto.request.QcScanRequest;
+import org.example.sep26management.infrastructure.persistence.repository.PickingTaskItemJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.PickingTaskJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +40,8 @@ public class ScanEventService {
     private final SseEmitterRegistry sseRegistry;
     private final ReceivingOrderJpaRepository receivingOrderRepo;
     private final ReceivingItemJpaRepository receivingItemRepo;
+    private final OutboundQcService outboundQcService;
+    private final PickingTaskItemJpaRepository pickingTaskItemRepository;
 
     /**
      * Process a barcode scan event sent from the iPhone/Tablet.
@@ -50,6 +57,11 @@ public class ScanEventService {
                 return ApiResponse.error("sessionId is required when calling with a regular user JWT token");
             }
             sessionId = request.getSessionId();
+        }
+
+        // ── Outbound QC mode: điện thoại scan barcode SKU → gọi qcScanItem trực tiếp ──
+        if ("outbound_qc".equals(request.getMode()) && request.getTaskId() != null) {
+            return processOutboundQcScan(request, sessionId);
         }
 
         // 2. Load session from Redis
@@ -228,5 +240,75 @@ public class ScanEventService {
                 "skuId", skuId,
                 "condition", normalizedCondition,
                 "remainingLines", lines.size()));
+    }
+    /**
+     * Xử lý scan event cho outbound QC.
+     * Điện thoại scan barcode SKU → tìm picking task item → gọi qcScanItem.
+     */
+    private ApiResponse<Map<String, Object>> processOutboundQcScan(ScanEventRequest request, String sessionId) {
+        Long taskId = request.getTaskId();
+        String barcode = request.getBarcode();
+        String condition = request.getCondition() != null ? request.getCondition().toUpperCase() : "PASS";
+        String reasonCode = request.getReasonCode();
+
+        // Tìm SKU theo barcode hoặc skuCode
+        Optional<SkuEntity> skuOpt = skuRepository.findActiveByBarcodeWithCategory(barcode);
+        if (skuOpt.isEmpty()) skuOpt = skuRepository.findActiveBySkuCodeWithCategory(barcode);
+        if (skuOpt.isEmpty()) {
+            log.warn("Outbound QC scan: SKU not found for barcode={}", barcode);
+            return ApiResponse.error("SKU không tìm thấy: " + barcode);
+        }
+        SkuEntity sku = skuOpt.get();
+
+        // Tìm picking task item thuộc task này và đúng SKU, chưa scan
+        var items = pickingTaskItemRepository.findByPickingTaskId(taskId);
+        var taskItem = items.stream()
+                .filter(i -> i.getSkuId().equals(sku.getSkuId()) && i.getQcScannedAt() == null)
+                .findFirst()
+                .orElse(items.stream()
+                        .filter(i -> i.getSkuId().equals(sku.getSkuId()))
+                        .findFirst()
+                        .orElse(null));
+
+        if (taskItem == null) {
+            return ApiResponse.error("Không tìm thấy mặt hàng " + sku.getSkuCode() + " trong Pick List #" + taskId);
+        }
+
+        // Gọi qcScanItem
+        try {
+            QcScanRequest qcReq = new QcScanRequest();
+            qcReq.setPickingTaskId(taskId);
+            qcReq.setPickingTaskItemId(taskItem.getPickingTaskItemId());
+            qcReq.setResult(condition);
+            qcReq.setReason("FAIL".equals(condition) ? (reasonCode != null ? reasonCode : "Lỗi phát hiện khi scan") : null);
+            outboundQcService.scanItem(qcReq, null);
+
+            log.info("Outbound QC scan OK: taskId={}, SKU={}, result={}", taskId, sku.getSkuCode(), condition);
+
+            // Push SSE update nếu có session
+            if (sessionId != null) {
+                try {
+                    var sessionOpt = sessionRedis.findById(sessionId);
+                    sessionOpt.ifPresent(s -> sseRegistry.send(sessionId, Map.of(
+                            "type", "qc_scan",
+                            "skuCode", sku.getSkuCode(),
+                            "skuName", sku.getSkuName(),
+                            "result", condition,
+                            "taskItemId", taskItem.getPickingTaskItemId()
+                    )));
+                } catch (Exception ignored) {}
+            }
+
+            return ApiResponse.success("QC " + condition + " — " + sku.getSkuCode(), Map.of(
+                    "skuCode", sku.getSkuCode(),
+                    "skuName", sku.getSkuName() != null ? sku.getSkuName() : "",
+                    "result", condition,
+                    "taskItemId", taskItem.getPickingTaskItemId(),
+                    "newQty", taskItem.getRequiredQty()
+            ));
+        } catch (Exception e) {
+            log.error("Outbound QC scan error: {}", e.getMessage(), e);
+            return ApiResponse.error("Lỗi ghi nhận QC: " + e.getMessage());
+        }
     }
 }
