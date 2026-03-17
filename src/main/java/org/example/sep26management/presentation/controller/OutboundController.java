@@ -319,6 +319,14 @@ public class OutboundController {
         return ResponseEntity.ok(outboundQcService.startQcSession(taskId, getUserId()));
     }
 
+    @PostMapping("/pick-list/{taskId}/finalize-qc")
+    @PreAuthorize("hasAnyRole('KEEPER','QC')")
+    @Operation(summary = "Hoàn tất phiên QC từ điện thoại",
+            description = "Gọi từ mobile khi bấm 'Kết thúc Scan'. Auto-PASS tất cả items chưa scan, cập nhật SO -> QC_SCAN.")
+    public ResponseEntity<ApiResponse<QcSummaryResponse>> finalizeQc(@PathVariable Long taskId) {
+        return ResponseEntity.ok(outboundQcService.finalizeQc(taskId, getUserId()));
+    }
+
     @PostMapping("/qc-scan")
     @PreAuthorize("hasAnyRole('KEEPER','QC')")
     @Operation(summary = "QC Scan từng item",

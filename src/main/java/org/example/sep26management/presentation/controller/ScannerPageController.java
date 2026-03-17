@@ -348,22 +348,25 @@ public class ScannerPageController {
                 "}\n" +
                 "function submitOutboundQcResult(allPass){\n" +
                 "  if(!TASK_ID){toast('Không tìm thấy Task ID!',true);return;}\n" +
-                "  var msg=allPass?'Xác nhận tất cả hàng ĐẠT CHUẨN — cho xuất kho?':'Xác nhận có hàng KHÔNG ĐẠT — tạm dừng xuất kho?';\n" +
+                "  var msg=allPass?'Xác nhận tất cả hàng ĐẠT CHUẨN — cho xuất kho?':' Xác nhận có hàng KHÔNG ĐẠT?'\n" +
                 "  if(!confirm(msg)) return;\n" +
                 "  var btn=allPass?document.getElementById('qcPassAllBtn'):document.getElementById('qcRejectBtn');\n" +
                 "  btn.disabled=true;btn.textContent='Đang gửi...';\n" +
-                "  var closeUrl=window.location.origin+'/v1/receiving-sessions/'+SESSION_ID;\n" +
-                "  fetch(closeUrl,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}})\n" +
+                "  fetch(window.location.origin+'/v1/outbound/pick-list/'+TASK_ID+'/finalize-qc',{\n" +
+                "    method:'POST',headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}\n" +
+                "  })\n" +
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
-                "    var resultMsg=allPass?'✅ QC xác nhận PASS — Keeper có thể xuất kho!':'⚠️ Đã báo cáo hàng lỗi';\n" +
+                "    if(!d||!d.success){toast((d&&d.message)?d.message:'Lỗi finalize QC',true);btn.disabled=false;return;}\n" +
+                "    var fc=d.data&&d.data.failCount?d.data.failCount:0;\n" +
+                "    var resultMsg=fc>0?('⚠️ '+fc+' hàng FAIL — đã ghi nhận'):'✅ QC xác nhận PASS — Keeper có thể xuất kho!';\n" +
+                "    fetch(window.location.origin+'/v1/receiving-sessions/'+SESSION_ID,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}}).catch(function(){});\n" +
                 "    toast(resultMsg);\n" +
-                "    lockUI(resultMsg);\n" +
+                "    lockUI('✅ QC xác nhận PASS — Keeper có thể xuất kho!');\n" +
                 "  })\n" +
-                "  .catch(function(e){toast('Lỗi: '+e,true);btn.disabled=false;});\n" +
+                "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;});\n" +
                 "}\n" +
                 "\n" +
-                "// OUTBOUND PICKING: scan confirm + gửi QC\n" +
                 "function loadPickItems(){\n" +
                 "  fetch(window.location.origin+'/v1/outbound/pick-list/'+TASK_ID,{headers:{'Authorization':'Bearer '+TOKEN}})\n" +
                 "  .then(function(r){return r.json();})\n" +
