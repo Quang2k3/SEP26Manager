@@ -38,6 +38,9 @@ public class AllocateStockResponse {
     @Schema(description = "Danh sách chi tiết kho chứa hàng sẵn có để đi lấy")
     private List<AllocationLine> allocations;
 
+    @Schema(description = "Phân bổ đủ hàng cho toàn bộ SKU hay không", example = "true")
+    private boolean fullyAllocated;
+
     @Schema(description = "Danh sách chi tiết SKU không đủ hàng kho")
     private List<ShortageItem> shortages; // items with insufficient stock
 
