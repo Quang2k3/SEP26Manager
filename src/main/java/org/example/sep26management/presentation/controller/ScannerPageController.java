@@ -751,23 +751,29 @@ public class ScannerPageController {
                 "  var roleBadge=document.getElementById('role-badge');\n" +
                 "  if(roleBadge && USER_ROLE){\n" +
                 "      roleBadge.textContent=USER_ROLE;roleBadge.classList.add('role-'+USER_ROLE.toLowerCase());\n" +
-                "      if(USER_ROLE.toUpperCase() === 'QC') {\n" +
+                "      // outbound_qc: force QC panel on regardless of token role\n" +
+                "      if(USER_ROLE.toUpperCase() === 'QC' || SCAN_MODE === 'outbound_qc') {\n" +
                 "          document.getElementById('qc-toggle-panel').style.display = 'flex';\n" +
                 "          document.getElementById('qc-mode-indicator').style.display = 'inline';\n" +
                 "          document.getElementById('confirmBtn').style.display = 'none';\n" +
-                "          document.getElementById('qcSubmitBtn').style.display = 'block';\n" +
+                "          document.getElementById('qcSubmitBtn').style.display = 'none';\n" +
+                "      } else if(SCAN_MODE === 'inbound') {\n" +
+                "          document.getElementById('qcSubmitBtn').style.display = 'none';\n" +
+                "          document.getElementById('confirmBtn').style.display = 'block';\n" +
                 "      }\n" +
                 "  }\n" +
-                "  // Auto-populate receiving ID từ URL param (truyền qua khi FE tạo scan URL)\n" +
-                "  if(RECEIVING_ID !== null && RECEIVING_ID !== undefined){\n" +
-                "    document.getElementById('recv-id-label').textContent='#'+RECEIVING_ID;\n" +
-                "    document.getElementById('recv-display').style.display='block';\n" +
-                "    document.getElementById('recv-manual').style.display='none';\n" +
-                "    loadOrderDetails();\n" +
-                "    document.getElementById('confirm-card').style.display='block';\n" +
-                "  } else {\n" +
-                "    document.getElementById('recv-display').style.display='none';\n" +
-                "    document.getElementById('recv-manual').style.display='block';\n" +
+                "  // Auto-populate receiving ID — chỉ dùng cho inbound mode\n" +
+                "  if(SCAN_MODE === 'inbound') {\n" +
+                "    if(RECEIVING_ID !== null && RECEIVING_ID !== undefined){\n" +
+                "      document.getElementById('recv-id-label').textContent='#'+RECEIVING_ID;\n" +
+                "      document.getElementById('recv-display').style.display='block';\n" +
+                "      document.getElementById('recv-manual').style.display='none';\n" +
+                "      loadOrderDetails();\n" +
+                "      document.getElementById('confirm-card').style.display='block';\n" +
+                "    } else {\n" +
+                "      document.getElementById('recv-display').style.display='none';\n" +
+                "      document.getElementById('recv-manual').style.display='block';\n" +
+                "    }\n" +
                 "  }\n" +
                 "  document.getElementById('manualBtn').addEventListener('click', submitManual);\n" +
                 "  document.getElementById('closeBtn').addEventListener('click', closeScan);\n" +
@@ -778,6 +784,7 @@ public class ScannerPageController {
                 "});\n" +
                 "window.addEventListener('load', function(){\n" +
                 "  waitForHtml5Qrcode(startQr, 25);\n" +
+                "  initOutboundQcMode();\n" +
                 "  initOutboundPickingMode();\n" +
                 "});\n" +
 
