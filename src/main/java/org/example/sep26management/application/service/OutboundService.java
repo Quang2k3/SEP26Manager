@@ -597,6 +597,7 @@ public class OutboundService {
                 .approvedAt(so.getApprovedAt())
                 .createdAt(so.getCreatedAt()).updatedAt(so.getUpdatedAt())
                 .stockWarnings(warnings != null && !warnings.isEmpty() ? warnings : null)
+                .dispatchPdfUrl(so.getDispatchPdfUrl())
                 .build();
     }
 
