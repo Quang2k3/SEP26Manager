@@ -124,7 +124,7 @@ public class ScannerPageController {
                 "</div>" +
                 "<div id='recv-manual' style='display:none'>" +
                 "  <input type='number' id='recv-input' placeholder='Nhập ID Phiếu Nhận ...' style='width:100%'/>" +
-                "  <div style='color:#f59e0b;font-size:11px;margin-top:6px'> Không tìm thấy ID phiếu trong URL. Vui lòng nhập tay.</div>" +
+                "  <div style='color:#f59e0b;font-size:11px;margin-top:6px'>⚠️ Không tìm thấy ID phiếu trong URL. Vui lòng nhập tay.</div>" +
                 "</div></div>" +
                 "<div class='card' id='order-info-card' style='display:none'><div class='card-title'>📋 Thông tin đơn hàng</div>" +
                 "<div id='order-loading' class='loading-spinner'>Đang tải thông tin đơn hàng...</div>" +
@@ -300,7 +300,7 @@ public class ScannerPageController {
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
                 "    if(d&&d.success){\n" +
-                "      toast(' Đã gửi QC kiểm đếm! Trạng thái: Chờ kiểm đếm. QR bị khoá.');\n" +
+                "      toast('✅ Đã gửi QC kiểm đếm! Trạng thái: Chờ kiểm đếm. QR bị khoá.');\n" +
                 "      lockUI('Đã gửi QC — Chờ kiểm đếm (PENDING_COUNT)');\n" +
                 "      if(document.getElementById('oi-status')) document.getElementById('oi-status').textContent='PENDING_COUNT';\n" +
                 "    } else {\n" +
@@ -322,7 +322,7 @@ public class ScannerPageController {
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
                 "    if(d&&d.success){\n" +
-                "      var msg=d.data.hasFailItems?' QC Hoàn Tất: Đã phát hiện hàng Lỗi — đã tạo Incident.':' QC Hoàn Tất: 100% Pass!';\n" +
+                "      var msg=d.data.hasFailItems?'⚠️ QC Hoàn Tất: Đã phát hiện hàng Lỗi — đã tạo Incident.':'✅ QC Hoàn Tất: 100% Pass!';\n" +
                 "      toast(msg);\n" +
                 "      lockUI(msg);\n" +
                 "      if(document.getElementById('oi-status')) document.getElementById('oi-status').textContent=d.data.status;\n" +
@@ -344,7 +344,7 @@ public class ScannerPageController {
                 "  html+=' / '+lines.length+' đã scan';\n" +
                 "  document.getElementById('outbound-qc-summary').innerHTML=html;\n" +
                 "  var pb=document.getElementById('qcPassAllBtn');\n" +
-                "  if(pb) pb.textContent=fail>0?' Vẫn xác nhận PASS tất cả?':' Xác nhận — Tất cả PASS (Cho xuất kho)';\n" +
+                "  if(pb) pb.textContent=fail>0?'⚠️ Vẫn xác nhận PASS tất cả?':' Xác nhận — Tất cả PASS (Cho xuất kho)';\n" +
                 "}\n" +
                 "function submitOutboundQcResult(allPass){\n" +
                 "  if(!TASK_ID){toast('Không tìm thấy Task ID!',true);return;}\n" +
@@ -359,10 +359,10 @@ public class ScannerPageController {
                 "  .then(function(d){\n" +
                 "    if(!d||!d.success){toast((d&&d.message)?d.message:'Lỗi finalize QC',true);btn.disabled=false;return;}\n" +
                 "    var fc=d.data&&d.data.failCount?d.data.failCount:0;\n" +
-                "    var resultMsg=fc>0?(' '+fc+' hàng FAIL — đã ghi nhận'):' QC xác nhận PASS — Keeper có thể xuất kho!';\n" +
+                "    var resultMsg=fc>0?('⚠️ '+fc+' hàng FAIL — đã ghi nhận'):'✅ QC xác nhận PASS — Keeper có thể xuất kho!';\n" +
                 "    fetch(window.location.origin+'/v1/receiving-sessions/'+SESSION_ID,{method:'DELETE',headers:{'Authorization':'Bearer '+TOKEN}}).catch(function(){});\n" +
                 "    toast(resultMsg);\n" +
-                "    lockUI(' QC xác nhận PASS — Keeper có thể xuất kho!');\n" +
+                "    lockUI('✅ QC xác nhận PASS — Keeper có thể xuất kho!');\n" +
                 "  })\n" +
                 "  .catch(function(e){toast('Lỗi kết nối: '+e,true);btn.disabled=false;});\n" +
                 "}\n" +
@@ -413,27 +413,28 @@ public class ScannerPageController {
                 "  document.getElementById('picking-status').textContent=totalScanned+'/'+totalRequired+' sản phẩm đã quét.'+(allDone?' Sẵn sàng gửi QC!':'');\n" +
                 "}\n" +
                 "function handlePickingScan(input){\n" +
-                "  var code=(input||'')).trim().toUpperCase();\n" +
+                "  var code=(input||'').trim().toUpperCase();\n" +
                 "  var matched=pickItems.filter(function(it){\n" +
-                "    return (it.skuCode||'')).toUpperCase()===code||(it.barcode||'')).toUpperCase()===code;\n" +
+                "    return (it.skuCode||'').toUpperCase()===code||(it.barcode||'').toUpperCase()===code;\n" +
                 "  });\n" +
-                "  if(matched.length===0){toast('Mã '+input+' không có trong Pick List!',true);return;}\n" +
+                "  if(matched.length===0){toast('Ma '+input+' khong co trong Pick List!',true);return;}\n" +
                 "  var it=matched[0];\n" +
                 "  var key=it.skuCode.toUpperCase();\n" +
                 "  var req=parseFloat(it.requiredQty)||1;\n" +
                 "  var cur=scannedPickSkus[key]||0;\n" +
-                "  if(cur>=req){toast('✓ '+it.skuCode+' đã đủ số lượng ('+req+')');return;}\n" +
+                "  if(cur>=req){toast('Da du so luong '+req);return;}\n" +
                 "  cur++;\n" +
                 "  scannedPickSkus[key]=cur;\n" +
                 "  var remaining=req-cur;\n" +
                 "  if(remaining>0){\n" +
-                "    toast('✓ '+it.skuCode+' — '+cur+'/'+req+' (còn '+remaining+')');\n" +
+                "    toast(it.skuCode+' — '+cur+'/'+req+' (con '+remaining+')');\n" +
                 "  } else {\n" +
-                "    toast(' '+it.skuCode+' — đủ '+req+' cái!');\n" +
+                "    toast('Da du! '+it.skuCode+' x'+req);\n" +
                 "  }\n" +
                 "  if(navigator.vibrate) navigator.vibrate(cur>=req?[80,30,80]:80);\n" +
                 "  renderPickItems();\n" +
                 "}\n" +
+
 
                 "function confirmPicked(){\n" +
                 "  if(!TASK_ID){toast('Không có Task ID!',true);return;}\n" +
@@ -446,7 +447,7 @@ public class ScannerPageController {
                 "  .then(function(r){return r.json();})\n" +
                 "  .then(function(d){\n" +
                 "    if(d&&d.success){\n" +
-                "      toast(' Đã gửi QC! Chờ QC kiểm tra hàng.');\n" +
+                "      toast('✅ Đã gửi QC! Chờ QC kiểm tra hàng.');\n" +
                 "      lockUI('Keeper đã xác nhận lấy hàng — chờ QC kiểm tra');\n" +
                 "    } else {\n" +
                 "      toast((d&&d.message)?d.message:'Lỗi confirm picked',true);\n" +
@@ -470,7 +471,7 @@ public class ScannerPageController {
                 "  // Filter URL/long codes (camera picks up QR on screen/poster)\n" +
                 "  var lc=(barcode||'').toLowerCase();\n" +
                 "  if(lc.indexOf('http')===0||lc.indexOf('//')!==-1||barcode.length>80){\n" +
-                "    setStatus(' Phát hiện QR/URL — đưa barcode sản phẩm vào khung');\n" +
+                "    setStatus('⚠️ Phát hiện QR/URL — đưa barcode sản phẩm vào khung');\n" +
                 "    return;\n" +
                 "  }\n" +
                 "  if(inflight) return;\n" +
@@ -563,7 +564,7 @@ public class ScannerPageController {
                 "        var lc=raw.toLowerCase();\n" +
                 "        if(lc.indexOf('http')===0||lc.indexOf('//')!==-1||raw.length>80){\n" +
                 "          if(SCAN_MODE==='outbound_qc'||SCAN_MODE==='outbound_picking')\n" +
-                "            setStatus(' Phát hiện QR/URL — đưa barcode sản phẩm vào khung');\n" +
+                "            setStatus('⚠️ Phát hiện QR/URL — đưa barcode sản phẩm vào khung');\n" +
                 "          return;\n" +
                 "        }\n" +
                 "        var code=raw.toUpperCase();\n" +
