@@ -91,9 +91,9 @@ file:
 
 # Cloudinary Configuration for avatar storage
 cloudinary:
-  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
-  api-key: ${CLOUDINARY_API_KEY:}
-  api-secret: ${CLOUDINARY_API_SECRET:}
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:dzti1zycp}
+  api-key: ${CLOUDINARY_API_KEY:796479776192876}
+  api-secret: ${CLOUDINARY_API_SECRET:ab7zzKgk4UcD7gYwPyzoZMK5vsM}
 
 
 server:
