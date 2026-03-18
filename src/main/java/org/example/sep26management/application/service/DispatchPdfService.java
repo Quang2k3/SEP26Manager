@@ -105,7 +105,7 @@ public class DispatchPdfService {
 
         } catch (Exception e) {
             log.error("Failed to generate/upload dispatch PDF for soId={}: {}", soId, e.getMessage(), e);
-            throw new RuntimeException("Không thể tạo phiếu xuất kho PDF: " + e.getMessage(), e);
+            throw new org.example.sep26management.infrastructure.exception.BusinessException("Lỗi tạo PDF: " + e.getMessage());
         }
     }
 
@@ -120,7 +120,7 @@ public class DispatchPdfService {
                     }
                     return generateAndUploadPdf(soId);
                 })
-                .orElseThrow(() -> new RuntimeException("Sales Order not found: " + soId));
+                .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.BusinessException("Sales Order not found: " + soId));
     }
 
     // ─── Build PDF bytes ───────────────────────────────────────
@@ -362,7 +362,7 @@ public class DispatchPdfService {
         table.addCell(totalValCell);
 
         PdfPCell blankCell3 = new PdfPCell(new Phrase("", totalFont));
-        blankCell3.setColspan(4);
+        blankCell3.setColspan(5);
         blankCell3.setBackgroundColor(TOTAL_BG);
         blankCell3.setBorderColor(BORDER_CLR);
         blankCell3.setPadding(3);
