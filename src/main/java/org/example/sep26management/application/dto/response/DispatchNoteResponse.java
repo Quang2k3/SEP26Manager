@@ -34,6 +34,7 @@ public class DispatchNoteResponse {
     public static class DispatchNoteItem {
         private String skuCode;
         private String skuName;
+        private String unit;
         private String lotNumber;
         private String manufactureDate;
         private String expiryDate;

@@ -476,12 +476,10 @@ public class OutboundQcService {
 
     private DispatchNoteResponse.DispatchNoteItem buildDispatchNoteItem(PickingTaskItemEntity item) {
         // Resolve SKU code
-        String skuCode = skuRepository.findById(item.getSkuId())
-                .map(SkuEntity::getSkuCode)
-                .orElse("N/A");
-        String skuName = skuRepository.findById(item.getSkuId())
-                .map(SkuEntity::getSkuName)
-                .orElse("N/A");
+        SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
+        String skuCode = sku != null ? sku.getSkuCode() : "N/A";
+        String skuName = sku != null ? sku.getSkuName() : "N/A";
+        String unit    = sku != null ? sku.getUnit()    : "";
 
         // Resolve lot info
         String lotNumber       = null;
@@ -508,6 +506,7 @@ public class OutboundQcService {
         return DispatchNoteResponse.DispatchNoteItem.builder()
                 .skuCode(skuCode)
                 .skuName(skuName)
+                .unit(unit)
                 .lotNumber(lotNumber)
                 .manufactureDate(manufactureDate)
                 .expiryDate(expiryDate)
