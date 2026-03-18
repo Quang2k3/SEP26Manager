@@ -135,15 +135,19 @@ public class GrnService {
         List<ReceivingItemEntity> rcvItems =
                 receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
 
-        PutawayTaskEntity task = PutawayTaskEntity.builder()
-                .warehouseId(grn.getWarehouseId())
-                .receivingId(grn.getReceivingId())
-                .grnId(grn.getGrnId())
-                .fromLocationId(stagingLocationId)
-                .status("PENDING")
-                .createdBy(userId)
-                .build();
-        task = putawayTaskRepo.save(task);
+        // Check if task already exists for this receiving_id (avoid unique constraint violation)
+        PutawayTaskEntity task = putawayTaskRepo.findByReceivingId(grn.getReceivingId())
+                .orElseGet(() -> {
+                    PutawayTaskEntity newTask = PutawayTaskEntity.builder()
+                            .warehouseId(grn.getWarehouseId())
+                            .receivingId(grn.getReceivingId())
+                            .grnId(grn.getGrnId())
+                            .fromLocationId(stagingLocationId)
+                            .status("PENDING")
+                            .createdBy(userId)
+                            .build();
+                    return putawayTaskRepo.save(newTask);
+                });
 
         for (GrnItemEntity item : items) {
             // Match receiving item by SKU + lot + expiry, fallback to SKU only

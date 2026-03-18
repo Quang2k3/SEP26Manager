@@ -138,10 +138,13 @@ public class PutawayTaskController {
                 if (first instanceof Long) return (Long) first;
                 if (first instanceof Integer) return ((Integer) first).longValue();
                 if (first instanceof Number) return ((Number) first).longValue();
-                if (first != null) return Long.parseLong(first.toString());
+                if (first != null) {
+                    try { return Long.parseLong(first.toString()); } catch (NumberFormatException ignored) {}
+                }
             }
         }
-        throw new RuntimeException("Cannot extract warehouseId from token");
+        // warehouseIds empty or missing — return null, service will fetch all tasks
+        return null;
     }
 
     @SuppressWarnings("unchecked")
