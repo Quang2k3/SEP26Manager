@@ -106,5 +106,11 @@ public class PickListResponse {
 
         @Schema(description = "Trạng thái dòng này (PENDING | PICKED)", example = "PENDING")
         private String status; // PENDING | PICKED
+
+        @Schema(description = "QC result: PASS | FAIL | HOLD | null")
+        private String qcResult; // null = not yet scanned
+
+        @Schema(description = "QC scanned timestamp")
+        private java.time.LocalDateTime qcScannedAt;
     }
 }

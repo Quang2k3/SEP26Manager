@@ -254,6 +254,8 @@ public class PickListService {
                     .lotId(item.getLotId()).lotNumber(lotNumber).expiryDate(expiryDate)
                     .requiredQty(item.getRequiredQty()).pickedQty(item.getPickedQty())
                     .status(item.getPickedQty().compareTo(item.getRequiredQty()) >= 0 ? "PICKED" : "PENDING")
+                    .qcResult(item.getQcResult())
+                    .qcScannedAt(item.getQcScannedAt())
                     .build());
         }
 
