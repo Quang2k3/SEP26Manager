@@ -172,6 +172,15 @@ public class OutboundController {
     //              fromDate, toDate, currentUserId, currentUserRole, page, size)
     // getSummary(warehouseId)
     // ─────────────────────────────────────────────────────────────
+    @GetMapping("/{documentId}")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Chi tiết lệnh xuất kho (kèm items)", description = "Trả về thông tin đầy đủ gồm danh sách SKU. Query param `orderType`: SALES_ORDER hoặc INTERNAL_TRANSFER.")
+    public ResponseEntity<ApiResponse<OutboundResponse>> getOutboundDetail(
+            @PathVariable Long documentId,
+            @RequestParam(defaultValue = "SALES_ORDER") String orderType) {
+        return ResponseEntity.ok(outboundService.getOutboundDetail(documentId, orderType));
+    }
+
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Danh sách lệnh xuất kho")
