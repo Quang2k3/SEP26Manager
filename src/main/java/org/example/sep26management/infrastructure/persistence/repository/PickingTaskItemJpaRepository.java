@@ -71,7 +71,7 @@ public interface PickingTaskItemJpaRepository extends JpaRepository<PickingTaskI
             FROM PickingTaskItemEntity i
             JOIN PickingTaskEntity t ON t.pickingTaskId = i.pickingTaskId
             WHERE t.soId = :soId
-              AND t.status NOT IN ('CANCELLED', 'COMPLETED')
+              AND t.status NOT IN ('CANCELLED')
               AND i.qcResult = 'PASS'
             """)
     List<PickingTaskItemEntity> findPassedItemsBySoId(@Param("soId") Long soId);
