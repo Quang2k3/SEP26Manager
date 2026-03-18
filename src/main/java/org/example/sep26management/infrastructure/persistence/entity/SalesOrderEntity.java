@@ -60,6 +60,9 @@ public class SalesOrderEntity {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    @Column(name = "dispatch_pdf_url", columnDefinition = "TEXT")
+    private String dispatchPdfUrl;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

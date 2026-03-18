@@ -50,6 +50,8 @@ public class OutboundQcService {
     private final UserJpaRepository userRepository;
     private final WarehouseJpaRepository warehouseRepository;
     private final CustomerJpaRepository customerRepository;
+    // ── [NEW] PDF service — tạo Phiếu Xuất Kho sau khi dispatch thành công
+    private final DispatchPdfService dispatchPdfService;
 
     // ─────────────────────────────────────────────────────────────────────────
     // 1) START QC SESSION
@@ -266,6 +268,7 @@ public class OutboundQcService {
      * Then:
      *   5. Update picking_task  → status=COMPLETED, completed_at=now()
      *   6. Update sales_order   → status=DISPATCHED, dispatched_at=now()
+     *   7. [NEW] Tạo Phiếu Xuất Kho PDF và đính kèm vào đơn (không block nếu lỗi)
      *
      * Guards:
      *   BR-DISPATCH-02: blocks if any item is not QC-scanned.
@@ -365,63 +368,18 @@ public class OutboundQcService {
         salesOrderRepository.save(so);
 
         log.info("Dispatch confirmed for soId={}. SO status → DISPATCHED", soId);
-        return ApiResponse.success("Order dispatched successfully. Status: DISPATCHED", null);
-    }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Private helpers
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private PickingTaskEntity findPickingTask(Long taskId) {
-        return pickingTaskRepository.findById(taskId)
-                .orElseThrow(() -> new ResourceNotFoundException("PickingTask not found: " + taskId));
-    }
-
-    private SalesOrderEntity findSalesOrder(Long soId) {
-        return salesOrderRepository.findById(soId)
-                .orElseThrow(() -> new ResourceNotFoundException("SalesOrder not found: " + soId));
-    }
-
-    private DispatchNoteResponse.DispatchNoteItem buildDispatchNoteItem(PickingTaskItemEntity item) {
-        // Resolve SKU code
-        String skuCode = skuRepository.findById(item.getSkuId())
-                .map(SkuEntity::getSkuCode)
-                .orElse("N/A");
-        String skuName = skuRepository.findById(item.getSkuId())
-                .map(SkuEntity::getSkuName)
-                .orElse("N/A");
-
-        // Resolve lot info
-        String lotNumber  = null;
-        String expiryDate = null;
-        if (item.getLotId() != null) {
-            inventoryLotRepository.findById(item.getLotId()).ifPresent(lot -> {
-                // fields set below via local vars
-            });
-            InventoryLotEntity lot = inventoryLotRepository.findById(item.getLotId()).orElse(null);
-            if (lot != null) {
-                lotNumber  = lot.getLotNumber();
-                expiryDate = lot.getExpiryDate() != null ? lot.getExpiryDate().toString() : null;
-            }
+        // 7) [NEW] Tạo Phiếu Xuất Kho PDF và đính kèm URL vào đơn
+        //    Chạy sau transaction chính — lỗi PDF không được block dispatch thành công
+        try {
+            String pdfUrl = dispatchPdfService.generateAndUploadPdf(soId);
+            log.info("Dispatch PDF created and attached for soId={}: {}", soId, pdfUrl);
+        } catch (Exception e) {
+            log.error("Dispatch PDF creation failed for soId={} (dispatch vẫn thành công): {}",
+                    soId, e.getMessage());
         }
 
-        // Resolve location code
-        String locationCode = locationRepository.findById(item.getFromLocationId())
-                .map(LocationEntity::getLocationCode)
-                .orElse("N/A");
-
-        BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
-                ? item.getPickedQty()
-                : item.getRequiredQty();
-
-        return DispatchNoteResponse.DispatchNoteItem.builder()
-                .skuCode(skuCode)
-                .skuName(skuName)
-                .lotNumber(lotNumber)
-                .expiryDate(expiryDate)
-                .locationCode(locationCode)
-                .quantity(qty)
-                .build();
+        return ApiResponse.success("Order dispatched successfully. Status: DISPATCHED", null);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -502,4 +460,59 @@ public class OutboundQcService {
         return ApiResponse.success("QC finalized. All items processed.", summary);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Private helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private PickingTaskEntity findPickingTask(Long taskId) {
+        return pickingTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("PickingTask not found: " + taskId));
+    }
+
+    private SalesOrderEntity findSalesOrder(Long soId) {
+        return salesOrderRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException("SalesOrder not found: " + soId));
+    }
+
+    private DispatchNoteResponse.DispatchNoteItem buildDispatchNoteItem(PickingTaskItemEntity item) {
+        // Resolve SKU code
+        String skuCode = skuRepository.findById(item.getSkuId())
+                .map(SkuEntity::getSkuCode)
+                .orElse("N/A");
+        String skuName = skuRepository.findById(item.getSkuId())
+                .map(SkuEntity::getSkuName)
+                .orElse("N/A");
+
+        // Resolve lot info
+        String lotNumber  = null;
+        String expiryDate = null;
+        if (item.getLotId() != null) {
+            inventoryLotRepository.findById(item.getLotId()).ifPresent(lot -> {
+                // fields set below via local vars
+            });
+            InventoryLotEntity lot = inventoryLotRepository.findById(item.getLotId()).orElse(null);
+            if (lot != null) {
+                lotNumber  = lot.getLotNumber();
+                expiryDate = lot.getExpiryDate() != null ? lot.getExpiryDate().toString() : null;
+            }
+        }
+
+        // Resolve location code
+        String locationCode = locationRepository.findById(item.getFromLocationId())
+                .map(LocationEntity::getLocationCode)
+                .orElse("N/A");
+
+        BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
+                ? item.getPickedQty()
+                : item.getRequiredQty();
+
+        return DispatchNoteResponse.DispatchNoteItem.builder()
+                .skuCode(skuCode)
+                .skuName(skuName)
+                .lotNumber(lotNumber)
+                .expiryDate(expiryDate)
+                .locationCode(locationCode)
+                .quantity(qty)
+                .build();
+    }
 }

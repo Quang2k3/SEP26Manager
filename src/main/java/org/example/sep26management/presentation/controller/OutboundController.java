@@ -59,7 +59,7 @@ public class OutboundController {
     private final PickListService pickListService;
     private final OutboundQcService outboundQcService;
     private final ReceivingSessionService receivingSessionService;
-
+    private final DispatchPdfService dispatchPdfService;
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
     // createOutbound(request, createdBy, ip, ua) — warehouseId injected vào request
@@ -374,7 +374,40 @@ public class OutboundController {
     public ResponseEntity<ApiResponse<Void>> confirmDispatch(@PathVariable Long soId) {
         return ResponseEntity.ok(outboundQcService.confirmDispatch(soId, getUserId()));
     }
+    // ─────────────────────────────────────────────────────────────
+    // GET dispatch PDF URL (để FE redirect tải về)
+    // ─────────────────────────────────────────────────────────────
 
+    @GetMapping("/sales-orders/{soId}/dispatch-pdf")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER','ACCOUNTANT')")
+    @Operation(
+            summary = "Lấy URL Phiếu Xuất Kho PDF",
+            description = "Trả về URL Cloudinary của Phiếu Xuất Kho PDF.\n\n"
+                    + "- Nếu PDF đã có: trả ngay URL đã lưu.\n"
+                    + "- Nếu chưa có (ví dụ SO dispatch trước khi tính năng này live): tạo mới và trả về.\n"
+                    + "- FE redirect user đến URL này để tải file PDF."
+    )
+    public ResponseEntity<ApiResponse<Map<String, String>>> getDispatchPdfUrl(@PathVariable Long soId) {
+        String pdfUrl = dispatchPdfService.getOrCreatePdfUrl(soId);
+        return ResponseEntity.ok(ApiResponse.success("OK", Map.of(
+                "soId",   String.valueOf(soId),
+                "pdfUrl", pdfUrl
+        )));
+    }
+
+    @PostMapping("/sales-orders/{soId}/dispatch-pdf/regenerate")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @Operation(
+            summary = "Tạo lại Phiếu Xuất Kho PDF",
+            description = "Tạo lại PDF (ví dụ sau khi chỉnh sửa thông tin). Ghi đè URL cũ."
+    )
+    public ResponseEntity<ApiResponse<Map<String, String>>> regenerateDispatchPdf(@PathVariable Long soId) {
+        String pdfUrl = dispatchPdfService.generateAndUploadPdf(soId);
+        return ResponseEntity.ok(ApiResponse.success("PDF regenerated", Map.of(
+                "soId",   String.valueOf(soId),
+                "pdfUrl", pdfUrl
+        )));
+    }
     // ─────────────────────────────────────────────────────────────
     // Helpers — giữ nguyên theo file gốc
     // ─────────────────────────────────────────────────────────────
