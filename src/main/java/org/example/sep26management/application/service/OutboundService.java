@@ -630,4 +630,25 @@ public class OutboundService {
                 .stockWarnings(warnings != null && !warnings.isEmpty() ? warnings : null)
                 .build();
     }
+    // ─── Get single order detail (with items) ─────────────────────────────────
+    @Transactional(readOnly = true)
+    public ApiResponse<OutboundResponse> getOutboundDetail(Long documentId, String orderType) {
+        if ("INTERNAL_TRANSFER".equals(orderType)) {
+            TransferEntity transfer = transferRepository.findById(documentId)
+                    .orElseThrow(() -> new RuntimeException("Transfer not found: " + documentId));
+            List<TransferItemEntity> items = transferItemRepository.findByTransferId(documentId);
+            WarehouseEntity dest = transfer.getToWarehouseId() != null
+                    ? warehouseRepository.findById(transfer.getToWarehouseId()).orElse(null) : null;
+            return ApiResponse.success("OK", buildTransferResponse(transfer, items, dest, null));
+        } else {
+            SalesOrderEntity so = soRepository.findById(documentId)
+                    .orElseThrow(() -> new RuntimeException("Sales order not found: " + documentId));
+            List<SalesOrderItemEntity> items = soItemRepository.findBySoId(documentId);
+            CustomerEntity customer = so.getCustomerId() != null
+                    ? customerRepository.findById(so.getCustomerId()).orElse(null) : null;
+            return ApiResponse.success("OK", buildSalesOrderResponse(so, items, customer, null));
+        }
+    }
+
+
 }
