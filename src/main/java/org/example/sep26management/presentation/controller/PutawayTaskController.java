@@ -11,6 +11,7 @@ import org.example.sep26management.application.dto.response.PutawayAllocationRes
 import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
 import org.example.sep26management.application.service.PutawayTaskService;
+import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,6 +26,7 @@ import java.util.Map;
 public class PutawayTaskController {
 
     private final PutawayTaskService putawayTaskService;
+    private final UserJpaRepository userJpaRepository;
 
     // ─── CRUD ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +133,15 @@ public class PutawayTaskController {
 
     @SuppressWarnings("unchecked")
     private Long extractWarehouseId(Authentication auth) {
+        // Query DB live — không dùng JWT claim vì có thể stale (user assign warehouse sau khi login)
+        Long userId = extractUserId(auth);
+        if (userId != null) {
+            List<Long> liveWarehouseIds = userJpaRepository.findActiveWarehouseIdsByUserId(userId);
+            if (liveWarehouseIds != null && !liveWarehouseIds.isEmpty()) {
+                return liveWarehouseIds.get(0);
+            }
+        }
+        // Fallback: try JWT claim
         if (auth != null && auth.getDetails() instanceof Map) {
             Object raw = ((Map<?, ?>) auth.getDetails()).get("warehouseIds");
             if (raw instanceof java.util.List<?> list && !list.isEmpty()) {
@@ -143,7 +154,7 @@ public class PutawayTaskController {
                 }
             }
         }
-        // warehouseIds empty or missing — return null, service will fetch all tasks
+        // warehouseIds empty — return null, service will fetch all tasks
         return null;
     }
 
