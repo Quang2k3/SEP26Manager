@@ -75,6 +75,10 @@ public class OutboundResponse {
     // Stock warnings — BR-OUT-03/04
     @Schema(description = "Danh sách cánh báo hết hàng (Nếu Số Lượng Tồn < Số Khách yêu cầu, sẽ hiện Cảnh Báo cho Quản lý biết để Reject phiếu)")
     private List<StockWarning> stockWarnings;
+    @com.fasterxml.jackson.annotation.JsonInclude(
+            com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL
+    )
+    private String dispatchPdfUrl;
 
     @Getter
     @Setter
@@ -118,4 +122,6 @@ public class OutboundResponse {
         @Schema(description = "Thông báo giải thích", example = "Sản phẩm SKU-IP15 chỉ còn khả dụng 30.0 cái (Khách đòi 50.0).")
         private String message;
     }
+
+
 }
