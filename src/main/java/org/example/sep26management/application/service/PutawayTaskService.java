@@ -57,11 +57,13 @@ public class PutawayTaskService {
         Page<PutawayTaskEntity> tasksPage;
         if (assignedTo != null && status != null) {
             tasksPage = putawayTaskRepo.findByAssignedToAndStatusOrderByCreatedAtDesc(assignedTo, status, pageable);
-        } else if (status != null) {
+        } else if (status != null && warehouseId != null) {
             tasksPage = putawayTaskRepo.findByWarehouseIdAndStatusOrderByCreatedAtDesc(warehouseId, status, pageable);
-        } else {
-            // Luôn filter theo warehouseId của user đang login
+        } else if (warehouseId != null) {
             tasksPage = putawayTaskRepo.findByWarehouseIdOrderByCreatedAtDesc(warehouseId, pageable);
+        } else {
+            // warehouseId null (user chưa assign warehouse) → trả về tất cả tasks
+            tasksPage = putawayTaskRepo.findAllByOrderByCreatedAtDesc(pageable);
         }
 
         List<PutawayTaskResponse> content = tasksPage.getContent().stream()
