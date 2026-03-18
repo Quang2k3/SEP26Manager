@@ -484,16 +484,15 @@ public class OutboundQcService {
                 .orElse("N/A");
 
         // Resolve lot info
-        String lotNumber  = null;
-        String expiryDate = null;
+        String lotNumber       = null;
+        String manufactureDate = null;
+        String expiryDate      = null;
         if (item.getLotId() != null) {
-            inventoryLotRepository.findById(item.getLotId()).ifPresent(lot -> {
-                // fields set below via local vars
-            });
             InventoryLotEntity lot = inventoryLotRepository.findById(item.getLotId()).orElse(null);
             if (lot != null) {
-                lotNumber  = lot.getLotNumber();
-                expiryDate = lot.getExpiryDate() != null ? lot.getExpiryDate().toString() : null;
+                lotNumber       = lot.getLotNumber();
+                manufactureDate = lot.getManufactureDate() != null ? lot.getManufactureDate().toString() : null;
+                expiryDate      = lot.getExpiryDate() != null ? lot.getExpiryDate().toString() : null;
             }
         }
 
@@ -510,6 +509,7 @@ public class OutboundQcService {
                 .skuCode(skuCode)
                 .skuName(skuName)
                 .lotNumber(lotNumber)
+                .manufactureDate(manufactureDate)
                 .expiryDate(expiryDate)
                 .locationCode(locationCode)
                 .quantity(qty)

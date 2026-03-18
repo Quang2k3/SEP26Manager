@@ -35,6 +35,7 @@ public class DispatchNoteResponse {
         private String skuCode;
         private String skuName;
         private String lotNumber;
+        private String manufactureDate;
         private String expiryDate;
         private String locationCode;
         private java.math.BigDecimal quantity;
