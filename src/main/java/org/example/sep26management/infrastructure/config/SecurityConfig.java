@@ -69,6 +69,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers("/ws/**", "/ws/chat/**").permitAll()
                         .requestMatchers(
                                 "/v1/auth/**",
                                 "/v1/test/**",
