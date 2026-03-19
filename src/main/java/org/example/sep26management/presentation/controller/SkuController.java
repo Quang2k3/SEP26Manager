@@ -12,6 +12,8 @@ import org.example.sep26management.application.dto.request.ConfigureSkuThreshold
 import org.example.sep26management.application.dto.request.SearchSkuRequest;
 import org.example.sep26management.application.dto.response.*;
 import org.example.sep26management.application.service.SkuService;
+import org.example.sep26management.infrastructure.persistence.entity.InventoryLotEntity;
+import org.example.sep26management.infrastructure.persistence.repository.InventoryLotJpaRepository;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -44,6 +46,7 @@ import java.util.Map;
 public class SkuController {
 
     private final SkuService skuService;
+    private final InventoryLotJpaRepository inventoryLotRepo;
 
     /**
      * UC-268: View SKU Detail
@@ -172,6 +175,40 @@ public class SkuController {
                 skuId, request, updatedBy,
                 getClientIpAddress(httpRequest),
                 httpRequest.getHeader("User-Agent")));
+    }
+
+    /**
+     * GET /v1/skus/code/{skuCode}/lots
+     * Lấy danh sách lot đã tồn tại của 1 SKU — dùng để check trùng LOT khi tạo phiếu nhận hàng.
+     * Trả về list { lotId, lotNumber, expiryDate } để FE cảnh báo realtime.
+     */
+    @GetMapping("/code/{skuCode}/lots")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Danh sách lot của SKU", description = "Lấy tất cả lot đã có trong hệ thống cho 1 SKU. FE dùng để cảnh báo khi nhập lotNumber trùng.")
+    public ResponseEntity<ApiResponse<List<java.util.Map<String, Object>>>> getSkuLots(
+            @PathVariable String skuCode) {
+
+        // Tìm SKU theo skuCode
+        ApiResponse<SkuResponse> skuResp = skuService.findBySkuCode(skuCode);
+        if (!Boolean.TRUE.equals(skuResp.getSuccess()) || skuResp.getData() == null) {
+            return ResponseEntity.ok(ApiResponse.success("SKU not found", java.util.List.of()));
+        }
+        Long skuId = skuResp.getData().getSkuId();
+
+        // Lấy tất cả lot của SKU
+        List<InventoryLotEntity> lots = inventoryLotRepo.findBySkuId(skuId);
+        List<java.util.Map<String, Object>> result = lots.stream()
+                .map(l -> {
+                    java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+                    m.put("lotId",     l.getLotId());
+                    m.put("lotNumber", l.getLotNumber());
+                    m.put("expiryDate", l.getExpiryDate() != null ? l.getExpiryDate().toString() : null);
+                    m.put("manufactureDate", l.getManufactureDate() != null ? l.getManufactureDate().toString() : null);
+                    return m;
+                })
+                .collect(java.util.stream.Collectors.toList());
+
+        return ResponseEntity.ok(ApiResponse.success("OK", result));
     }
 
     // ─────────────────────────────────────────────────────────────
