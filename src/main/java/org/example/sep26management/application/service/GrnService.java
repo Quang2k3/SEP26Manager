@@ -137,7 +137,14 @@ public class GrnService {
         List<ReceivingItemEntity> rcvItems =
                 receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
 
-        // Mỗi lần post GRN tạo 1 PutawayTask mới — không check duplicate
+        // Guard: tránh post cùng 1 GRN 2 lần (mỗi GRN chỉ được tạo 1 PutawayTask)
+        // Dùng grnId — KHÔNG dùng receivingId vì nhiều GRN có thể cùng receivingId
+        if (putawayTaskRepo.findByGrnId(grn.getGrnId()).isPresent()) {
+            throw new BusinessException(
+                    "GRN " + grn.getGrnCode() + " đã được nhập kho trước đó. Không thể nhập kho lần 2.");
+        }
+
+        // Tạo PutawayTask mới cho GRN này
         PutawayTaskEntity task = PutawayTaskEntity.builder()
                 .warehouseId(grn.getWarehouseId())
                 .receivingId(grn.getReceivingId())
