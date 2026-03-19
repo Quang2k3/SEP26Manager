@@ -109,19 +109,41 @@ public interface InventorySnapshotJpaRepository
 
         // ── Warehouse-level aggregate queries ────────────────────────────────────
 
+        /**
+         * Tính tổng tồn kho khả dụng theo warehouse + sku.
+         * FIX: chỉ tính hàng ở location ACTIVE + là BIN thực (không staging, không AISLE/RACK).
+         * Trước đây query không join locations → tính cả hàng ở location inactive hoặc staging
+         * → tồn kho hiển thị cao hơn thực tế.
+         */
         @Query("""
             SELECT COALESCE(SUM(s.quantity), 0)
             FROM InventorySnapshotEntity s
-            WHERE s.warehouseId = :warehouseId AND s.skuId = :skuId
+            JOIN LocationEntity loc ON loc.locationId = s.locationId
+            WHERE s.warehouseId = :warehouseId
+              AND s.skuId = :skuId
+              AND loc.active = true
+              AND loc.isStaging = false
+              AND loc.locationType = org.example.sep26management.application.enums.LocationType.BIN
             """)
         BigDecimal sumQuantityByWarehouseAndSku(
                 @Param("warehouseId") Long warehouseId,
                 @Param("skuId") Long skuId);
 
+        /**
+         * Tính tổng reserved_qty theo warehouse + sku.
+         * FIX: chỉ tính reserved ở location ACTIVE + BIN thực.
+         * Nếu location bị deactivate thì reserved ở đó không được tính vào công thức
+         * available = total - reserved → tránh available âm.
+         */
         @Query("""
             SELECT COALESCE(SUM(s.reservedQty), 0)
             FROM InventorySnapshotEntity s
-            WHERE s.warehouseId = :warehouseId AND s.skuId = :skuId
+            JOIN LocationEntity loc ON loc.locationId = s.locationId
+            WHERE s.warehouseId = :warehouseId
+              AND s.skuId = :skuId
+              AND loc.active = true
+              AND loc.isStaging = false
+              AND loc.locationType = org.example.sep26management.application.enums.LocationType.BIN
             """)
         BigDecimal sumReservedByWarehouseAndSku(
                 @Param("warehouseId") Long warehouseId,
