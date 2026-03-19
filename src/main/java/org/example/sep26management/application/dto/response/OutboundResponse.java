@@ -79,6 +79,8 @@ public class OutboundResponse {
             com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL
     )
     private String dispatchPdfUrl;
+    private String signedNoteUrl;
+    private String signedNoteUploadedAt;
 
     @Getter
     @Setter

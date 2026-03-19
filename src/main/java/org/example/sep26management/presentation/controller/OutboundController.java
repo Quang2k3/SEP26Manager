@@ -13,6 +13,7 @@ import org.example.sep26management.application.enums.OutboundType;
 import org.example.sep26management.application.service.*;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -60,6 +61,7 @@ public class OutboundController {
     private final OutboundQcService outboundQcService;
     private final ReceivingSessionService receivingSessionService;
     private final DispatchPdfService dispatchPdfService;
+    private final SignedNoteService signedNoteService;
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
     // createOutbound(request, createdBy, ip, ua) — warehouseId injected vào request
@@ -408,6 +410,33 @@ public class OutboundController {
                 "pdfUrl", pdfUrl
         )));
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // SIGNED NOTE — Upload ảnh phiếu xuất kho đã ký (via QR điện thoại)
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * POST /v1/outbound/sales-orders/{soId}/signed-note
+     * Không cần JWT — điện thoại scan QR không có token.
+     * Dùng token ngắn hạn trong URL để xác thực.
+     */
+    @PostMapping(value = "/sales-orders/{soId}/signed-note",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload ảnh phiếu xuất kho đã ký",
+            description = "Điện thoại scan QR → chụp ảnh → POST ảnh lên đây. Không cần JWT.")
+    public ResponseEntity<ApiResponse<Map<String, String>>> uploadSignedNote(
+            @PathVariable Long soId,
+            @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
+        return ResponseEntity.ok(signedNoteService.uploadSignedNote(soId, photo));
+    }
+
+    @GetMapping("/sales-orders/{soId}/signed-note")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER','ACCOUNTANT')")
+    @Operation(summary = "Xem ảnh phiếu xuất kho đã ký")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getSignedNote(@PathVariable Long soId) {
+        return ResponseEntity.ok(signedNoteService.getSignedNote(soId));
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Helpers — giữ nguyên theo file gốc
     // ─────────────────────────────────────────────────────────────

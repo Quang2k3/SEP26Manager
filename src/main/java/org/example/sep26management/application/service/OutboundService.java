@@ -598,6 +598,8 @@ public class OutboundService {
                 .createdAt(so.getCreatedAt()).updatedAt(so.getUpdatedAt())
                 .stockWarnings(warnings != null && !warnings.isEmpty() ? warnings : null)
                 .dispatchPdfUrl(so.getDispatchPdfUrl())
+                .signedNoteUrl(so.getSignedNoteUrl())
+                .signedNoteUploadedAt(so.getSignedNoteUploadedAt() != null ? so.getSignedNoteUploadedAt().toString() : null)
                 .build();
     }
 
