@@ -175,18 +175,8 @@ public class ProfileService {
         try {
             String publicId = CLOUDINARY_FOLDER + "/avatar_" + userId;
 
-            // DUNG "eager" thay vi "transformation" khi upload trong Java SDK
-            // "transformation" chi dung khi build delivery URL, KHONG phai khi upload
-            List<Map<String, Object>> eager = new ArrayList<>();
-            eager.add(ObjectUtils.asMap(
-                    "width",        400,
-                    "height",       400,
-                    "crop",         "fill",
-                    "gravity",      "face",
-                    "quality",      "auto",
-                    "fetch_format", "auto"
-            ));
-
+            // Không dùng eager transformation — free plan có thể không support
+            // Chỉ upload raw image, Cloudinary tự optimize
             @SuppressWarnings("unchecked")
             Map<String, Object> uploadResult = cloudinary.uploader().upload(
                     file.getBytes(),
@@ -194,32 +184,30 @@ public class ProfileService {
                             "public_id",     publicId,
                             "overwrite",     true,
                             "resource_type", "image",
-                            "eager",         eager,
-                            "invalidate",    true
+                            "invalidate",    true,
+                            "quality",       "auto",
+                            "fetch_format",  "auto"
                     )
             );
 
             String secureUrl = (String) uploadResult.get("secure_url");
             if (secureUrl == null) {
-                log.error("Cloudinary returned null secure_url. Response: {}", uploadResult);
-                throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
+                log.error("Cloudinary returned null secure_url. Full response: {}", uploadResult);
+                throw new BusinessException("Upload avatar thất bại: Cloudinary không trả về URL.");
             }
-            log.info("Avatar uploaded successfully for userId={}: {}", userId, secureUrl);
+            log.info("Avatar uploaded for userId={}: {}", userId, secureUrl);
             return secureUrl;
 
         } catch (BusinessException e) {
             throw e;
         } catch (IOException e) {
-            // IOException: loi doc bytes tu MultipartFile
-            log.error("IO error reading file for userId={}: {}", userId, e.getMessage(), e);
-            throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
+            log.error("IO error reading avatar file for userId={}: {}", userId, e.getMessage(), e);
+            throw new BusinessException("Không thể đọc file ảnh: " + e.getMessage());
         } catch (Exception e) {
-            // Cloudinary SDK throw RuntimeException (com.cloudinary.api.exceptions.*)
-            // khi credentials sai (401), cloud_name sai, rate limit, loi mang...
-            // KHONG phai IOException -> phai catch Exception rieng o day
-            log.error("Cloudinary upload failed for userId={}: [{}] {}", userId,
-                    e.getClass().getSimpleName(), e.getMessage(), e);
-            throw new BusinessException(MessageConstants.AVATAR_SAVE_FAILED);
+            log.error("Cloudinary avatar upload failed for userId={}: [{}] {}",
+                    userId, e.getClass().getSimpleName(), e.getMessage(), e);
+            // Trả message lỗi thật từ Cloudinary để dễ debug
+            throw new BusinessException("Upload avatar thất bại: " + e.getMessage());
         }
     }
 
