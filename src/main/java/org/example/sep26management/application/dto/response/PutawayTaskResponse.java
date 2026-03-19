@@ -21,7 +21,19 @@ public class PutawayTaskResponse {
     @Schema(description = "Thuộc GRN số", example = "3")
     private Long grnId;
 
-    @Schema(description = "Trạng thái (PENDING, IN_PROGRESS, COMPLETED, CANCELLED)", example = "PENDING")
+    @Schema(description = "Mã GRN (ví dụ: GRN-1773906771871)", example = "GRN-1773906771871")
+    private String grnCode;
+
+    @Schema(description = "ID phiếu nhận hàng gốc", example = "5")
+    private Long receivingId;
+
+    @Schema(description = "Mã phiếu nhận hàng (ví dụ: RCV-2026-001)", example = "RCV-2026-001")
+    private String receivingCode;
+
+    @Schema(description = "Số lượng SKU trong task (để hiển thị nhanh trên list)", example = "3")
+    private Integer itemCount;
+
+    @Schema(description = "Trạng thái (PENDING, OPEN, IN_PROGRESS, DONE)", example = "PENDING")
     private String status;
     private Long fromLocationId;
     private Long assignedTo;

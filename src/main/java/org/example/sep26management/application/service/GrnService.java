@@ -1,6 +1,7 @@
 package org.example.sep26management.application.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.GrnItemResponse;
 import org.example.sep26management.application.dto.response.GrnResponse;
@@ -20,6 +21,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class GrnService {
 
     private final GrnJpaRepository grnRepo;
@@ -135,6 +137,13 @@ public class GrnService {
         List<ReceivingItemEntity> rcvItems =
                 receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
 
+        // Guard: phiếu nhận hàng phải có items (đã scan xong)
+        if (rcvItems.isEmpty()) {
+            throw new BusinessException(
+                    "Phiếu nhận hàng #" + grn.getReceivingId() + " chưa có dòng hàng nào được scan. "
+                            + "Vui lòng hoàn thành bước scan nhận hàng trước khi nhập kho.");
+        }
+
         // Check if task already exists for this receiving_id (avoid unique constraint violation)
         PutawayTaskEntity task = putawayTaskRepo.findByReceivingId(grn.getReceivingId())
                 .orElseGet(() -> {
@@ -148,6 +157,20 @@ public class GrnService {
                             .build();
                     return putawayTaskRepo.save(newTask);
                 });
+
+        // Guard: nếu task đã có items (tránh tạo duplicate khi gọi post() nhiều lần)
+        boolean taskAlreadyHasItems = !putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(task.getPutawayTaskId()).isEmpty();
+        if (taskAlreadyHasItems) {
+            log.warn("PutawayTask {} đã có items — bỏ qua bước tạo items để tránh duplicate (receivingId={})",
+                    task.getPutawayTaskId(), grn.getReceivingId());
+            grn.setStatus("POSTED");
+            grnRepo.save(grn);
+            receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
+                order.setStatus("POSTED");
+                receivingOrderRepo.save(order);
+            });
+            return ApiResponse.success("GRN posted (task items already exist).", toSummaryResponse(grn));
+        }
 
         for (GrnItemEntity item : items) {
             // Match receiving item by SKU + lot + expiry, fallback to SKU only

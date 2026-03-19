@@ -19,6 +19,8 @@ import org.example.sep26management.infrastructure.persistence.repository.Putaway
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.GrnJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -47,6 +49,8 @@ public class PutawayTaskService {
     private final PutawaySuggestionService putawaySuggestionService;
     private final SkuJpaRepository skuRepo;
     private final PutawayAllocationJpaRepository allocationRepo;
+    private final GrnJpaRepository grnRepo;
+    private final ReceivingOrderJpaRepository receivingOrderRepo;
 
     // ─── List tasks ────────────────────────────────────────────────────────────
 
@@ -318,10 +322,33 @@ public class PutawayTaskService {
     }
 
     private PutawayTaskResponse toResponse(PutawayTaskEntity t) {
+        // Resolve GRN code
+        String grnCode = null;
+        if (t.getGrnId() != null) {
+            grnCode = grnRepo.findById(t.getGrnId())
+                    .map(g -> g.getGrnCode())
+                    .orElse(null);
+        }
+
+        // Resolve receiving code
+        String receivingCode = null;
+        if (t.getReceivingId() != null) {
+            receivingCode = receivingOrderRepo.findById(t.getReceivingId())
+                    .map(r -> r.getReceivingCode())
+                    .orElse(null);
+        }
+
+        // Count items for quick display on list (avoid loading all items for list endpoint)
+        int itemCount = (int) putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(t.getPutawayTaskId()).size();
+
         return PutawayTaskResponse.builder()
                 .putawayTaskId(t.getPutawayTaskId())
                 .warehouseId(t.getWarehouseId())
                 .grnId(t.getGrnId())
+                .grnCode(grnCode)
+                .receivingId(t.getReceivingId())
+                .receivingCode(receivingCode)
+                .itemCount(itemCount)
                 .status(t.getStatus())
                 .fromLocationId(t.getFromLocationId())
                 .assignedTo(t.getAssignedTo())
