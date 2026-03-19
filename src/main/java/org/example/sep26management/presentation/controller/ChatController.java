@@ -97,9 +97,12 @@ public class ChatController {
     public void handleMessage(
             @DestinationVariable Long roomId,
             @Payload SendMessageRequest req,
-            SimpMessageHeaderAccessor headerAccessor) {
-        Long userId = extractUserIdFromWs(headerAccessor);
-        if (userId == null) return;
+            java.security.Principal principal) {
+        Long userId = extractUserIdFromPrincipal(principal);
+        if (userId == null) {
+            log.warn("[WS] handleMessage: cannot extract userId, principal={}", principal);
+            return;
+        }
         chatService.sendMessage(roomId, userId, req.getContent());
     }
 
@@ -108,8 +111,8 @@ public class ChatController {
     public void handleTyping(
             @DestinationVariable Long roomId,
             @Payload Map<String, Object> payload,
-            SimpMessageHeaderAccessor headerAccessor) {
-        Long userId = extractUserIdFromWs(headerAccessor);
+            java.security.Principal principal) {
+        Long userId = extractUserIdFromPrincipal(principal);
         if (userId == null) return;
         boolean typing = Boolean.TRUE.equals(payload.get("typing"));
         chatService.broadcastTyping(roomId, userId, typing);
@@ -119,8 +122,8 @@ public class ChatController {
     @MessageMapping("/chat/{roomId}/read")
     public void handleRead(
             @DestinationVariable Long roomId,
-            SimpMessageHeaderAccessor headerAccessor) {
-        Long userId = extractUserIdFromWs(headerAccessor);
+            java.security.Principal principal) {
+        Long userId = extractUserIdFromPrincipal(principal);
         if (userId == null) return;
         chatService.markRead(roomId, userId);
     }
@@ -136,18 +139,18 @@ public class ChatController {
         throw new RuntimeException("Cannot extract userId");
     }
 
-    private Long extractUserIdFromWs(SimpMessageHeaderAccessor accessor) {
+    private Long extractUserIdFromPrincipal(java.security.Principal principal) {
         try {
-            var user = accessor.getUser();
-            if (user instanceof org.springframework.security.authentication.UsernamePasswordAuthenticationToken token) {
+            if (principal instanceof org.springframework.security.authentication.UsernamePasswordAuthenticationToken token) {
                 if (token.getDetails() instanceof java.util.Map<?,?> map) {
                     Object uid = map.get("userId");
                     if (uid instanceof Long l) return l;
                     if (uid instanceof Integer i) return i.longValue();
+                    if (uid != null) return Long.parseLong(uid.toString());
                 }
             }
         } catch (Exception e) {
-            log.warn("Cannot extract userId from WS: {}", e.getMessage());
+            log.warn("Cannot extract userId from Principal: {}", e.getMessage());
         }
         return null;
     }

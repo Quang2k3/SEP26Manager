@@ -62,12 +62,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 if (accessor == null) return message;
 
                 if (StompCommand.CONNECT.equals(accessor.getCommand())) {
+                    // ── Authenticate on CONNECT, store Principal in session ──────────
                     String token = accessor.getFirstNativeHeader("Authorization");
                     if (token != null && token.startsWith("Bearer ")) {
                         token = token.substring(7);
                     }
                     if (token == null) {
-                        // Try query param (SockJS fallback)
                         token = accessor.getFirstNativeHeader("token");
                     }
                     if (token != null && jwtTokenProvider.validateToken(token)) {
@@ -82,9 +82,37 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                             var auth = new UsernamePasswordAuthenticationToken(email, null, authorities);
                             auth.setDetails(Map.of("userId", userId, "token", token));
                             accessor.setUser(auth);
+                            // Persist Principal so subsequent SEND/SUBSCRIBE frames also carry it
+                            accessor.setLeaveMutable(true);
                             log.debug("WS CONNECT authenticated: userId={}", userId);
                         } catch (Exception e) {
                             log.warn("WS CONNECT auth failed: {}", e.getMessage());
+                        }
+                    }
+                } else if (accessor.getCommand() != null) {
+                    // ── For SEND/SUBSCRIBE/etc: ensure Principal is propagated ───────
+                    // Spring's SimpAnnotationMethod injects Principal from the session;
+                    // but if accessor lost it, attempt token re-auth as fallback.
+                    if (accessor.getUser() == null) {
+                        String token = accessor.getFirstNativeHeader("Authorization");
+                        if (token != null && token.startsWith("Bearer ")) {
+                            token = token.substring(7);
+                        }
+                        if (token != null && jwtTokenProvider.validateToken(token)) {
+                            try {
+                                Long userId = jwtTokenProvider.getUserIdFromToken(token);
+                                String email = jwtTokenProvider.getEmailFromToken(token);
+                                List<String> roles = jwtTokenProvider.getRoleCodesFromToken(token)
+                                        .stream().collect(Collectors.toList());
+                                var authorities = roles.stream()
+                                        .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
+                                        .collect(Collectors.toList());
+                                var auth = new UsernamePasswordAuthenticationToken(email, null, authorities);
+                                auth.setDetails(Map.of("userId", userId, "token", token));
+                                accessor.setUser(auth);
+                            } catch (Exception e) {
+                                log.warn("WS re-auth failed on {}: {}", accessor.getCommand(), e.getMessage());
+                            }
                         }
                     }
                 }
