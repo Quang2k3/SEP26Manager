@@ -63,6 +63,12 @@ public class SalesOrderEntity {
     @Column(name = "dispatch_pdf_url", columnDefinition = "TEXT")
     private String dispatchPdfUrl;
 
+    @Column(name = "signed_note_url", columnDefinition = "TEXT")
+    private String signedNoteUrl;
+
+    @Column(name = "signed_note_uploaded_at")
+    private java.time.LocalDateTime signedNoteUploadedAt;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
