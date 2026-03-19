@@ -16,17 +16,24 @@ public interface ReservationQueryRepository extends JpaRepository<ReservationEnt
             String referenceTable, Long referenceId, String status);
 
     /**
-     * Resolve which location holds stock for a reservation's sku+lot
-     * Returns the location_id with the most available qty (for pick routing)
+     * Resolve which location holds stock for a reservation's sku+lot.
+     * FIX: loại trừ staging locations (is_staging=true) — pick list chỉ lấy từ bin thực,
+     * không lấy từ Z-OUT/staging mà hàng chưa được putaway.
+     * Returns the location_id with the most available qty (for pick routing — FEFO + most qty first).
      */
-    @Query("""
-            SELECT s.locationId FROM InventorySnapshotEntity s
-            WHERE s.warehouseId = :warehouseId
-              AND s.skuId = :skuId
-              AND (:lotId IS NULL OR s.lotId = :lotId)
-              AND (s.quantity - s.reservedQty) > 0
-            ORDER BY (s.quantity - s.reservedQty) DESC
-            """)
+    @Query(value = """
+            SELECT s.location_id
+            FROM inventory_snapshot s
+            JOIN locations l ON l.location_id = s.location_id
+            WHERE s.warehouse_id = :warehouseId
+              AND s.sku_id       = :skuId
+              AND (:lotId IS NULL OR s.lot_id = :lotId)
+              AND (s.quantity - COALESCE(s.reserved_qty, 0)) > 0
+              AND l.is_staging   = false
+              AND l.active       = true
+            ORDER BY (s.quantity - COALESCE(s.reserved_qty, 0)) DESC
+            LIMIT 50
+            """, nativeQuery = true)
     List<Long> findLocationForReservationList(
             @Param("warehouseId") Long warehouseId,
             @Param("skuId") Long skuId,
