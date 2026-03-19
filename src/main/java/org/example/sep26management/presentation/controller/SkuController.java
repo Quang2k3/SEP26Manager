@@ -47,6 +47,7 @@ public class SkuController {
 
     private final SkuService skuService;
     private final InventoryLotJpaRepository inventoryLotRepo;
+    private final org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository skuJpaRepository;
 
     /**
      * UC-268: View SKU Detail
@@ -175,6 +176,49 @@ public class SkuController {
                 skuId, request, updatedBy,
                 getClientIpAddress(httpRequest),
                 httpRequest.getHeader("User-Agent")));
+    }
+
+    /**
+     * GET /v1/skus/lots/check?lotNumber=xxx
+     * Kiểm tra lotNumber đã tồn tại trong DB chưa (bất kỳ SKU nào).
+     * FE gọi realtime khi user nhập LOT — cảnh báo ngay nếu trùng.
+     * Response: { exists: true/false, matches: [{ skuCode, lotNumber, expiryDate }] }
+     */
+    @GetMapping("/lots/check")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Kiểm tra LOT trùng", description = "Kiểm tra xem lotNumber đã tồn tại trong hệ thống chưa (bất kỳ SKU nào). Dùng để cảnh báo realtime khi tạo phiếu nhận hàng.")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> checkLotExists(
+            @RequestParam String lotNumber) {
+
+        if (lotNumber == null || lotNumber.isBlank()) {
+            java.util.Map<String, Object> empty = new java.util.LinkedHashMap<>();
+            empty.put("exists", false);
+            empty.put("matches", java.util.List.of());
+            return ResponseEntity.ok(ApiResponse.success("OK", empty));
+        }
+
+        // Tìm tất cả lots có lotNumber trùng (case-insensitive)
+        List<InventoryLotEntity> allLots = inventoryLotRepo.findAll().stream()
+                .filter(l -> l.getLotNumber().equalsIgnoreCase(lotNumber.trim()))
+                .collect(java.util.stream.Collectors.toList());
+
+        List<java.util.Map<String, Object>> matches = allLots.stream().map(l -> {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            // Resolve SKU code
+            String skuCode = skuJpaRepository.findById(l.getSkuId())
+                    .map(s -> s.getSkuCode()).orElse("SKU-" + l.getSkuId());
+            m.put("lotId",     l.getLotId());
+            m.put("lotNumber", l.getLotNumber());
+            m.put("skuCode",   skuCode);
+            m.put("expiryDate",   l.getExpiryDate()      != null ? l.getExpiryDate().toString()      : null);
+            m.put("manufactureDate", l.getManufactureDate() != null ? l.getManufactureDate().toString() : null);
+            return m;
+        }).collect(java.util.stream.Collectors.toList());
+
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("exists",  !matches.isEmpty());
+        result.put("matches", matches);
+        return ResponseEntity.ok(ApiResponse.success("OK", result));
     }
 
     /**
