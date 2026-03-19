@@ -248,8 +248,6 @@ public class IncidentService {
         ReceivingOrderEntity order = receivingOrderRepo.findById(incident.getReceivingId())
                 .orElseThrow(() -> new RuntimeException("Receiving order not found: " + incident.getReceivingId()));
 
-        boolean hasWaitBackorder = false;
-
         for (org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest.ItemResolution res : request
                 .getItems()) {
             IncidentItemEntity incItem = incidentItemRepo.findById(res.getIncidentItemId())
@@ -281,10 +279,27 @@ public class IncidentService {
                     break;
 
                 case "WAIT_BACKORDER":
-                    // Chờ giao bù: giữ nguyên expectedQty, đánh dấu chờ
-                    hasWaitBackorder = true;
-                    incItem.setNote(appendNote(incItem.getNote(),
-                            "[Manager]: WAIT_BACKORDER — Chờ giao bù cho phần thiếu"));
+                    // Nhập số đã có, đánh dấu thiếu LOT để lần sau giao bù
+                    if (rcItem != null) {
+                        java.math.BigDecimal shortageQty = rcItem.getExpectedQty()
+                                .subtract(rcItem.getReceivedQty() != null ? rcItem.getReceivedQty() : java.math.BigDecimal.ZERO);
+                        String lotInfo = rcItem.getLotNumber() != null ? rcItem.getLotNumber() : "N/A";
+                        String skuCode = skuRepo.findById(rcItem.getSkuId())
+                                .map(SkuEntity::getSkuCode).orElse("SKU-" + rcItem.getSkuId());
+
+                        // Accept current received qty — set expectedQty = receivedQty
+                        rcItem.setExpectedQty(rcItem.getReceivedQty());
+                        receivingItemRepo.save(rcItem);
+
+                        incItem.setNote(appendNote(incItem.getNote(),
+                                "[Manager]: WAIT_BACKORDER — Nhập " + rcItem.getReceivedQty()
+                                        + " đã có. Thiếu " + shortageQty + " ("
+                                        + skuCode + ", LOT: " + lotInfo
+                                        + ") — chờ NCC giao bù lần sau"));
+                    } else {
+                        incItem.setNote(appendNote(incItem.getNote(),
+                                "[Manager]: WAIT_BACKORDER — Chờ giao bù cho phần thiếu"));
+                    }
                     break;
 
                 case "ACCEPT":
@@ -318,7 +333,7 @@ public class IncidentService {
             incidentItemRepo.save(incItem);
         }
 
-        // Resolve incident and move order — BE-C3 FIX: chỉ chuyển SUBMITTED nếu KHÔNG có WAIT_BACKORDER
+        // Resolve incident and move order to SUBMITTED → QC tiếp tục
         incident.setStatus("RESOLVED");
         if (request.getNote() != null && !request.getNote().isBlank()) {
             incident.setDescription(
@@ -326,22 +341,14 @@ public class IncidentService {
         }
         incidentRepo.save(incident);
 
-        if (hasWaitBackorder) {
-            // BE-C3 FIX: Còn item đang chờ giao bù → giữ PENDING_INCIDENT, không QC approve vội
-            // Order sẽ chuyển SUBMITTED khi supplier giao bù và Keeper scan lại
-            order.setStatus("PENDING_INCIDENT");
-            log.info("Discrepancy Incident {} resolved with WAIT_BACKORDER — order stays PENDING_INCIDENT (receivingId={})",
-                    incident.getIncidentCode(), order.getReceivingId());
-        } else {
-            // Tất cả item đã xử lý dứt điểm (CLOSE_SHORT / ACCEPT / RETURN) → cho QC tiếp tục
-            order.setStatus("SUBMITTED");
-            log.info("Discrepancy Incident {} fully resolved — order moved to SUBMITTED (receivingId={})",
-                    incident.getIncidentCode(), order.getReceivingId());
-        }
+        // All actions (including WAIT_BACKORDER) now allow order to proceed
+        order.setStatus("SUBMITTED");
+        log.info("Discrepancy Incident {} resolved — order moved to SUBMITTED (receivingId={})",
+                incident.getIncidentCode(), order.getReceivingId());
         receivingOrderRepo.save(order);
 
-        log.info("Discrepancy Incident {} resolved by managerId={}, hasWaitBackorder={}",
-                incident.getIncidentCode(), managerId, hasWaitBackorder);
+        log.info("Discrepancy Incident {} resolved by managerId={}",
+                incident.getIncidentCode(), managerId);
         return ApiResponse.success("Discrepancy incident resolved successfully.", toResponse(incident));
     }
 
