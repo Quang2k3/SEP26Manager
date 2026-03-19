@@ -61,7 +61,9 @@ public class PutawayTaskEntity {
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
+        // Default PENDING — task moi tao cho Keeper xu ly.
+        // OPEN duoc set khi Keeper bat dau lam viec voi task.
         if (status == null)
-            status = "OPEN";
+            status = "PENDING";
     }
 }

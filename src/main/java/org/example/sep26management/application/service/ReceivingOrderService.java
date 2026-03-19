@@ -725,7 +725,7 @@ public class ReceivingOrderService {
 
                                 if (lotNumber == null || lotNumber.isBlank()) {
                                         String skuCode = sku != null ? sku.getSkuCode() : String.valueOf(skuId);
-                                        lotNumber = "LOT-" + order.getReceivingCode() + "-" + skuCode;
+                                        lotNumber = "LOT-" + grnCode + "-" + skuCode; // FIX: dùng grnCode thay vì receivingCode để mỗi GRN có lot riêng
                                         item.setLotNumber(lotNumber);
                                 }
 
