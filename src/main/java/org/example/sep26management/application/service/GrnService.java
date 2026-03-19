@@ -272,7 +272,13 @@ public class GrnService {
         if (grns.isEmpty()) {
             throw new BusinessException("Chưa có GRN cho đơn nhập kho này (receivingId=" + receivingId + ")");
         }
-        return ApiResponse.success("OK", toSummaryResponse(grns.get(0)));
+        // Ưu tiên trả GRN đang active (PENDING_APPROVAL hoặc APPROVED) trước
+        // Tránh trường hợp có nhiều GRN, GRN mới nhất đã POSTED nhưng GRN cũ vẫn đang chờ duyệt
+        GrnEntity active = grns.stream()
+                .filter(g -> "PENDING_APPROVAL".equals(g.getStatus()) || "APPROVED".equals(g.getStatus()))
+                .findFirst()
+                .orElse(grns.get(0)); // fallback về mới nhất nếu không có active
+        return ApiResponse.success("OK", toSummaryResponse(active));
     }
 
     private GrnEntity findGrn(Long id) {
