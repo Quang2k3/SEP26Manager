@@ -8,6 +8,8 @@ import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.GrnResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.service.GrnService;
+import org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity;
+import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +23,7 @@ import java.util.Map;
 public class GrnController {
 
     private final GrnService grnService;
+    private final ReceivingOrderJpaRepository receivingOrderRepo;
 
     @GetMapping
     @Operation(summary = "Danh sách Phiếu nhập kho (List GRN)",
@@ -114,6 +117,39 @@ public class GrnController {
                     + "- Hoặc lấy task theo GRN: `GET /v1/putaway-tasks/grn/{grnId}`")
     public ApiResponse<GrnResponse> post(@PathVariable Long id, Authentication auth) {
         return grnService.post(id, extractUserId(auth));
+    }
+
+    /**
+     * GET /v1/grns/check-po?sourceReferenceCode=PO-001
+     * Kiểm tra số chứng từ / PO đã tồn tại trong các đơn active chưa.
+     * FE gọi realtime khi user nhập PO — cảnh báo duplicate ngay lập tức.
+     */
+    @GetMapping("/check-po")
+    @Operation(summary = "Kiểm tra số chứng từ / PO trùng",
+            description = "Kiểm tra xem sourceReferenceCode đã được dùng trong phiếu nhận hàng active chưa (bỏ qua DRAFT/CANCELLED).")
+    public ApiResponse<java.util.Map<String, Object>> checkPoExists(
+            @RequestParam String sourceReferenceCode) {
+
+        if (sourceReferenceCode == null || sourceReferenceCode.isBlank()) {
+            return ApiResponse.success("OK", java.util.Map.of("exists", false, "orders", java.util.List.of()));
+        }
+
+        java.util.List<ReceivingOrderEntity> found =
+                receivingOrderRepo.findActiveBySourceReferenceCode(sourceReferenceCode.trim());
+
+        java.util.List<java.util.Map<String, Object>> orders = found.stream().map(r -> {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("receivingId",   r.getReceivingId());
+            m.put("receivingCode", r.getReceivingCode());
+            m.put("status",        r.getStatus());
+            m.put("createdAt",     r.getCreatedAt() != null ? r.getCreatedAt().toString() : null);
+            return m;
+        }).collect(java.util.stream.Collectors.toList());
+
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("exists", !orders.isEmpty());
+        result.put("orders", orders);
+        return ApiResponse.success("OK", result);
     }
 
     private Long extractUserId(Authentication auth) {
