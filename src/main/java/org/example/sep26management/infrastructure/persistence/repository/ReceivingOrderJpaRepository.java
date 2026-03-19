@@ -14,7 +14,7 @@ import java.util.Optional;
 public interface ReceivingOrderJpaRepository extends JpaRepository<ReceivingOrderEntity, Long> {
 
     Page<ReceivingOrderEntity> findByWarehouseIdAndStatusOrderByCreatedAtDesc(Long warehouseId, String status,
-            Pageable pageable);
+                                                                              Pageable pageable);
 
     Page<ReceivingOrderEntity> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
 
@@ -22,4 +22,14 @@ public interface ReceivingOrderJpaRepository extends JpaRepository<ReceivingOrde
 
     @Query("SELECT MAX(r.receivingCode) FROM ReceivingOrderEntity r WHERE r.warehouseId = :warehouseId AND r.receivingCode LIKE 'GRN%'")
     Optional<String> findMaxReceivingCode(@Param("warehouseId") Long warehouseId);
+
+    /**
+     * Kiểm tra số chứng từ / PO đã tồn tại chưa (bỏ qua DRAFT và CANCELLED).
+     * Dùng để cảnh báo duplicate PO khi tạo phiếu nhận hàng mới.
+     */
+    @Query("SELECT r FROM ReceivingOrderEntity r " +
+            "WHERE LOWER(r.sourceReferenceCode) = LOWER(:sourceReferenceCode) " +
+            "AND r.status NOT IN ('DRAFT', 'CANCELLED')")
+    java.util.List<ReceivingOrderEntity> findActiveBySourceReferenceCode(
+            @Param("sourceReferenceCode") String sourceReferenceCode);
 }
