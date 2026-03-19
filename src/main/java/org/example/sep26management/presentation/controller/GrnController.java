@@ -128,6 +128,7 @@ public class GrnController {
     }
 
     private Long extractWarehouseId(Authentication auth) {
+        // Trả null nếu không có warehouseId — service fallback về findAll
         if (auth != null && auth.getDetails() instanceof Map) {
             @SuppressWarnings("unchecked")
             Object raw = ((Map<?, ?>) auth.getDetails()).get("warehouseIds");
@@ -136,9 +137,11 @@ public class GrnController {
                 if (first instanceof Long) return (Long) first;
                 if (first instanceof Integer) return ((Integer) first).longValue();
                 if (first instanceof Number) return ((Number) first).longValue();
-                if (first != null) return Long.parseLong(first.toString());
+                if (first != null) {
+                    try { return Long.parseLong(first.toString()); } catch (NumberFormatException ignored) {}
+                }
             }
         }
-        throw new RuntimeException("Cannot extract warehouseId from token");
+        return null;
     }
 }
