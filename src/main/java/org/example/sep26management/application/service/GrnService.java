@@ -137,40 +137,18 @@ public class GrnService {
         List<ReceivingItemEntity> rcvItems =
                 receivingItemRepo.findByReceivingOrderReceivingId(grn.getReceivingId());
 
-        // Guard: phiếu nhận hàng phải có items (đã scan xong)
-        if (rcvItems.isEmpty()) {
-            throw new BusinessException(
-                    "Phiếu nhận hàng #" + grn.getReceivingId() + " chưa có dòng hàng nào được scan. "
-                            + "Vui lòng hoàn thành bước scan nhận hàng trước khi nhập kho.");
-        }
-
-        // Check if task already exists for this receiving_id (avoid unique constraint violation)
-        PutawayTaskEntity task = putawayTaskRepo.findByReceivingId(grn.getReceivingId())
-                .orElseGet(() -> {
-                    PutawayTaskEntity newTask = PutawayTaskEntity.builder()
-                            .warehouseId(grn.getWarehouseId())
-                            .receivingId(grn.getReceivingId())
-                            .grnId(grn.getGrnId())
-                            .fromLocationId(stagingLocationId)
-                            .status("PENDING")
-                            .createdBy(userId)
-                            .build();
-                    return putawayTaskRepo.save(newTask);
-                });
-
-        // Guard: nếu task đã có items (tránh tạo duplicate khi gọi post() nhiều lần)
-        boolean taskAlreadyHasItems = !putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(task.getPutawayTaskId()).isEmpty();
-        if (taskAlreadyHasItems) {
-            log.warn("PutawayTask {} đã có items — bỏ qua bước tạo items để tránh duplicate (receivingId={})",
-                    task.getPutawayTaskId(), grn.getReceivingId());
-            grn.setStatus("POSTED");
-            grnRepo.save(grn);
-            receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
-                order.setStatus("POSTED");
-                receivingOrderRepo.save(order);
-            });
-            return ApiResponse.success("GRN posted (task items already exist).", toSummaryResponse(grn));
-        }
+        // Mỗi lần post GRN tạo 1 PutawayTask mới — không check duplicate
+        PutawayTaskEntity task = PutawayTaskEntity.builder()
+                .warehouseId(grn.getWarehouseId())
+                .receivingId(grn.getReceivingId())
+                .grnId(grn.getGrnId())
+                .fromLocationId(stagingLocationId)
+                .status("PENDING")
+                .createdBy(userId)
+                .build();
+        task = putawayTaskRepo.save(task);
+        log.info("Created PutawayTask {} for GRN {} (receivingId={})",
+                task.getPutawayTaskId(), grn.getGrnId(), grn.getReceivingId());
 
         for (GrnItemEntity item : items) {
             // Match receiving item by SKU + lot + expiry, fallback to SKU only
