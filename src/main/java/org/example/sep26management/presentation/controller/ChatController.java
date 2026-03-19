@@ -81,6 +81,15 @@ public class ChatController {
         return chatService.getTotalUnread(extractUserId(auth));
     }
 
+    @GetMapping("/members")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Danh sách thành viên nội bộ để nhắn tin (mọi role đều truy cập được)")
+    public ApiResponse<List<ChatMemberDto>> listChatMembers(
+            @RequestParam(required = false) String keyword,
+            Authentication auth) {
+        return chatService.listChatMembers(extractUserId(auth), keyword);
+    }
+
     // ─── WebSocket message handlers ───────────────────────────────────────────
 
     /** Client gửi: /app/chat/{roomId}/send */

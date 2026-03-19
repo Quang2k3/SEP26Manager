@@ -20,30 +20,43 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
         boolean existsByEmail(String email);
 
         @Query("SELECT DISTINCT u FROM UserEntity u " +
-                        "LEFT JOIN FETCH u.roles r " +
-                        "LEFT JOIN FETCH r.permissions " +
-                        "WHERE u.email = :email")
+                "LEFT JOIN FETCH u.roles r " +
+                "LEFT JOIN FETCH r.permissions " +
+                "WHERE u.email = :email")
         Optional<UserEntity> findByEmailWithRolesAndPermissions(@Param("email") String email);
 
         @Query("SELECT DISTINCT u FROM UserEntity u " +
-                        "LEFT JOIN FETCH u.roles r " +
-                        "LEFT JOIN FETCH r.permissions " +
-                        "WHERE u.userId = :userId")
+                "LEFT JOIN FETCH u.roles r " +
+                "LEFT JOIN FETCH r.permissions " +
+                "WHERE u.userId = :userId")
         Optional<UserEntity> findByIdWithRolesAndPermissions(@Param("userId") Long userId);
 
         @Query("SELECT u FROM UserEntity u WHERE " +
-                        "(:keyword IS NULL OR :keyword = '' OR " +
-                        "LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-                        "LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) AND " +
-                        "(:status IS NULL OR u.status = :status)")
+                "(:keyword IS NULL OR :keyword = '' OR " +
+                "LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                "LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) AND " +
+                "(:status IS NULL OR u.status = :status)")
         Page<UserEntity> searchUsers(
-                        @Param("keyword") String keyword,
-                        @Param("status") UserStatus status,
-                        Pageable pageable);
+                @Param("keyword") String keyword,
+                @Param("status") UserStatus status,
+                Pageable pageable);
 
         long countByStatus(UserStatus status);
 
+        /**
+         * Tìm tất cả user ACTIVE để hiển thị trong danh sách chat.
+         * Dùng cho endpoint /v1/chat/members - không giới hạn role.
+         */
+        @Query("SELECT DISTINCT u FROM UserEntity u " +
+                "LEFT JOIN FETCH u.roles " +
+                "WHERE u.status = org.example.sep26management.domain.enums.UserStatus.ACTIVE " +
+                "AND (:keyword IS NULL OR :keyword = '' OR " +
+                "LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+                "LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+                "ORDER BY u.fullName ASC")
+        List<UserEntity> findActiveMembersForChat(@Param("keyword") String keyword);
+
         @Query(value = "SELECT uw.warehouse_id FROM user_warehouses uw " +
-                        "WHERE uw.user_id = :userId AND uw.active = TRUE", nativeQuery = true)
+                "WHERE uw.user_id = :userId AND uw.active = TRUE", nativeQuery = true)
         List<Long> findActiveWarehouseIdsByUserId(@Param("userId") Long userId);
 }

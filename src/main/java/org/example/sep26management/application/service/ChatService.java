@@ -133,6 +133,31 @@ public class ChatService {
         return ApiResponse.success("OK", messageRepo.countTotalUnread(userId));
     }
 
+    /**
+     * Danh sách thành viên nội bộ để chat - mọi role đều gọi được.
+     * Loại bỏ chính mình, chỉ lấy user ACTIVE.
+     */
+    @Transactional(readOnly = true)
+    public ApiResponse<List<ChatMemberDto>> listChatMembers(Long currentUserId, String keyword) {
+        List<ChatMemberDto> members = userRepo.findActiveMembersForChat(keyword)
+                .stream()
+                .filter(u -> !u.getUserId().equals(currentUserId))
+                .map(u -> {
+                    List<String> roles = u.getRoles() == null ? List.of() :
+                            u.getRoles().stream()
+                                    .map(r -> r.getRoleCode())
+                                    .collect(Collectors.toList());
+                    return ChatMemberDto.builder()
+                            .userId(u.getUserId())
+                            .fullName(u.getFullName())
+                            .avatarUrl(u.getAvatarUrl())
+                            .roleCode(String.join(",", roles))
+                            .build();
+                })
+                .collect(Collectors.toList());
+        return ApiResponse.success("OK", members);
+    }
+
     // ─── Typing ───────────────────────────────────────────────────────────────
 
     public void broadcastTyping(Long roomId, Long userId, boolean typing) {
