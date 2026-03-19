@@ -317,11 +317,13 @@ public class ScannerPageController {
                 "  .catch(function(e){document.getElementById('order-loading').textContent='Lỗi kết nối: '+e;});\n" +
                 "}\n" +
                 "function updateComparisonTable(){\n" +
-                "  if(!orderItems.length) return;\n" +
+                "  if(!orderItems.length && !Object.keys(lineData).length) return;\n" +
                 "  var rows='';var matchCount=0;\n" +
+                "  var orderSkus={};\n" +
                 "  for(var i=0;i<orderItems.length;i++){\n" +
                 "    var item=orderItems[i];\n" +
                 "    var sku=item.skuCode||'';\n" +
+                "    orderSkus[sku]=true;\n" +
                 "    var expected=parseFloat(item.expectedQty)||0;\n" +
                 "    var scanned=0;\n" +
                 "    for(var lk in lineData){if(lineData[lk].skuCode===sku)scanned+=parseFloat(lineData[lk].qty)||0;}\n"
@@ -335,10 +337,20 @@ public class ScannerPageController {
                 "    rows+='<tr><td class=\"sc\">'+sku+'</td><td>'+(item.skuName||'')+'</td><td class=\"expected-col\">'+expected+'</td><td class=\"received-col\">'+scanned+'</td><td class=\"'+sc+'\" style=\"text-align:center\">'+st+'</td></tr>';\n"
                 +
                 "  }\n" +
+                "  for(var lk in lineData){\n" +
+                "    var it=lineData[lk];\n" +
+                "    if(!orderSkus[it.skuCode]){\n" +
+                "      orderSkus[it.skuCode]=true;\n" +
+                "      var extraQty=0;\n" +
+                "      for(var lk2 in lineData){if(lineData[lk2].skuCode===it.skuCode)extraQty+=parseFloat(lineData[lk2].qty)||0;}\n" +
+                "      rows+='<tr style=\"background:rgba(245,158,11,0.08)\"><td class=\"sc\">'+it.skuCode+'</td><td>'+it.name+'</td><td class=\"expected-col\" style=\"color:#64748b\">—</td><td class=\"received-col\">'+extraQty+'</td><td class=\"status-over\" style=\"text-align:center\">⚠ NGOÀI PHIẾU</td></tr>';\n" +
+                "    }\n" +
+                "  }\n" +
                 "  document.getElementById('comparison-lines').innerHTML=rows;\n" +
-                "  document.getElementById('comp-total').textContent=orderItems.length;\n" +
+                "  var totalLines=orderItems.length+Object.keys(orderSkus).length-orderItems.length;\n" +
+                "  document.getElementById('comp-total').textContent=totalLines;\n" +
                 "  document.getElementById('comp-match').textContent=matchCount;\n" +
-                "  document.getElementById('comp-mismatch').textContent=(orderItems.length-matchCount);\n" +
+                "  document.getElementById('comp-mismatch').textContent=(totalLines-matchCount);\n" +
                 "}\n" +
                 "\n" +
                 "// ── ACTION FUNCTIONS (per mode) ───────────────────────────────────\n" +
