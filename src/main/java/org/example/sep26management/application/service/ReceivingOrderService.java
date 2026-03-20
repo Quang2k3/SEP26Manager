@@ -720,7 +720,11 @@ public class ReceivingOrderService {
                         // Keeper có đủ thời gian rescan. refreshTtl() không đủ vì
                         // expire() có thể fail nếu key đã hết hạn.
                         sessionRedis.save(sessionId, session);
-                        log.info("KEEPER_RESCAN: Re-saved QC session {} with fresh TTL for order {}",
+                        // Xóa active session MAPPING (nhưng giữ session DATA)
+                        // → QC sẽ tạo session MỚI khi scan lại, tránh cộng dồn
+                        // → Keeper vẫn truy cập được data cũ qua order.qcSessionId
+                        sessionRedis.deleteActiveSession(session.getWarehouseId(), session.getCreatedBy());
+                        log.info("KEEPER_RESCAN: Re-saved QC session {} + cleared active mapping for order {}",
                                         sessionId, order.getReceivingCode());
 
                         // ── Reset data cho Keeper rescan: clean slate ──
