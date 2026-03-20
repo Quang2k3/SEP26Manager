@@ -323,19 +323,33 @@ public class OutboundQcService {
                     ? item.getPickedQty()
                     : item.getRequiredQty();
 
+            // [FIX] Resolve locationId đúng từ inventory_snapshot
+            // fromLocationId trong picking item có thể sai (reservation cũ không có locationId)
+            // → tìm lại từ snapshot để đảm bảo trừ đúng bin
+            Long resolvedLocationId = item.getFromLocationId();
+            if (resolvedLocationId == null) {
+                resolvedLocationId = inventorySnapshotRepository
+                        .findLocationIdByWarehouseSkuLot(so.getWarehouseId(), item.getSkuId(), item.getLotId());
+            }
+            if (resolvedLocationId == null) {
+                log.warn("Cannot resolve locationId for SKU={} lot={} — skipping deduction",
+                        item.getSkuId(), item.getLotId());
+                continue;
+            }
+
             // 1 & 2) Decrease quantity + reserved_qty in inventory_snapshot
             inventorySnapshotRepository.decrementQuantity(
-                    so.getWarehouseId(), item.getSkuId(), item.getLotId(), item.getFromLocationId(), qty);
+                    so.getWarehouseId(), item.getSkuId(), item.getLotId(), resolvedLocationId, qty);
 
             inventorySnapshotRepository.decrementReservedByLocationSkuLot(
-                    item.getFromLocationId(), item.getSkuId(), item.getLotId(), qty);
+                    resolvedLocationId, item.getSkuId(), item.getLotId(), qty);
 
             // 3) Insert inventory_transaction with txn_type = DISPATCH (negative quantity)
             InventoryTransactionEntity txn = InventoryTransactionEntity.builder()
                     .warehouseId(so.getWarehouseId())
                     .skuId(item.getSkuId())
                     .lotId(item.getLotId())
-                    .locationId(item.getFromLocationId())
+                    .locationId(resolvedLocationId)
                     .quantity(qty.negate())  // negative = outbound movement
                     .txnType("DISPATCH")
                     .referenceTable("sales_orders")
@@ -351,13 +365,14 @@ public class OutboundQcService {
             List<ReservationEntity> openReservations = reservationRepository
                     .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
 
+            final Long finalResolvedLocationId = resolvedLocationId;
             openReservations.stream()
                     .filter(r -> r.getSkuId().equals(item.getSkuId())
                             && (item.getLotId() == null
                             ? r.getLotId() == null
                             : item.getLotId().equals(r.getLotId()))
                             && (r.getLocationId() == null
-                            || r.getLocationId().equals(item.getFromLocationId())))
+                            || r.getLocationId().equals(finalResolvedLocationId)))
                     .forEach(r -> {
                         r.setStatus("CLOSED");
                         reservationRepository.save(r);
