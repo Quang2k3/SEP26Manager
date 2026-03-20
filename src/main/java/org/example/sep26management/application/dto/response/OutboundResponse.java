@@ -35,6 +35,8 @@ public class OutboundResponse {
     // Sales Order fields
     @Schema(description = "ID Khách hàng", example = "100")
     private Long customerId;
+    @Schema(description = "Mã Khách hàng — dùng cho edit form", example = "CUST-001")
+    private String customerCode;
     @Schema(description = "Tên Khách Hàng", example = "Công ty TNHH A")
     private String customerName;
     @Schema(description = "Ngày dự kiến giao hàng", example = "2026-03-15")
@@ -45,6 +47,8 @@ public class OutboundResponse {
     // Internal Transfer fields
     @Schema(description = "ID Kho đến", example = "2")
     private Long destinationWarehouseId;
+    @Schema(description = "Mã Kho đến — dùng cho edit form", example = "WH-02")
+    private String destinationWarehouseCode;
     @Schema(description = "Tên Kho đến", example = "Kho Quận 1")
     private String destinationWarehouseName;
     @Schema(description = "Lý do chuyển", example = "STOCK_BALANCING")
