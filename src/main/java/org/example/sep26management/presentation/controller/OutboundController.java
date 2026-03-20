@@ -212,6 +212,27 @@ public class OutboundController {
     // SCRUM-510: Allocate
     // allocateStock(AllocateStockRequest, userId, ip, ua)
     // ─────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // DELETE: Xóa lệnh xuất DRAFT
+    // ─────────────────────────────────────────────────────────────
+    @DeleteMapping("/sales-orders/{soId}")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Xóa Sales Order (chỉ DRAFT)")
+    public ResponseEntity<ApiResponse<Void>> deleteSalesOrder(
+            @PathVariable Long soId,
+            HttpServletRequest http) {
+        return ResponseEntity.ok(outboundService.deleteSalesOrder(soId, getUserId(), getIp(http), ua(http)));
+    }
+
+    @DeleteMapping("/transfers/{transferId}")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Xóa Internal Transfer (chỉ DRAFT)")
+    public ResponseEntity<ApiResponse<Void>> deleteTransfer(
+            @PathVariable Long transferId,
+            HttpServletRequest http) {
+        return ResponseEntity.ok(outboundService.deleteTransfer(transferId, getUserId(), getIp(http), ua(http)));
+    }
+
     @PostMapping("/allocate")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
     @Operation(summary = "Phân bổ / Khóa tồn kho (FEFO)", description = "Khóa số lượng tồn theo FEFO trước khi đi lấy hàng.\n\n"

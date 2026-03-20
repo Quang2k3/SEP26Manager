@@ -11,6 +11,8 @@ import org.example.sep26management.application.dto.response.DispatchNoteResponse
 import org.example.sep26management.infrastructure.persistence.entity.*;
 import org.example.sep26management.infrastructure.persistence.repository.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.time.LocalDateTime;
@@ -77,6 +79,9 @@ public class DispatchPdfService {
      *
      * @return URL của PDF đã upload (Cloudinary URL)
      */
+    // [FIX] REQUIRES_NEW: tách khỏi transaction của confirmDispatch
+    // → nếu PDF/Cloudinary fail chỉ rollback phần PDF, không rollback dispatch
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public String generateAndUploadPdf(Long soId) {
         try {
             byte[] pdfBytes = buildPdfBytes(soId);

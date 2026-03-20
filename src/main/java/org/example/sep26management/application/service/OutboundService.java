@@ -570,6 +570,46 @@ public class OutboundService {
                 );
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // DELETE: Xóa lệnh xuất kho (chỉ DRAFT)
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<Void> deleteSalesOrder(Long soId, Long userId, String ip, String ua) {
+        SalesOrderEntity so = soRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
+        if (!"DRAFT".equals(so.getStatus())) {
+            throw new BusinessException("Chỉ có thể xóa lệnh xuất đang ở trạng thái DRAFT. Trạng thái hiện tại: " + so.getStatus());
+        }
+        if (!so.getCreatedBy().equals(userId)) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+        }
+        soItemRepository.deleteBySoId(soId);
+        soRepository.delete(so);
+        auditLogService.logAction(userId, "OUTBOUND_DELETED", "SALES_ORDER", soId,
+                "Sales order " + so.getSoCode() + " deleted", ip, ua);
+        return ApiResponse.success("Đã xóa lệnh xuất kho thành công", null);
+    }
+
+    @Transactional
+    public ApiResponse<Void> deleteTransfer(Long transferId, Long userId, String ip, String ua) {
+        TransferEntity transfer = transferRepository.findById(transferId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, transferId)));
+        if (!"DRAFT".equals(transfer.getStatus())) {
+            throw new BusinessException("Chỉ có thể xóa lệnh chuyển kho đang ở trạng thái DRAFT. Trạng thái hiện tại: " + transfer.getStatus());
+        }
+        if (!transfer.getCreatedBy().equals(userId)) {
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+        }
+        transferItemRepository.deleteByTransferId(transferId);
+        transferRepository.delete(transfer);
+        auditLogService.logAction(userId, "OUTBOUND_DELETED", "TRANSFER", transferId,
+                "Transfer " + transfer.getTransferCode() + " deleted", ip, ua);
+        return ApiResponse.success("Đã xóa lệnh chuyển kho thành công", null);
+    }
+
     // ─── Response builders ───────────────────────────────────────
 
     private OutboundResponse buildSalesOrderResponse(
