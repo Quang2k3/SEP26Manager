@@ -422,11 +422,12 @@ public class ReceivingOrderService {
                         });
                 }
 
-                // ── Mismatch detection: compare receivedQty vs expectedQty ──────────
+                // ── Log mismatch info (chỉ ghi nhận, KHÔNG tạo Incident) ──────────
+                // Incident sẽ được QC tạo sau khi kiểm đếm lại tại qcSubmitSession()
                 List<ReceivingItemEntity> allItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
-                List<IncidentItemEntity> mismatchItems = new ArrayList<>();
-                List<IncidentItemEntity> unexpectedItems = new ArrayList<>();
-                org.example.sep26management.application.enums.IncidentType mismatchType = null;
+                StringBuilder mismatchNote = new StringBuilder();
+                int mismatchCount = 0;
+                int unexpectedCount = 0;
 
                 for (ReceivingItemEntity item : allItems) {
                         BigDecimal expected = item.getExpectedQty() != null ? item.getExpectedQty() : BigDecimal.ZERO;
@@ -438,150 +439,33 @@ public class ReceivingOrderService {
                                 String skuCode = skuRepo.findById(item.getSkuId())
                                         .map(SkuEntity::getSkuCode).orElse("SKU-" + item.getSkuId());
 
-                                // ── Phân biệt: UNEXPECTED_ITEM (ngoài phiếu) vs SHORTAGE/OVERAGE ──
                                 if (expected.compareTo(BigDecimal.ZERO) == 0 && received.compareTo(BigDecimal.ZERO) > 0) {
-                                        // Extra SKU không có trong phiếu nhận hàng (expectedQty=0)
-                                        IncidentItemEntity incItem = IncidentItemEntity.builder()
-                                                .skuId(item.getSkuId())
-                                                .expectedQty(BigDecimal.ZERO)
-                                                .actualQty(received)
-                                                .damagedQty(received)
-                                                .reasonCode("UNEXPECTED_ITEM")
-                                                .note("Hàng ngoài phiếu: " + skuCode + " — quét được " + received
-                                                        + " nhưng không có trong đơn nhận hàng")
-                                                .actionPassQty(BigDecimal.ZERO)
-                                                .actionReturnQty(BigDecimal.ZERO)
-                                                .actionScrapQty(BigDecimal.ZERO)
-                                                .build();
-                                        unexpectedItems.add(incItem);
-
-                                        log.info("Unexpected item detected: {} — qty={} (not on order)",
-                                                skuCode, received);
+                                        unexpectedCount++;
+                                        mismatchNote.append("[Keeper] Hàng ngoài phiếu: ").append(skuCode)
+                                                .append(" — quét được ").append(received).append(". ");
+                                        log.info("Keeper count — Unexpected item: {} qty={}", skuCode, received);
                                 } else {
-                                        // SHORTAGE hoặc OVERAGE thông thường
-                                        org.example.sep26management.application.enums.IncidentType itemType =
-                                                cmp < 0
-                                                        ? org.example.sep26management.application.enums.IncidentType.SHORTAGE
-                                                        : org.example.sep26management.application.enums.IncidentType.OVERAGE;
-
-                                        if (mismatchType == null) {
-                                                mismatchType = itemType;
-                                        } else if (!mismatchType.equals(itemType)) {
-                                                mismatchType = org.example.sep26management.application.enums.IncidentType.SHORTAGE;
-                                        }
-
-                                        String note = cmp < 0
-                                                ? "Thiếu " + diff + " so với dự kiến (expected=" + expected + ", received=" + received + ")"
-                                                : "Thừa " + diff + " so với dự kiến (expected=" + expected + ", received=" + received + ")";
-
-                                        IncidentItemEntity incItem = IncidentItemEntity.builder()
-                                                .skuId(item.getSkuId())
-                                                .expectedQty(expected)
-                                                .actualQty(received)
-                                                .damagedQty(diff)
-                                                .reasonCode(cmp < 0 ? "SHORTAGE" : "OVERAGE")
-                                                .note(note)
-                                                .actionPassQty(BigDecimal.ZERO)
-                                                .actionReturnQty(BigDecimal.ZERO)
-                                                .actionScrapQty(BigDecimal.ZERO)
-                                                .build();
-                                        mismatchItems.add(incItem);
-
-                                        log.info("Mismatch detected: {} — {} {} (expected={}, received={})",
-                                                skuCode, itemType.name(), diff, expected, received);
+                                        mismatchCount++;
+                                        String type = cmp < 0 ? "Thiếu" : "Thừa";
+                                        mismatchNote.append("[Keeper] ").append(type).append(" ").append(diff)
+                                                .append(" ").append(skuCode)
+                                                .append(" (expected=").append(expected)
+                                                .append(", received=").append(received).append("). ");
+                                        log.info("Keeper count — {} {} {} (expected={}, received={})",
+                                                type, diff, skuCode, expected, received);
                                 }
                         }
                 }
 
-                boolean hasAnyIncident = !mismatchItems.isEmpty() || !unexpectedItems.isEmpty();
-
-                // ── Gộp tất cả items vào 1 incident duy nhất ──
-                if (hasAnyIncident) {
-                        // Xác định incidentType dựa trên loại items có mặt
-                        org.example.sep26management.application.enums.IncidentType resolvedType;
-                        if (!mismatchItems.isEmpty() && !unexpectedItems.isEmpty()) {
-                                // Hỗn hợp: vừa chênh lệch số lượng vừa hàng ngoài phiếu
-                                resolvedType = org.example.sep26management.application.enums.IncidentType.DISCREPANCY;
-                        } else if (!unexpectedItems.isEmpty()) {
-                                resolvedType = org.example.sep26management.application.enums.IncidentType.UNEXPECTED_ITEM;
-                        } else if (mismatchType != null) {
-                                resolvedType = mismatchType;
-                        } else {
-                                resolvedType = org.example.sep26management.application.enums.IncidentType.OVERAGE;
-                        }
-
-                        // Gộp tất cả items
-                        List<IncidentItemEntity> allIncidentItems = new ArrayList<>();
-                        allIncidentItems.addAll(unexpectedItems);
-                        allIncidentItems.addAll(mismatchItems);
-
-                        // Mô tả gộp
-                        StringBuilder desc = new StringBuilder();
-                        if (!unexpectedItems.isEmpty()) {
-                                desc.append("Phát hiện ").append(unexpectedItems.size())
-                                        .append(" SKU ngoài phiếu nhận hàng khi Keeper kiểm đếm. ");
-                        }
-                        if (!mismatchItems.isEmpty()) {
-                                desc.append("Phát hiện chênh lệch số lượng khi Keeper kiểm đếm. ")
-                                        .append(mismatchItems.size()).append(" SKU không khớp dự kiến.");
-                        }
-
-                        String incCode = "INC-" + System.currentTimeMillis() % 1_000_000;
-                        IncidentEntity incident = IncidentEntity.builder()
-                                .warehouseId(order.getWarehouseId())
-                                .incidentCode(incCode)
-                                .incidentType(resolvedType)
-                                .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
-                                .severity("HIGH")
-                                .occurredAt(LocalDateTime.now())
-                                .description(desc.toString().trim())
-                                .reportedBy(userId)
-                                .status("OPEN")
-                                .receivingId(id)
-                                .build();
-                        IncidentEntity savedIncident = incidentRepo.save(incident);
-
-                        for (IncidentItemEntity incItem : allIncidentItems) {
-                                incItem.setIncident(savedIncident);
-                                incidentItemRepo.save(incItem);
-                        }
-
-                        auditLogService.logAction(
-                                userId,
-                                "RECEIVING_DISCREPANCY_INCIDENT",
-                                "RECEIVING_ORDER",
-                                order.getReceivingId(),
-                                "Receiving Order " + order.getReceivingCode()
-                                        + " — phát hiện " + allIncidentItems.size()
-                                        + " SKU bất thường. Incident " + incCode + " gửi Manager.",
-                                null, null);
-
-                        log.info("Receiving Order {} — Incident {} created ({} type), {} items.",
-                                order.getReceivingCode(), incCode, resolvedType.name(), allIncidentItems.size());
-
-                        order.setStatus("PENDING_INCIDENT");
-                        order.setUpdatedAt(LocalDateTime.now());
-                        receivingOrderRepo.save(order);
-
-                        log.info("Receiving Order {} → PENDING_INCIDENT. Incident: {}",
-                                order.getReceivingCode(), incCode);
-
-                        ReceivingOrderResponse resp = getOrder(id).getData();
-
-                        StringBuilder msg = new StringBuilder();
-                        if (!unexpectedItems.isEmpty()) {
-                                msg.append("Phát hiện ").append(unexpectedItems.size())
-                                        .append(" SKU ngoài phiếu nhận hàng. ");
-                        }
-                        if (!mismatchItems.isEmpty()) {
-                                msg.append("Phát hiện chênh lệch số lượng ")
-                                        .append(mismatchItems.size()).append(" SKU. ");
-                        }
-                        msg.append("Gửi Manager duyệt. Incident: ").append(incCode);
-                        return ApiResponse.success(msg.toString(), resp);
+                // Ghi nhận sai lệch vào note của phiếu để QC tham khảo
+                if (mismatchNote.length() > 0) {
+                        String existingNote = order.getNote() != null ? order.getNote() : "";
+                        order.setNote(existingNote + "\n[Keeper kiểm đếm] " + mismatchNote.toString().trim());
+                        log.info("Receiving Order {} — Keeper phát hiện {} sai lệch, {} hàng ngoài phiếu. Ghi nhận vào note, gửi QC kiểm tra.",
+                                order.getReceivingCode(), mismatchCount, unexpectedCount);
                 }
 
-                // ── No mismatch → normal flow: PENDING_COUNT ──
+                // ── Luôn chuyển sang PENDING_COUNT → QC kiểm duyệt ──
                 order.setStatus("PENDING_COUNT");
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
@@ -590,10 +474,15 @@ public class ReceivingOrderService {
                 // Tồn sẽ bị trừ khỏi Z-INB sau khi confirm putaway.
                 addInboundStockToStaging(order, userId);
 
+                String msg = "Count finalized. Status: PENDING_COUNT. Ready for QC review.";
+                if (mismatchCount > 0 || unexpectedCount > 0) {
+                        msg = "Keeper kiểm đếm xong — phát hiện " + mismatchCount + " sai lệch, "
+                                + unexpectedCount + " hàng ngoài phiếu. Đã ghi nhận, chờ QC kiểm tra.";
+                }
+
                 log.info("Receiving Order {} finalized (SUBMITTED → PENDING_COUNT) by userId={}",
                         order.getReceivingCode(), userId);
-                return ApiResponse.success("Count finalized. Status: PENDING_COUNT. Ready for QC review.",
-                        getOrder(id).getData());
+                return ApiResponse.success(msg, getOrder(id).getData());
         }
 
         // ─── QC Approve ──────────────────────────────────────────────────────────
@@ -654,8 +543,19 @@ public class ReceivingOrderService {
 
                 List<ReceivingItemEntity> dbItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
 
+                // ── Collect ALL issues: FAIL items + Discrepancy items + Unexpected items ──
+                List<IncidentItemEntity> allIncidentItems = new ArrayList<>();
                 boolean hasFailItems = false;
-                List<IncidentItemEntity> incidentItems = new ArrayList<>();
+                boolean hasDiscrepancy = false;
+                boolean hasUnexpectedItems = false;
+                int failCount = 0;
+                int discrepancyCount = 0;
+                int unexpectedCount = 0;
+
+                // Track which SKUs from scan are on the order (to detect unexpected items later)
+                java.util.Set<Long> orderSkuIds = dbItems.stream()
+                        .map(ReceivingItemEntity::getSkuId)
+                        .collect(Collectors.toSet());
 
                 for (ReceivingItemEntity dbItem : dbItems) {
                         Long skuId = dbItem.getSkuId();
@@ -663,43 +563,144 @@ public class ReceivingOrderService {
 
                         BigDecimal passQty = skuScanData.getOrDefault("PASS", BigDecimal.ZERO);
                         BigDecimal failQty = skuScanData.getOrDefault("FAIL", BigDecimal.ZERO);
-
-                        // Cập nhật lại dbItem. receivedQty = Tổng QC quét
                         BigDecimal totalScanned = passQty.add(failQty);
+                        BigDecimal expectedQty = dbItem.getExpectedQty() != null ? dbItem.getExpectedQty() : BigDecimal.ZERO;
+
+                        // Cập nhật lại dbItem
                         dbItem.setReceivedQty(totalScanned);
 
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
-                                hasFailItems = true;
-                                IncidentItemEntity incidentItem = IncidentItemEntity.builder()
-                                        // incident reference will be set later
-                                        .skuId(skuId)
-                                        .damagedQty(failQty) // Hàng lỗi QC
-                                        .expectedQty(totalScanned) // Tổng QC quét
-                                        .actualQty(passQty) // Số lượng đạt
-                                        .note("Báo cáo từ QC Scanner")
-                                        .actionPassQty(BigDecimal.ZERO)
-                                        .actionReturnQty(BigDecimal.ZERO)
-                                        .actionScrapQty(BigDecimal.ZERO)
-                                        .build();
-                                incidentItems.add(incidentItem);
-
                                 dbItem.setCondition("FAIL");
                                 dbItem.setQcRequired(true);
                         } else {
                                 dbItem.setCondition("PASS");
                         }
                         receivingItemRepo.save(dbItem);
+
+                        String skuCode = skuRepo.findById(skuId)
+                                .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
+
+                        // ── (A) FAIL items ──
+                        if (failQty.compareTo(BigDecimal.ZERO) > 0) {
+                                hasFailItems = true;
+                                failCount++;
+                                IncidentItemEntity failItem = IncidentItemEntity.builder()
+                                        .skuId(skuId)
+                                        .damagedQty(failQty)
+                                        .expectedQty(totalScanned)
+                                        .actualQty(passQty)
+                                        .reasonCode("DAMAGE")
+                                        .note("[QC] Hàng lỗi: " + skuCode + " — PASS=" + passQty + ", FAIL=" + failQty)
+                                        .actionPassQty(BigDecimal.ZERO)
+                                        .actionReturnQty(BigDecimal.ZERO)
+                                        .actionScrapQty(BigDecimal.ZERO)
+                                        .build();
+                                allIncidentItems.add(failItem);
+                                log.info("QC scan — FAIL detected: {} PASS={}, FAIL={}", skuCode, passQty, failQty);
+                        }
+
+                        // ── (B) Discrepancy: expected vs QC total scanned ──
+                        if (expectedQty.compareTo(BigDecimal.ZERO) > 0) {
+                                int cmp = totalScanned.compareTo(expectedQty);
+                                if (cmp != 0) {
+                                        hasDiscrepancy = true;
+                                        discrepancyCount++;
+                                        BigDecimal diff = totalScanned.subtract(expectedQty).abs();
+                                        String reasonCode = cmp < 0 ? "SHORTAGE" : "OVERAGE";
+                                        String typeVi = cmp < 0 ? "Thiếu" : "Thừa";
+
+                                        IncidentItemEntity discItem = IncidentItemEntity.builder()
+                                                .skuId(skuId)
+                                                .expectedQty(expectedQty)
+                                                .actualQty(totalScanned)
+                                                .damagedQty(diff)
+                                                .reasonCode(reasonCode)
+                                                .note("[QC] " + typeVi + " " + diff + " " + skuCode
+                                                        + " (expected=" + expectedQty + ", QC scanned=" + totalScanned + ")")
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                        allIncidentItems.add(discItem);
+                                        log.info("QC scan — {} detected: {} diff={} (expected={}, scanned={})",
+                                                reasonCode, skuCode, diff, expectedQty, totalScanned);
+                                }
+                        }
                 }
 
-                if (hasFailItems) {
-                        // Tạo Quality Incident
+                // ── (C) Unexpected items: QC quét SKU không có trên phiếu ──
+                for (Map.Entry<Long, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
+                        Long skuId = entry.getKey();
+                        if (!orderSkuIds.contains(skuId)) {
+                                hasUnexpectedItems = true;
+                                unexpectedCount++;
+                                Map<String, BigDecimal> qtyMap = entry.getValue();
+                                BigDecimal totalQty = qtyMap.values().stream()
+                                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                                String skuCode = skuRepo.findById(skuId)
+                                        .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
+
+                                // Thêm hàng ngoài phiếu vào receiving items (expectedQty=0)
+                                ReceivingItemEntity extraItem = ReceivingItemEntity.builder()
+                                        .receivingOrder(order)
+                                        .skuId(skuId)
+                                        .expectedQty(BigDecimal.ZERO)
+                                        .receivedQty(totalQty)
+                                        .condition("PASS")
+                                        .build();
+                                receivingItemRepo.save(extraItem);
+
+                                IncidentItemEntity unexpectedItem = IncidentItemEntity.builder()
+                                        .skuId(skuId)
+                                        .expectedQty(BigDecimal.ZERO)
+                                        .actualQty(totalQty)
+                                        .damagedQty(totalQty)
+                                        .reasonCode("UNEXPECTED_ITEM")
+                                        .note("[QC] Hàng ngoài phiếu: " + skuCode + " — QC quét được " + totalQty)
+                                        .actionPassQty(BigDecimal.ZERO)
+                                        .actionReturnQty(BigDecimal.ZERO)
+                                        .actionScrapQty(BigDecimal.ZERO)
+                                        .build();
+                                allIncidentItems.add(unexpectedItem);
+                                log.info("QC scan — Unexpected item: {} qty={} (not on order)", skuCode, totalQty);
+                        }
+                }
+
+                boolean hasAnyIssue = hasFailItems || hasDiscrepancy || hasUnexpectedItems;
+
+                if (hasAnyIssue) {
+                        // ── Xác định incidentType tổng hợp ──
+                        org.example.sep26management.application.enums.IncidentType resolvedType;
+                        if (hasFailItems && (hasDiscrepancy || hasUnexpectedItems)) {
+                                resolvedType = org.example.sep26management.application.enums.IncidentType.DISCREPANCY;
+                        } else if (hasFailItems) {
+                                resolvedType = org.example.sep26management.application.enums.IncidentType.DAMAGE;
+                        } else if (hasUnexpectedItems && hasDiscrepancy) {
+                                resolvedType = org.example.sep26management.application.enums.IncidentType.DISCREPANCY;
+                        } else if (hasUnexpectedItems) {
+                                resolvedType = org.example.sep26management.application.enums.IncidentType.UNEXPECTED_ITEM;
+                        } else {
+                                // Only discrepancy (shortage/overage)
+                                resolvedType = org.example.sep26management.application.enums.IncidentType.SHORTAGE;
+                        }
+
+                        // ── Mô tả tổng hợp ──
+                        StringBuilder desc = new StringBuilder("QC kiểm đếm phát hiện: ");
+                        if (failCount > 0) desc.append(failCount).append(" SKU hàng lỗi. ");
+                        if (discrepancyCount > 0) desc.append(discrepancyCount).append(" SKU sai lệch số lượng. ");
+                        if (unexpectedCount > 0) desc.append(unexpectedCount).append(" SKU ngoài phiếu. ");
+
+                        // ── Tạo 1 Incident tổng hợp duy nhất ──
                         String qcIncCode = "INC-" + System.currentTimeMillis() % 1_000_000;
                         IncidentEntity incident = IncidentEntity.builder()
                                 .warehouseId(order.getWarehouseId())
                                 .incidentCode(qcIncCode)
-                                .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
+                                .incidentType(resolvedType)
                                 .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
-                                .description("Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)")
+                                .severity("HIGH")
+                                .occurredAt(LocalDateTime.now())
+                                .description(desc.toString().trim())
                                 .receivingId(id)
                                 .status("OPEN")
                                 .reportedBy(qcUserId)
@@ -707,7 +708,7 @@ public class ReceivingOrderService {
 
                         IncidentEntity savedIncident = incidentRepo.save(incident);
 
-                        for (IncidentItemEntity incItem : incidentItems) {
+                        for (IncidentItemEntity incItem : allIncidentItems) {
                                 incItem.setIncident(savedIncident);
                                 incidentItemRepo.save(incItem);
                         }
@@ -715,43 +716,42 @@ public class ReceivingOrderService {
                         order.setStatus("PENDING_INCIDENT");
                         order.setRejectedBy(qcUserId);
                         order.setRejectedAt(LocalDateTime.now());
-                        order.setRejectReason("Hàng lỗi phát hiện qua QC Scanner. Incident ID: "
-                                + savedIncident.getIncidentId());
+                        order.setRejectReason("QC phát hiện sự cố. Incident: " + qcIncCode
+                                + " (" + allIncidentItems.size() + " items)");
                         order.setUpdatedAt(LocalDateTime.now());
                         receivingOrderRepo.save(order);
 
-                        // Audit log: QC rejected (fail items found)
+                        // Audit log
                         auditLogService.logAction(
                                 qcUserId,
-                                "RECEIVING_QC_REJECTED",
+                                "RECEIVING_QC_INCIDENT",
                                 "RECEIVING_ORDER",
                                 order.getReceivingId(),
                                 "Receiving Order " + order.getReceivingCode()
-                                        + " QC rejected — fail items detected. Incident ID: "
-                                        + savedIncident.getIncidentId(),
+                                        + " — QC phát hiện " + allIncidentItems.size()
+                                        + " items bất thường. Incident " + qcIncCode + " gửi Manager.",
                                 null, null);
 
-                        log.info("QC scan completed with errors for GRN {}. Created Incident {}.",
-                                order.getReceivingCode(), savedIncident.getIncidentId());
+                        log.info("QC scan completed for GRN {}. Created aggregated Incident {} ({} type, {} items).",
+                                order.getReceivingCode(), qcIncCode, resolvedType.name(), allIncidentItems.size());
                 } else {
-                        // Toàn bộ PASS
+                        // ── Toàn bộ khớp + 100% PASS → auto QC_APPROVED ──
                         order.setStatus("QC_APPROVED");
                         order.setApprovedBy(qcUserId);
                         order.setApprovedAt(LocalDateTime.now());
                         order.setUpdatedAt(LocalDateTime.now());
                         receivingOrderRepo.save(order);
 
-                        // Audit log: QC approved (100% pass)
                         auditLogService.logAction(
                                 qcUserId,
                                 "RECEIVING_QC_APPROVED",
                                 "RECEIVING_ORDER",
                                 order.getReceivingId(),
                                 "Receiving Order " + order.getReceivingCode()
-                                        + " QC scan 100% PASS — auto approved",
+                                        + " QC scan — 100% khớp số lượng + 100% PASS → auto approved",
                                 null, null);
 
-                        log.info("QC scan completed 100% PASS for GRN {}.", order.getReceivingCode());
+                        log.info("QC scan completed — 100% match + 100% PASS for GRN {}.", order.getReceivingCode());
                 }
 
                 // Clean up session
@@ -762,7 +762,9 @@ public class ReceivingOrderService {
                 return ApiResponse.success("QC scan session submitted successfully", Map.of(
                         "receivingId", order.getReceivingId(),
                         "status", order.getStatus(),
-                        "hasFailItems", hasFailItems));
+                        "hasFailItems", hasFailItems,
+                        "hasDiscrepancy", hasDiscrepancy,
+                        "hasUnexpectedItems", hasUnexpectedItems));
         }
 
         // ─── Approve (deprecated — đã chuyển sang GRN flow) ──────────────────────────
