@@ -651,6 +651,31 @@ public class ReceivingOrderService {
                         order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + mismatchNote);
                         receivingOrderRepo.save(order);
 
+                        // ── Reset data cho Keeper rescan: clean slate ──
+                        // 1. Xóa items ngoài phiếu (expectedQty=0) từ lần scan trước
+                        List<ReceivingItemEntity> extraItems = dbItems.stream()
+                                .filter(i -> i.getExpectedQty() == null
+                                        || i.getExpectedQty().compareTo(BigDecimal.ZERO) == 0)
+                                .collect(Collectors.toList());
+                        if (!extraItems.isEmpty()) {
+                                receivingItemRepo.deleteAll(extraItems);
+                                log.info("KEEPER_RESCAN: Deleted {} extra items (expectedQty=0) for order {}",
+                                        extraItems.size(), order.getReceivingCode());
+                        }
+
+                        // 2. Reset receivedQty = 0 cho tất cả items còn lại
+                        for (ReceivingItemEntity dbItem : dbItems) {
+                                if (dbItem.getExpectedQty() != null
+                                        && dbItem.getExpectedQty().compareTo(BigDecimal.ZERO) > 0) {
+                                        dbItem.setReceivedQty(BigDecimal.ZERO);
+                                        dbItem.setCondition(null);
+                                        dbItem.setReasonCode(null);
+                                        receivingItemRepo.save(dbItem);
+                                }
+                        }
+                        log.info("KEEPER_RESCAN: Reset receivedQty=0 for all items of order {}",
+                                order.getReceivingCode());
+
                         log.info("QC scan for GRN {} — {} SKU(s) mismatch with Keeper. Auto back to PENDING_COUNT. {}",
                                 order.getReceivingCode(), mismatchDetails.size(), mismatchNote);
 
