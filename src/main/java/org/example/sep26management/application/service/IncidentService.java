@@ -318,10 +318,20 @@ public class IncidentService {
                     break;
 
                 case "RETURN":
-                    // Trả hàng thừa hoặc hàng hỏng
+                    // Hoàn hàng hỏng/thừa: giảm receivedQty + điều chỉnh expectedQty
                     if (rcItem != null) {
-                        incItem.setActionReturnQty(incItem.getDamagedQty()); // return the overage/damaged qty
-                        rcItem.setReceivedQty(rcItem.getExpectedQty());
+                        java.math.BigDecimal returnQty = incItem.getDamagedQty() != null
+                                ? incItem.getDamagedQty() : java.math.BigDecimal.ZERO;
+                        incItem.setActionReturnQty(returnQty);
+                        // Giảm receivedQty trừ phần hoàn
+                        java.math.BigDecimal curReceived = rcItem.getReceivedQty() != null
+                                ? rcItem.getReceivedQty() : java.math.BigDecimal.ZERO;
+                        java.math.BigDecimal afterReturn = curReceived.subtract(returnQty);
+                        if (afterReturn.compareTo(java.math.BigDecimal.ZERO) < 0)
+                            afterReturn = java.math.BigDecimal.ZERO;
+                        rcItem.setReceivedQty(afterReturn);
+                        // Điều chỉnh expectedQty = phần thực tế giữ lại
+                        rcItem.setExpectedQty(afterReturn);
                         receivingItemRepo.save(rcItem);
                     }
                     incItem.setNote(appendNote(incItem.getNote(),
