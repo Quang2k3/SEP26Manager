@@ -699,10 +699,11 @@ public class ReceivingOrderService {
                         order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + mismatchNote);
                         receivingOrderRepo.save(order);
 
-                        // Refresh TTL của QC session trong Redis để không hết hạn trước khi Keeper
-                        // rescan
-                        sessionRedis.refreshTtl(sessionId);
-                        log.info("KEEPER_RESCAN: Refreshed TTL for QC session {} (order {})",
+                        // RE-SAVE QC session vào Redis với TTL mới (1h) để đảm bảo
+                        // Keeper có đủ thời gian rescan. refreshTtl() không đủ vì
+                        // expire() có thể fail nếu key đã hết hạn.
+                        sessionRedis.save(sessionId, session);
+                        log.info("KEEPER_RESCAN: Re-saved QC session {} with fresh TTL for order {}",
                                         sessionId, order.getReceivingCode());
 
                         // ── Reset data cho Keeper rescan: clean slate ──
