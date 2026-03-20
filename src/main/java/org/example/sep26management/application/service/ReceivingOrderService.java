@@ -466,13 +466,27 @@ public class ReceivingOrderService {
                 }
 
                 // ── KEEPER_RESCAN: So sánh Keeper mới vs QC đã lưu ──────────────
-                if ("KEEPER_RESCAN".equals(order.getStatus()) && order.getQcSessionId() != null) {
+                if ("KEEPER_RESCAN".equals(order.getStatus())) {
                         String qcSessionId = order.getQcSessionId();
+
+                        // Nếu không có QC session → không so sánh được → fallback
+                        if (qcSessionId == null) {
+                                order.setStatus("PENDING_COUNT");
+                                order.setUpdatedAt(LocalDateTime.now());
+                                order.setNote((order.getNote() != null ? order.getNote() + "\n" : "")
+                                        + "[System] Không có QC session để đối chiếu — chuyển PENDING_COUNT.");
+                                receivingOrderRepo.save(order);
+                                log.warn("KEEPER_RESCAN: No qcSessionId for order {}. Fallback to PENDING_COUNT.",
+                                        order.getReceivingCode());
+                                return ApiResponse.success(
+                                        "Không có dữ liệu QC để đối chiếu. Chờ QC quét kiểm tra.",
+                                        getOrder(id).getData());
+                        }
+
                         ScanSessionData qcSession = sessionRedis.findById(qcSessionId).orElse(null);
 
                         if (qcSession == null || qcSession.getLines() == null) {
                                 // QC session đã hết hạn → không so sánh được
-                                // Fallback: chuyển PENDING_COUNT để QC scan lại từ đầu
                                 order.setStatus("PENDING_COUNT");
                                 order.setQcSessionId(null);
                                 order.setUpdatedAt(LocalDateTime.now());
@@ -486,78 +500,80 @@ public class ReceivingOrderService {
                                         getOrder(id).getData());
                         }
 
-                        if (qcSession.getLines() != null) {
-                                // Build QC scan totals per SKU
-                                Map<Long, BigDecimal> qcTotals = qcSession.getLines().stream()
-                                        .filter(l -> l.getSkuId() != null && l.getQty() != null)
-                                        .collect(Collectors.groupingBy(ScanLineItem::getSkuId,
-                                                Collectors.reducing(BigDecimal.ZERO, ScanLineItem::getQty, BigDecimal::add)));
+                        // Build QC scan totals per SKU
+                        Map<Long, BigDecimal> qcTotals = qcSession.getLines().stream()
+                                .filter(l -> l.getSkuId() != null && l.getQty() != null)
+                                .collect(Collectors.groupingBy(ScanLineItem::getSkuId,
+                                        Collectors.reducing(BigDecimal.ZERO, ScanLineItem::getQty, BigDecimal::add)));
 
-                                // Build Keeper scan totals per SKU (from just-synced data)
-                                List<ReceivingItemEntity> freshItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
-                                Map<Long, BigDecimal> keeperTotals = freshItems.stream()
-                                        .collect(Collectors.toMap(
-                                                ReceivingItemEntity::getSkuId,
-                                                it -> it.getReceivedQty() != null ? it.getReceivedQty() : BigDecimal.ZERO,
-                                                BigDecimal::add));
+                        // Build Keeper scan totals per SKU (from just-synced data)
+                        List<ReceivingItemEntity> freshItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
+                        Map<Long, BigDecimal> keeperTotals = freshItems.stream()
+                                .collect(Collectors.toMap(
+                                        ReceivingItemEntity::getSkuId,
+                                        it -> it.getReceivedQty() != null ? it.getReceivedQty() : BigDecimal.ZERO,
+                                        BigDecimal::add));
 
-                                // Merge all SKU IDs (from both sides)
-                                java.util.Set<Long> allSkuIds = new java.util.HashSet<>(qcTotals.keySet());
-                                allSkuIds.addAll(keeperTotals.keySet());
+                        // Merge all SKU IDs (from both sides)
+                        java.util.Set<Long> allSkuIds = new java.util.HashSet<>(qcTotals.keySet());
+                        allSkuIds.addAll(keeperTotals.keySet());
 
-                                boolean keeperMatchesQc = true;
-                                List<String> rescanMismatches = new ArrayList<>();
-                                for (Long skuId : allSkuIds) {
-                                        BigDecimal qcQty = qcTotals.getOrDefault(skuId, BigDecimal.ZERO);
-                                        BigDecimal kQty  = keeperTotals.getOrDefault(skuId, BigDecimal.ZERO);
-                                        if (qcQty.compareTo(kQty) != 0) {
-                                                keeperMatchesQc = false;
-                                                String skuCode = skuRepo.findById(skuId)
-                                                        .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
-                                                rescanMismatches.add(skuCode + " (QC=" + qcQty + ", Keeper=" + kQty + ")");
-                                        }
+                        boolean keeperMatchesQc = true;
+                        List<String> rescanMismatches = new ArrayList<>();
+                        for (Long skuId : allSkuIds) {
+                                BigDecimal qcQty = qcTotals.getOrDefault(skuId, BigDecimal.ZERO);
+                                BigDecimal kQty  = keeperTotals.getOrDefault(skuId, BigDecimal.ZERO);
+                                if (qcQty.compareTo(kQty) != 0) {
+                                        keeperMatchesQc = false;
+                                        String skuCode = skuRepo.findById(skuId)
+                                                .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
+                                        rescanMismatches.add(skuCode + " (QC=" + qcQty + ", Keeper=" + kQty + ")");
+                                }
+                        }
+
+                        if (keeperMatchesQc) {
+                                // ✅ Keeper khớp QC → auto-process qua qcSubmitSession
+                                log.info("Keeper rescan matches QC for GRN {}. Auto-processing QC session {}",
+                                        order.getReceivingCode(), qcSessionId);
+
+                                // Chuyển trạng thái tạm PENDING_COUNT để qcSubmitSession chấp nhận
+                                order.setStatus("PENDING_COUNT");
+                                order.setUpdatedAt(LocalDateTime.now());
+                                receivingOrderRepo.save(order);
+
+                                // Lấy QC userId từ order (người đã reject/flag mismatch)
+                                Long qcUserId = order.getRejectedBy() != null ? order.getRejectedBy() : userId;
+
+                                // Auto-call qcSubmitSession → tạo incident hoặc QC_APPROVED
+                                ApiResponse<Map<String, Object>> qcResult = qcSubmitSession(id, qcSessionId, qcUserId);
+                                if (qcResult == null || !Boolean.TRUE.equals(qcResult.getSuccess())) {
+                                        log.error("KEEPER_RESCAN: auto qcSubmitSession failed for order {}. Result: {}",
+                                                order.getReceivingCode(), qcResult != null ? qcResult.getMessage() : "null");
                                 }
 
-                                if (keeperMatchesQc) {
-                                        // ✅ Keeper khớp QC → auto-process qua qcSubmitSession
-                                        log.info("Keeper rescan matches QC for GRN {}. Auto-processing QC session {}",
-                                                order.getReceivingCode(), qcSessionId);
+                                // Clear qcSessionId (đã xử lý xong)
+                                ReceivingOrderEntity updatedOrder = findOrder(id);
+                                updatedOrder.setQcSessionId(null);
+                                receivingOrderRepo.save(updatedOrder);
 
-                                        // Chuyển trạng thái tạm PENDING_COUNT để qcSubmitSession chấp nhận
-                                        order.setStatus("PENDING_COUNT");
-                                        order.setUpdatedAt(LocalDateTime.now());
-                                        receivingOrderRepo.save(order);
+                                log.info("Keeper rescan matched QC → auto-processed order {} via qcSubmitSession",
+                                        order.getReceivingCode());
+                                return ApiResponse.success(
+                                        "Keeper rescan khớp QC! Hệ thống tự xử lý.", getOrder(id).getData());
+                        } else {
+                                // ❌ Keeper vẫn lệch QC → PENDING_COUNT → QC rescan lại
+                                order.setStatus("PENDING_COUNT");
+                                order.setQcSessionId(null); // Clear — QC cần scan mới
+                                order.setUpdatedAt(LocalDateTime.now());
+                                String note = "[Keeper rescan vẫn lệch QC] " + String.join(", ", rescanMismatches);
+                                order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + note);
+                                receivingOrderRepo.save(order);
 
-                                        // Lấy QC userId từ order (người đã reject/flag mismatch)
-                                        Long qcUserId = order.getRejectedBy() != null ? order.getRejectedBy() : userId;
-
-                                        // Auto-call qcSubmitSession → tạo incident hoặc QC_APPROVED
-                                        qcSubmitSession(id, qcSessionId, qcUserId);
-
-                                        // Clear qcSessionId (đã xử lý xong)
-                                        ReceivingOrderEntity updatedOrder = findOrder(id);
-                                        updatedOrder.setQcSessionId(null);
-                                        receivingOrderRepo.save(updatedOrder);
-
-                                        log.info("Keeper rescan matched QC → auto-processed order {} via qcSubmitSession",
-                                                order.getReceivingCode());
-                                        return ApiResponse.success(
-                                                "Keeper rescan khớp QC! Hệ thống tự xử lý.", getOrder(id).getData());
-                                } else {
-                                        // ❌ Keeper vẫn lệch QC → PENDING_COUNT → QC rescan lại
-                                        order.setStatus("PENDING_COUNT");
-                                        order.setQcSessionId(null); // Clear — QC cần scan mới
-                                        order.setUpdatedAt(LocalDateTime.now());
-                                        String note = "[Keeper rescan vẫn lệch QC] " + String.join(", ", rescanMismatches);
-                                        order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + note);
-                                        receivingOrderRepo.save(order);
-
-                                        log.info("Keeper rescan STILL mismatches QC for GRN {}. Back to PENDING_COUNT for QC rescan. {}",
-                                                order.getReceivingCode(), note);
-                                        return ApiResponse.success(
-                                                "Keeper rescan vẫn lệch QC (" + rescanMismatches.size()
-                                                        + " SKU). Chờ QC kiểm đếm lại.", getOrder(id).getData());
-                                }
+                                log.info("Keeper rescan STILL mismatches QC for GRN {}. Back to PENDING_COUNT for QC rescan. {}",
+                                        order.getReceivingCode(), note);
+                                return ApiResponse.success(
+                                        "Keeper rescan vẫn lệch QC (" + rescanMismatches.size()
+                                                + " SKU). Chờ QC kiểm đếm lại.", getOrder(id).getData());
                         }
                 }
 
