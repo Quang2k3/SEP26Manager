@@ -325,7 +325,7 @@ public class IncidentService {
                         receivingItemRepo.save(rcItem);
                     }
                     incItem.setNote(appendNote(incItem.getNote(),
-                            "[Manager]: RETURN — Trả hàng thừa cho nhà cung cấp"));
+                            "[Manager]: RETURN — Hoàn hàng thừa"));
                     break;
 
                 default:
