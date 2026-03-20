@@ -54,6 +54,14 @@ public class PutawayTaskEntity {
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 
+    /** URL ảnh phiếu cất hàng đã ký — lưu trên Cloudinary */
+    @Column(name = "signed_note_url", columnDefinition = "TEXT")
+    private String signedNoteUrl;
+
+    /** Thời điểm upload ảnh ký */
+    @Column(name = "signed_note_uploaded_at")
+    private java.time.LocalDateTime signedNoteUploadedAt;
+
     @OneToMany(mappedBy = "putawayTask", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
     private List<PutawayTaskItemEntity> items = new ArrayList<>();

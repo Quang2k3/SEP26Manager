@@ -355,6 +355,8 @@ public class PutawayTaskService {
                 .createdAt(t.getCreatedAt())
                 .completedAt(t.getCompletedAt())
                 .note(t.getNote())
+                .signedNoteUrl(t.getSignedNoteUrl())
+                .signedNoteUploadedAt(t.getSignedNoteUploadedAt())
                 .build();
     }
 

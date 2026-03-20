@@ -5,6 +5,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.PutawayAllocateRequest;
+import org.example.sep26management.application.service.PutawaySignedNoteService;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartFile;
+
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.PutawayAllocationResponse;
@@ -12,8 +17,11 @@ import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
 import org.example.sep26management.application.service.PutawayTaskService;
 import org.example.sep26management.infrastructure.persistence.repository.UserJpaRepository;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -27,6 +35,7 @@ public class PutawayTaskController {
 
     private final PutawayTaskService putawayTaskService;
     private final UserJpaRepository userJpaRepository;
+    private final PutawaySignedNoteService putawaySignedNoteService;
 
     // ─── CRUD ────────────────────────────────────────────────────────────────────
 
@@ -127,6 +136,24 @@ public class PutawayTaskController {
             @PathVariable Long id,
             Authentication auth) {
         return putawayTaskService.confirmAll(id, extractUserId(auth));
+    }
+
+    // ─── Signed Note (ảnh phiếu cất hàng đã ký) ─────────────────────────────────
+
+    @PostMapping(value = "/{id}/signed-note", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload ảnh phiếu cất hàng đã ký",
+            description = "Nhân viên chụp ảnh phiếu sau khi đã có chữ ký, upload lên để xác nhận.")
+    public ResponseEntity<ApiResponse<java.util.Map<String, String>>> uploadSignedNote(
+            @PathVariable Long id,
+            @RequestParam("photo") MultipartFile photo) {
+        return ResponseEntity.ok(putawaySignedNoteService.uploadSignedNote(id, photo));
+    }
+
+    @GetMapping("/{id}/signed-note")
+    @Operation(summary = "Lấy thông tin ảnh phiếu cất hàng đã ký")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> getSignedNote(
+            @PathVariable Long id) {
+        return ResponseEntity.ok(putawaySignedNoteService.getSignedNote(id));
     }
 
     // ─── Helper ──────────────────────────────────────────────────────────────────
