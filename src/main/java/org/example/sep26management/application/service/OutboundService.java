@@ -336,7 +336,10 @@ public class OutboundService {
         transfer.setApprovedBy(0L);
         transferRepository.save(transfer);
 
-        reserveInventory(transfer.getFromWarehouseId(), items.stream()
+        // [FIX-BUG-4 + FIX-CORE] reserveInventory cho Internal Transfer:
+        // Dùng stagingLocationId và lưu locationId vào reservation để PickList sau này
+        // có thể resolve đúng BIN → dispatch trừ đúng tồn.
+        reserveInventoryForTransfer(transfer.getFromWarehouseId(), items.stream()
                 .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
                 .toList(), "transfers", transferId, userId);
 
@@ -519,9 +522,19 @@ public class OutboundService {
         return total.subtract(reserved).max(BigDecimal.ZERO);
     }
 
-    private void reserveInventory(Long warehouseId,
-                                  List<AbstractMap.SimpleEntry<Long, BigDecimal>> items,
-                                  String refTable, Long refId, Long userId) {
+    /**
+     * [FIX-CORE] Reserve tồn kho cho Internal Transfer (submitTransfer auto-approve).
+     *
+     * Điểm khác biệt so với reserveInventory cũ:
+     *   1. Lưu locationId (stagingLocationId) vào ReservationEntity.
+     *      → PickListService.generatePickList() đọc res.getLocationId() → không còn NULL
+     *      → không cần fallback resolveLocationForReservation() → không chọn sai BIN.
+     *   2. Dùng incrementReservedByLocationAndSku (không phải ByWarehouseAndSku)
+     *      → chỉ tăng reserved_qty đúng 1 row (location+sku), không tăng nhầm tất cả BIN.
+     */
+    private void reserveInventoryForTransfer(Long warehouseId,
+                                             List<AbstractMap.SimpleEntry<Long, BigDecimal>> items,
+                                             String refTable, Long refId, Long userId) {
 
         Long stagingLocationId = getFirstStagingOrAnyLocationId(warehouseId);
 
@@ -529,9 +542,12 @@ public class OutboundService {
             Long skuId = entry.getKey();
             BigDecimal qty = entry.getValue();
 
+            // [FIX-CORE] Lưu locationId vào reservation — đây là fix then chốt.
+            // Trước đây locationId không được set → NULL trong DB → PickList sai BIN.
             ReservationEntity reservation = ReservationEntity.builder()
                     .warehouseId(warehouseId)
                     .skuId(skuId)
+                    .locationId(stagingLocationId)   // ← FIX: thêm locationId
                     .quantity(qty)
                     .referenceTable(refTable)
                     .referenceId(refId)
@@ -551,10 +567,8 @@ public class OutboundService {
                     .build();
             txnRepository.save(txn);
 
-            // [FIX-BUG-4] Dùng incrementReservedByLocationAndSku thay vì incrementReservedByWarehouseAndSku.
-            // incrementReservedByWarehouseAndSku update TẤT CẢ rows của warehouse+sku (không filter location/lot)
-            // → reserved_qty bị tăng nhầm ở nhiều location cùng lúc → available = total - reserved bị âm.
-            // stagingLocationId là location thực tế hàng đang ở khi chờ xuất (cho Internal Transfer).
+            // [FIX-BUG-4] incrementReservedByLocationAndSku: chỉ update đúng 1 row (location+sku),
+            // không update TẤT CẢ rows của warehouse+sku như incrementReservedByWarehouseAndSku cũ.
             snapshotRepository.incrementReservedByLocationAndSku(stagingLocationId, skuId, null, qty);
         }
     }
@@ -679,6 +693,7 @@ public class OutboundService {
                 .stockWarnings(warnings != null && !warnings.isEmpty() ? warnings : null)
                 .build();
     }
+
     // ─── Get single order detail (with items) ─────────────────────────────────
     @Transactional(readOnly = true)
     public ApiResponse<OutboundResponse> getOutboundDetail(Long documentId, String orderType) {
@@ -698,6 +713,4 @@ public class OutboundService {
             return ApiResponse.success("OK", buildSalesOrderResponse(so, items, customer, null));
         }
     }
-
-
 }
