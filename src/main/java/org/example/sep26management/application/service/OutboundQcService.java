@@ -391,7 +391,12 @@ public class OutboundQcService {
                 log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
             }
             case "CLOSE_SHORT" -> {
-                // [GAP 3 FIX] Cắt giảm orderedQty về available → SO → APPROVED → re-Allocate
+                // [BUG FIX] Phải cancel OPEN reservations của SO này trước khi tính available.
+                // Nếu không, reserved_qty trong snapshot vẫn còn qty đã lock → available = 0
+                // → adjustOrderedQtyToAvailable sẽ set orderedQty = 0 (sai).
+                cancelOpenReservations(so.getSoId(), so.getWarehouseId());
+
+                // Bây giờ reserved_qty đã được giải phóng → tính available đúng
                 adjustOrderedQtyToAvailable(so);
                 so.setStatus("APPROVED");
                 so.setUpdatedAt(LocalDateTime.now());
@@ -410,6 +415,29 @@ public class OutboundQcService {
 
         log.info("SHORTAGE Incident {} resolved, action={}", incidentId, action);
         return ApiResponse.success("Shortage incident resolved.", buildSimpleResponse(incident));
+    }
+
+    /**
+     * [BUG FIX] CLOSE_SHORT: cancel toàn bộ OPEN reservation của SO này,
+     * giải phóng reserved_qty trong inventory_snapshot trước khi tính available.
+     * Nếu không cancel trước, reserved_qty vẫn còn → available = 0 → orderedQty = 0 (sai).
+     */
+    private void cancelOpenReservations(Long soId, Long warehouseId) {
+        List<ReservationEntity> openReservations = reservationRepository
+                .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
+        for (ReservationEntity r : openReservations) {
+            if (r.getLocationId() != null) {
+                inventorySnapshotRepository.incrementReservedByLocationAndSku(
+                        r.getLocationId(), r.getSkuId(), r.getLotId(),
+                        r.getQuantity().negate());
+            } else {
+                inventorySnapshotRepository.incrementReservedByWarehouseAndSku(
+                        warehouseId, r.getSkuId(), r.getQuantity().negate());
+            }
+            r.setStatus("CANCELLED");
+            reservationRepository.save(r);
+        }
+        log.info("CLOSE_SHORT: cancelled {} OPEN reservation(s) for SO #{}", openReservations.size(), soId);
     }
 
     /** CLOSE_SHORT: giảm orderedQty về số lượng available thực tế trong kho. */
