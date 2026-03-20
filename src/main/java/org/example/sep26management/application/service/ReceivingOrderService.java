@@ -693,8 +693,10 @@ public class ReceivingOrderService {
 
                 if (hasFailItems) {
                         // Tạo Quality Incident
+                        String qcIncCode = "INC-" + System.currentTimeMillis() % 1_000_000;
                         IncidentEntity incident = IncidentEntity.builder()
                                 .warehouseId(order.getWarehouseId())
+                                .incidentCode(qcIncCode)
                                 .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
                                 .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
                                 .description("Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)")
