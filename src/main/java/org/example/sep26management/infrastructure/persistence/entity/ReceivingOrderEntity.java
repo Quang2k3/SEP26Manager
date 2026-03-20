@@ -69,6 +69,9 @@ public class ReceivingOrderEntity {
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 
+    @Column(name = "qc_session_id", length = 255)
+    private String qcSessionId;
+
     @OneToMany(mappedBy = "receivingOrder", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
     private List<ReceivingItemEntity> items = new ArrayList<>();
