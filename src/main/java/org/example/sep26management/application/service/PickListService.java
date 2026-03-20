@@ -14,20 +14,23 @@ import org.example.sep26management.infrastructure.persistence.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * SCRUM-511: UC-WXE-06 Generate Pick List
  * BR-WXE-22: only from allocated stock
  * BR-WXE-23: optimal picking route (zone → location code order)
  * BR-WXE-24: SKU, lot, location traceability
+ *
+ * Luồng trừ tồn kho (sau refactor bỏ Z-OUT):
+ *   confirmPicked → trừ quantity + reserved_qty + close reservation + ghi txn PICK
+ *   confirmDispatch → chỉ set DISPATCHED, KHÔNG trừ tồn nữa
  */
 @Service
 @RequiredArgsConstructor
@@ -45,6 +48,10 @@ public class PickListService {
     private final SkuJpaRepository skuRepository;
     private final InventoryLotJpaRepository lotRepository;
     private final AuditLogService auditLogService;
+    // Dependencies added for inventory deduction at confirmPicked
+    private final InventorySnapshotJpaRepository snapshotRepository;
+    private final InventoryTransactionJpaRepository txnRepository;
+    private final ReservationJpaRepository reservationRepository;
 
     @Transactional
     public ApiResponse<PickListResponse> generatePickList(
@@ -57,9 +64,6 @@ public class PickListService {
         String documentCode;
         String refTable;
 
-        // [FIX-BUG-1] Validate document phải ALLOCATED (phân bổ đủ tồn kho) trước khi tạo Pick List.
-        // Trước đây cho phép APPROVED bypass → Pick List được tạo mà không có reservation
-        // → confirmDispatch trừ tồn nhưng không close được reservation → tồn kho sai.
         if (request.getOrderType() == OutboundType.SALES_ORDER) {
             SalesOrderEntity so = soRepository.findById(request.getDocumentId())
                     .orElseThrow(() -> new ResourceNotFoundException(
@@ -89,7 +93,6 @@ public class PickListService {
             refTable = "transfers";
         }
 
-        // BR-WXE-22: fetch OPEN reservations for this document (allocated stock)
         List<ReservationEntity> reservations = revReservationQueryRepository
                 .findByReferenceTableAndReferenceIdAndStatus(refTable, request.getDocumentId(), "OPEN");
 
@@ -97,7 +100,7 @@ public class PickListService {
             throw new BusinessException(MessageConstants.PICKLIST_NO_ALLOCATION);
         }
 
-        // Invalidate existing pick tasks for this document (BR-WXE alternative 4b)
+        // Huỷ pick task cũ nếu có
         List<PickingTaskEntity> existing = pickingTaskRepository
                 .findByWarehouseIdAndSoId(warehouseId, request.getDocumentId());
         existing.forEach(t -> {
@@ -105,7 +108,6 @@ public class PickListService {
             pickingTaskRepository.save(t);
         });
 
-        // Create new picking task
         String taskCode = generatePickTaskCode(warehouseId);
         PickingTaskEntity task = PickingTaskEntity.builder()
                 .warehouseId(warehouseId)
@@ -116,24 +118,14 @@ public class PickListService {
                 .build();
         PickingTaskEntity savedTask = pickingTaskRepository.save(task);
 
-        // Build pick items from reservations
-        // The locationMap is not used directly here since each item resolves its location via resolveLocationForReservation
-        // Remove the broken locationMap that incorrectly used lotId as locationId
-
         List<PickingTaskItemEntity> taskItems = new ArrayList<>();
-        List<PickListResponse.PickListItem> pickItems = new ArrayList<>();
 
         for (ReservationEntity res : reservations) {
-            // [FIX-CORE] Dùng res.getLocationId() (đã lưu khi allocate) thay vì
-            // resolveLocationForReservation() query lại snapshot.
-            // Query lại snapshot sẽ trả về bin SAI vì bin đã bị khoá (reserved_qty cao)
-            // → available = 0 → query chọn bin khác → dispatch trừ tồn sai vị trí.
             Long fromLocation = res.getLocationId();
             if (fromLocation == null) {
-                // Fallback cho reservation cũ (trước fix) chưa có locationId
                 fromLocation = resolveLocationForReservation(res, warehouseId);
-                log.warn("[FIX-CORE] Reservation {} có locationId=null, fallback query snapshot. "
-                        + "Cần re-allocate đơn này để đảm bảo trừ đúng bin.", res.getReservationId());
+                log.warn("Reservation {} locationId=null — fallback query. Re-allocate để đảm bảo đúng bin.",
+                        res.getReservationId());
             }
             PickingTaskItemEntity item = PickingTaskItemEntity.builder()
                     .pickingTaskId(savedTask.getPickingTaskId())
@@ -141,14 +133,14 @@ public class PickListService {
                     .lotId(res.getLotId())
                     .fromLocationId(fromLocation)
                     .requiredQty(res.getQuantity())
-                    .pickedQty(java.math.BigDecimal.ZERO)
+                    .pickedQty(BigDecimal.ZERO)
                     .build();
             taskItems.add(item);
         }
 
         List<PickingTaskItemEntity> savedItems = pickingTaskItemRepository.saveAll(taskItems);
 
-        // Build response with traceability — BR-WXE-24
+        // Build response
         int seq = 1;
         List<PickListResponse.PickListItem> responseItems = new ArrayList<>();
         for (int i = 0; i < savedItems.size(); i++) {
@@ -167,50 +159,38 @@ public class PickListService {
             }
 
             var skuOpt = skuRepository.findById(item.getSkuId());
-            String skuCode   = skuOpt.map(s -> s.getSkuCode()).orElse(null);
-            String skuName   = skuOpt.map(s -> s.getSkuName()).orElse(null);
+            String skuCode    = skuOpt.map(s -> s.getSkuCode()).orElse(null);
+            String skuName    = skuOpt.map(s -> s.getSkuName()).orElse(null);
             String skuBarcode = skuOpt.map(s -> s.getBarcode()).orElse(null);
-            String lotNumber = null;
-            java.time.LocalDate expiryDate = null;
+            String lotNumber  = null;
+            LocalDate expiryDate = null;
             if (item.getLotId() != null) {
                 var lot = lotRepository.findById(item.getLotId()).orElse(null);
-                if (lot != null) {
-                    lotNumber = lot.getLotNumber();
-                    expiryDate = lot.getExpiryDate();
-                }
+                if (lot != null) { lotNumber = lot.getLotNumber(); expiryDate = lot.getExpiryDate(); }
             }
 
             responseItems.add(PickListResponse.PickListItem.builder()
-                    .sequence(seq++)
-                    .pickingTaskItemId(item.getPickingTaskItemId())
+                    .sequence(seq++).pickingTaskItemId(item.getPickingTaskItemId())
                     .locationId(item.getFromLocationId())
                     .locationCode(loc != null ? loc.getLocationCode() : null)
-                    .zoneCode(zoneCode)
-                    .rackCode(rackCode)
+                    .zoneCode(zoneCode).rackCode(rackCode)
                     .skuId(item.getSkuId()).skuCode(skuCode).skuName(skuName).barcode(skuBarcode)
                     .lotId(item.getLotId()).lotNumber(lotNumber).expiryDate(expiryDate)
-                    .requiredQty(item.getRequiredQty())
-                    .pickedQty(item.getPickedQty())
+                    .requiredQty(item.getRequiredQty()).pickedQty(item.getPickedQty())
                     .status("PENDING")
                     .build());
         }
 
-        // BR-WXE-23: sort by optimal picking route — zone → location code
         responseItems.sort(Comparator
                 .comparing((PickListResponse.PickListItem r) -> r.getZoneCode() != null ? r.getZoneCode() : "")
                 .thenComparing(r -> r.getLocationCode() != null ? r.getLocationCode() : ""));
+        for (int i = 0; i < responseItems.size(); i++) responseItems.get(i).setSequence(i + 1);
 
-        // Re-sequence after sort
-        for (int i = 0; i < responseItems.size(); i++) {
-            responseItems.get(i).setSequence(i + 1);
-        }
-
-        // ── Update SO status → PICKING ────────────────────────────────────────────
         if (request.getOrderType() == OutboundType.SALES_ORDER) {
             soRepository.findById(request.getDocumentId()).ifPresent(so -> {
                 so.setStatus("PICKING");
                 soRepository.save(so);
-                log.info("SO {} status → PICKING after pick list generated", so.getSoCode());
+                log.info("SO {} → PICKING", so.getSoCode());
             });
         } else {
             transferRepository.findById(request.getDocumentId()).ifPresent(t -> {
@@ -250,14 +230,13 @@ public class PickListService {
         for (PickingTaskItemEntity item : items) {
             LocationEntity loc = locationRepository.findById(item.getFromLocationId()).orElse(null);
             String zoneCode = (loc != null && loc.getZoneId() != null)
-                    ? zoneRepository.findById(loc.getZoneId()).map(z -> z.getZoneCode()).orElse(null)
-                    : null;
+                    ? zoneRepository.findById(loc.getZoneId()).map(z -> z.getZoneCode()).orElse(null) : null;
             var skuOpt = skuRepository.findById(item.getSkuId());
-            String skuCode   = skuOpt.map(s -> s.getSkuCode()).orElse(null);
-            String skuName   = skuOpt.map(s -> s.getSkuName()).orElse(null);
+            String skuCode    = skuOpt.map(s -> s.getSkuCode()).orElse(null);
+            String skuName    = skuOpt.map(s -> s.getSkuName()).orElse(null);
             String skuBarcode = skuOpt.map(s -> s.getBarcode()).orElse(null);
-            String lotNumber = null;
-            java.time.LocalDate expiryDate = null;
+            String lotNumber  = null;
+            LocalDate expiryDate = null;
             if (item.getLotId() != null) {
                 var lot = lotRepository.findById(item.getLotId()).orElse(null);
                 if (lot != null) { lotNumber = lot.getLotNumber(); expiryDate = lot.getExpiryDate(); }
@@ -272,8 +251,7 @@ public class PickListService {
                     .lotId(item.getLotId()).lotNumber(lotNumber).expiryDate(expiryDate)
                     .requiredQty(item.getRequiredQty()).pickedQty(item.getPickedQty())
                     .status(item.getPickedQty().compareTo(item.getRequiredQty()) >= 0 ? "PICKED" : "PENDING")
-                    .qcResult(item.getQcResult())
-                    .qcScannedAt(item.getQcScannedAt())
+                    .qcResult(item.getQcResult()).qcScannedAt(item.getQcScannedAt())
                     .build());
         }
 
@@ -290,10 +268,17 @@ public class PickListService {
                 .build());
     }
 
-
     /**
-     * Keeper xác nhận đã lấy đủ hàng → picking task OPEN/IN_PROGRESS → PICKED.
-     * Bắt buộc trước khi QC có thể gọi start-qc (yêu cầu task PICKED).
+     * Keeper xác nhận đã lấy đủ hàng.
+     *
+     * Sau refactor bỏ Z-OUT, bước này chịu trách nhiệm trừ tồn kho:
+     *   1. decrementQuantity  — trừ quantity trong BIN
+     *   2. decrementReserved  — giải phóng reserved_qty
+     *   3. Close reservation  — status → CLOSED
+     *   4. Ghi inventory_transaction txnType=PICK
+     *   5. task → PICKED, SO → QC_SCAN
+     *
+     * confirmDispatch sau này chỉ còn task → COMPLETED, SO → DISPATCHED.
      */
     @Transactional
     public ApiResponse<PickListResponse> confirmPicked(Long taskId, Long userId, String ip, String ua) {
@@ -308,45 +293,104 @@ public class PickListService {
                     "Không thể xác nhận: task phải ở OPEN hoặc IN_PROGRESS. Hiện: " + task.getStatus());
         }
 
+        Long warehouseId = task.getWarehouseId();
+
         // Set pickedQty = requiredQty cho item chưa được đánh dấu
         List<PickingTaskItemEntity> items = pickingTaskItemExtendedRepository.findByPickingTaskId(taskId);
         for (PickingTaskItemEntity item : items) {
-            if (item.getPickedQty() == null || item.getPickedQty().compareTo(java.math.BigDecimal.ZERO) == 0) {
+            if (item.getPickedQty() == null || item.getPickedQty().compareTo(BigDecimal.ZERO) == 0) {
                 item.setPickedQty(item.getRequiredQty());
                 pickingTaskItemRepository.save(item);
             }
         }
 
+        // Trừ tồn kho theo từng item
+        for (PickingTaskItemEntity item : items) {
+            BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
+                    ? item.getPickedQty() : item.getRequiredQty();
+
+            Long locationId = item.getFromLocationId();
+
+            // 1) Trừ quantity trong BIN
+            snapshotRepository.decrementQuantity(
+                    warehouseId, item.getSkuId(), item.getLotId(), locationId, qty);
+
+            // 2) Giải phóng reserved_qty
+            snapshotRepository.decrementReservedByLocationSkuLot(
+                    locationId, item.getSkuId(), item.getLotId(), qty);
+
+            // 3) Ghi inventory_transaction txnType = PICK
+            txnRepository.save(InventoryTransactionEntity.builder()
+                    .warehouseId(warehouseId)
+                    .skuId(item.getSkuId())
+                    .lotId(item.getLotId())
+                    .locationId(locationId)
+                    .quantity(qty.negate())
+                    .txnType("PICK")
+                    .referenceTable("picking_tasks")
+                    .referenceId(taskId)
+                    .createdBy(userId)
+                    .build());
+        }
+
+        // 4) Close OPEN reservations liên quan đến document của task này
+        //    Với SO: refTable=sales_orders, refId=soId
+        //    Với Transfer: tìm từ reservations theo items
+        if (task.getSoId() != null) {
+            List<ReservationEntity> openRes = reservationRepository
+                    .findByReferenceTableAndReferenceIdAndStatus("sales_orders", task.getSoId(), "OPEN");
+            openRes.forEach(r -> {
+                r.setStatus("CLOSED");
+                reservationRepository.save(r);
+            });
+        } else {
+            // Internal Transfer: close reservation bằng cách match sku + location từ items
+            for (PickingTaskItemEntity item : items) {
+                List<ReservationEntity> openRes = reservationRepository
+                        .findByReferenceTableAndReferenceIdAndStatus("transfers", item.getPickingTaskId(), "OPEN");
+                // fallback nếu không tìm được theo task: tìm theo sku+location+warehouse OPEN
+                if (openRes.isEmpty()) {
+                    openRes = reservationRepository.findOpenByWarehouseSkuLocation(
+                            warehouseId, item.getSkuId(), item.getFromLocationId());
+                }
+                final Long locId = item.getFromLocationId();
+                final Long skuId = item.getSkuId();
+                openRes.stream()
+                        .filter(r -> r.getSkuId().equals(skuId)
+                                && (r.getLocationId() == null || r.getLocationId().equals(locId)))
+                        .forEach(r -> {
+                            r.setStatus("CLOSED");
+                            reservationRepository.save(r);
+                        });
+            }
+        }
+
+        // 5) Task → PICKED
         task.setStatus("PICKED");
-        if (task.getStartedAt() == null) task.setStartedAt(java.time.LocalDateTime.now());
+        if (task.getStartedAt() == null) task.setStartedAt(LocalDateTime.now());
         pickingTaskRepository.save(task);
 
-        // Update SO status → QC_SCAN
+        // 6) SO → QC_SCAN
         if (task.getSoId() != null) {
             soRepository.findById(task.getSoId()).ifPresent(so -> {
                 so.setStatus("QC_SCAN");
                 soRepository.save(so);
-                log.info("SO {} status → QC_SCAN after confirm picked", so.getSoCode());
+                log.info("SO {} → QC_SCAN after confirmPicked", so.getSoCode());
             });
         }
 
         auditLogService.logAction(userId, "PICKING_CONFIRMED", "picking_tasks", taskId,
-                "Pick task " + taskId + " confirmed PICKED by keeper", ip, ua);
+                "Pick task " + taskId + " confirmed PICKED — tồn kho đã trừ trực tiếp từ BIN", ip, ua);
 
-        log.info("confirmPicked OK: taskId={} → PICKED", taskId);
+        log.info("confirmPicked OK: taskId={} → PICKED, inventory deducted", taskId);
         return getPickList(taskId);
     }
 
-    /**
-     * Lấy pick list active theo documentId (soId).
-     * Dùng khi FE mở lại modal và không có taskId trong state.
-     */
     @Transactional(readOnly = true)
     public ApiResponse<PickListResponse> getPickListByDocument(Long documentId, Long warehouseId) {
         List<PickingTaskEntity> tasks = pickingTaskRepository
                 .findByWarehouseIdAndSoId(warehouseId, documentId);
 
-        // Lấy task active nhất (không phải CANCELLED/COMPLETED)
         PickingTaskEntity active = tasks.stream()
                 .filter(t -> !"CANCELLED".equals(t.getStatus()) && !"COMPLETED".equals(t.getStatus()))
                 .findFirst()
@@ -355,28 +399,19 @@ public class PickListService {
         if (active == null) {
             throw new ResourceNotFoundException("Không tìm thấy Pick List cho đơn #" + documentId);
         }
-
         return getPickList(active.getPickingTaskId());
     }
 
     private Long resolveLocationForReservation(ReservationEntity res, Long warehouseId) {
-        // Find the location that has this reservation's stock
-        // Query snapshot for the specific sku+lot combination
         return revReservationQueryRepository.findLocationForReservation(
                 warehouseId, res.getSkuId(), res.getLotId());
     }
 
     private String generatePickTaskCode(Long warehouseId) {
-        String date = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String date  = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         LocalDate today = LocalDate.now();
-        LocalDateTime start = today.atStartOfDay();
-        LocalDateTime end = today.plusDays(1).atStartOfDay();
-
         long count = pickingTaskRepository.countTodayByWarehouse(
-                warehouseId,
-                start,
-                end
-        );
+                warehouseId, today.atStartOfDay(), today.plusDays(1).atStartOfDay());
         return String.format("PKL-%s-%04d", date, count);
     }
 }
