@@ -581,14 +581,15 @@ public class ReceivingOrderService {
                                 .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
 
                         // ── (A) FAIL items ──
+                        // FE expects: expectedQty=SL giấy tờ, actualQty=SL thực tế (total scanned), damagedQty=hàng hỏng
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                 hasFailItems = true;
                                 failCount++;
                                 IncidentItemEntity failItem = IncidentItemEntity.builder()
                                         .skuId(skuId)
-                                        .damagedQty(failQty)
-                                        .expectedQty(totalScanned)
-                                        .actualQty(passQty)
+                                        .expectedQty(expectedQty)      // SL giấy tờ (từ phiếu)
+                                        .actualQty(totalScanned)       // SL thực tế (QC quét tổng)
+                                        .damagedQty(failQty)           // Hàng hỏng (chỉ FAIL qty)
                                         .reasonCode("DAMAGE")
                                         .note("[QC] Hàng lỗi: " + skuCode + " — PASS=" + passQty + ", FAIL=" + failQty)
                                         .actionPassQty(BigDecimal.ZERO)
@@ -609,11 +610,12 @@ public class ReceivingOrderService {
                                         String reasonCode = cmp < 0 ? "SHORTAGE" : "OVERAGE";
                                         String typeVi = cmp < 0 ? "Thiếu" : "Thừa";
 
+                                        // FE expects: expectedQty=SL giấy tờ, actualQty=SL thực tế, damagedQty=hàng hỏng (failQty)
                                         IncidentItemEntity discItem = IncidentItemEntity.builder()
                                                 .skuId(skuId)
-                                                .expectedQty(expectedQty)
-                                                .actualQty(totalScanned)
-                                                .damagedQty(diff)
+                                                .expectedQty(expectedQty)      // SL giấy tờ
+                                                .actualQty(totalScanned)       // SL thực tế (QC quét tổng)
+                                                .damagedQty(failQty)           // Hàng hỏng (chỉ FAIL qty, không phải diff)
                                                 .reasonCode(reasonCode)
                                                 .note("[QC] " + typeVi + " " + diff + " " + skuCode
                                                         + " (expected=" + expectedQty + ", QC scanned=" + totalScanned + ")")
@@ -651,11 +653,13 @@ public class ReceivingOrderService {
                                         .build();
                                 receivingItemRepo.save(extraItem);
 
+                                BigDecimal unexpFailQty = qtyMap.getOrDefault("FAIL", BigDecimal.ZERO);
+
                                 IncidentItemEntity unexpectedItem = IncidentItemEntity.builder()
                                         .skuId(skuId)
-                                        .expectedQty(BigDecimal.ZERO)
-                                        .actualQty(totalQty)
-                                        .damagedQty(totalQty)
+                                        .expectedQty(BigDecimal.ZERO)  // Không có trên phiếu → SL giấy tờ = 0
+                                        .actualQty(totalQty)           // SL thực tế = tổng quét được
+                                        .damagedQty(unexpFailQty)      // Hàng hỏng (chỉ FAIL qty, không phải total)
                                         .reasonCode("UNEXPECTED_ITEM")
                                         .note("[QC] Hàng ngoài phiếu: " + skuCode + " — QC quét được " + totalQty)
                                         .actionPassQty(BigDecimal.ZERO)
