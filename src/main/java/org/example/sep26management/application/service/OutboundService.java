@@ -551,7 +551,11 @@ public class OutboundService {
                     .build();
             txnRepository.save(txn);
 
-            snapshotRepository.incrementReservedByWarehouseAndSku(warehouseId, skuId, qty);
+            // [FIX-BUG-4] Dùng incrementReservedByLocationAndSku thay vì incrementReservedByWarehouseAndSku.
+            // incrementReservedByWarehouseAndSku update TẤT CẢ rows của warehouse+sku (không filter location/lot)
+            // → reserved_qty bị tăng nhầm ở nhiều location cùng lúc → available = total - reserved bị âm.
+            // stagingLocationId là location thực tế hàng đang ở khi chờ xuất (cho Internal Transfer).
+            snapshotRepository.incrementReservedByLocationAndSku(stagingLocationId, skuId, null, qty);
         }
     }
 

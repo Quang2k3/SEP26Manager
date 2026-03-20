@@ -57,14 +57,19 @@ public class PickListService {
         String documentCode;
         String refTable;
 
-        // Validate document exists and is APPROVED
+        // [FIX-BUG-1] Validate document phải ALLOCATED (phân bổ đủ tồn kho) trước khi tạo Pick List.
+        // Trước đây cho phép APPROVED bypass → Pick List được tạo mà không có reservation
+        // → confirmDispatch trừ tồn nhưng không close được reservation → tồn kho sai.
         if (request.getOrderType() == OutboundType.SALES_ORDER) {
             SalesOrderEntity so = soRepository.findById(request.getDocumentId())
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            if (!"APPROVED".equals(so.getStatus()) && !"ALLOCATED".equals(so.getStatus())) {
-                throw new BusinessException(MessageConstants.PICKLIST_MUST_BE_ALLOCATED);
+            if (!"ALLOCATED".equals(so.getStatus())) {
+                throw new BusinessException(
+                        "Đơn hàng phải được phân bổ tồn kho đầy đủ (ALLOCATED) trước khi tạo Pick List. "
+                                + "Trạng thái hiện tại: " + so.getStatus()
+                                + ". Vui lòng thực hiện bước Phân Bổ Tồn Kho trước.");
             }
             warehouseId = so.getWarehouseId();
             documentCode = so.getSoCode();
@@ -74,8 +79,10 @@ public class PickListService {
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            if (!"APPROVED".equals(transfer.getStatus())) {
-                throw new BusinessException(MessageConstants.PICKLIST_MUST_BE_ALLOCATED);
+            if (!"ALLOCATED".equals(transfer.getStatus())) {
+                throw new BusinessException(
+                        "Lệnh chuyển kho phải được phân bổ tồn kho đầy đủ (ALLOCATED) trước khi tạo Pick List. "
+                                + "Trạng thái hiện tại: " + transfer.getStatus());
             }
             warehouseId = transfer.getFromWarehouseId();
             documentCode = transfer.getTransferCode();
@@ -117,11 +124,22 @@ public class PickListService {
         List<PickListResponse.PickListItem> pickItems = new ArrayList<>();
 
         for (ReservationEntity res : reservations) {
+            // [FIX-CORE] Dùng res.getLocationId() (đã lưu khi allocate) thay vì
+            // resolveLocationForReservation() query lại snapshot.
+            // Query lại snapshot sẽ trả về bin SAI vì bin đã bị khoá (reserved_qty cao)
+            // → available = 0 → query chọn bin khác → dispatch trừ tồn sai vị trí.
+            Long fromLocation = res.getLocationId();
+            if (fromLocation == null) {
+                // Fallback cho reservation cũ (trước fix) chưa có locationId
+                fromLocation = resolveLocationForReservation(res, warehouseId);
+                log.warn("[FIX-CORE] Reservation {} có locationId=null, fallback query snapshot. "
+                        + "Cần re-allocate đơn này để đảm bảo trừ đúng bin.", res.getReservationId());
+            }
             PickingTaskItemEntity item = PickingTaskItemEntity.builder()
                     .pickingTaskId(savedTask.getPickingTaskId())
                     .skuId(res.getSkuId())
                     .lotId(res.getLotId())
-                    .fromLocationId(resolveLocationForReservation(res, warehouseId))
+                    .fromLocationId(fromLocation)
                     .requiredQty(res.getQuantity())
                     .pickedQty(java.math.BigDecimal.ZERO)
                     .build();

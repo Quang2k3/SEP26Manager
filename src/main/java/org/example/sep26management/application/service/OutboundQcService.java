@@ -300,6 +300,17 @@ public class OutboundQcService {
                     "Dispatch blocked: " + openIncidents + " open incident(s) must be resolved first (BR-DISPATCH-03)");
         }
 
+        // [FIX-BUG-3] Guard: kiểm tra phải có OPEN reservation trước khi trừ tồn.
+        // Nếu bước Allocate chưa chạy hoặc bị bypass, dispatch sẽ trừ quantity nhưng
+        // không close được reservation → reserved_qty còn treo → tồn khả dụng bị tính sai.
+        List<ReservationEntity> openReservationsGuard = reservationRepository
+                .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
+        if (openReservationsGuard.isEmpty()) {
+            throw new BusinessException(
+                    "Dispatch bị chặn: Không tìm thấy reservation nào cho đơn hàng này. "
+                            + "Vui lòng thực hiện bước Phân Bổ Tồn Kho (Allocate) trước khi xuất kho.");
+        }
+
         // Fetch PASS items for inventory deduction
         List<PickingTaskItemEntity> passItems = pickingTaskItemRepository.findPassedItemsBySoId(soId);
 
@@ -335,7 +346,9 @@ public class OutboundQcService {
                     .build();
             inventoryTransactionRepository.save(txn);
 
-            // 4) Close reservation for this sku+lot combo
+            // 4) Close reservation cho đúng sku + lot + location
+            // [FIX-CORE] Filter thêm locationId để không đóng nhầm reservation của bin khác
+            // (trường hợp 1 SKU có stock ở nhiều bin, mỗi bin 1 reservation riêng).
             List<ReservationEntity> openReservations = reservationRepository
                     .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
 
@@ -343,7 +356,9 @@ public class OutboundQcService {
                     .filter(r -> r.getSkuId().equals(item.getSkuId())
                             && (item.getLotId() == null
                             ? r.getLotId() == null
-                            : item.getLotId().equals(r.getLotId())))
+                            : item.getLotId().equals(r.getLotId()))
+                            && (r.getLocationId() == null
+                            || r.getLocationId().equals(item.getFromLocationId())))
                     .forEach(r -> {
                         r.setStatus("CLOSED");
                         reservationRepository.save(r);

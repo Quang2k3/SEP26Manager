@@ -100,6 +100,31 @@ public class AllocateStockService {
             throw new BusinessException(MessageConstants.ALLOCATE_NO_ITEMS);
         }
 
+        // [FIX-BUG-2] Idempotency guard: xoá reservation OPEN cũ của document này trước khi tạo mới.
+        // Nếu không có bước này, gọi allocate 2 lần sẽ double-reserve và làm reserved_qty sai.
+        String refTableClean = request.getOrderType() == OutboundType.SALES_ORDER ? "sales_orders" : "transfers";
+        List<ReservationEntity> existingReservations = reservationRepository
+                .findByReferenceTableAndReferenceIdAndStatus(refTableClean, request.getDocumentId(), "OPEN");
+        for (ReservationEntity existing : existingReservations) {
+            // Hoàn trả reserved_qty đúng về location đã reserve
+            // [FIX-CORE] Sau khi ReservationEntity có locationId, dùng location-specific decrement
+            if (existing.getLocationId() != null) {
+                snapshotRepository.incrementReservedByLocationAndSku(
+                        existing.getLocationId(), existing.getSkuId(), existing.getLotId(),
+                        existing.getQuantity().negate());
+            } else {
+                // Fallback cho reservation cũ chưa có locationId
+                snapshotRepository.incrementReservedByWarehouseAndSku(
+                        existing.getWarehouseId(), existing.getSkuId(), existing.getQuantity().negate());
+            }
+            existing.setStatus("CANCELLED");
+            reservationRepository.save(existing);
+        }
+        if (!existingReservations.isEmpty()) {
+            log.info("[FIX-BUG-2] Cancelled {} existing OPEN reservations for documentId={} before re-allocating",
+                    existingReservations.size(), request.getDocumentId());
+        }
+
         List<AllocateStockResponse.AllocationLine> allocations = new ArrayList<>();
         List<AllocateStockResponse.ShortageItem> shortages = new ArrayList<>();
 
@@ -129,9 +154,12 @@ public class AllocateStockService {
                 snapshotRepository.incrementReservedByLocationAndSku(
                         stock.getLocationId(), pair.skuId, stock.getLotId(), canAllocate);
 
-                // Create reservation record — BR-WXE-21: with lot info
+                // Create reservation record — BR-WXE-21: with lot + location info
+                // [FIX-CORE] Lưu locationId vào reservation để PickListService biết
+                // đúng bin cần lấy hàng, và confirmDispatch trừ tồn đúng vị trí.
                 reservationRepository.save(ReservationEntity.builder()
                         .warehouseId(warehouseId).skuId(pair.skuId).lotId(stock.getLotId())
+                        .locationId(stock.getLocationId())
                         .quantity(canAllocate)
                         .referenceTable(request.getOrderType() == OutboundType.SALES_ORDER
                                 ? "sales_orders" : "transfers")
