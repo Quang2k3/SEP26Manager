@@ -806,55 +806,72 @@ public class ReceivingOrderService {
                         String skuCode = skuRepo.findById(skuId)
                                         .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
 
-                        // ── (A) FAIL items ──
-                        // FE expects: expectedQty=SL giấy tờ, actualQty=SL thực tế (total scanned),
-                        // damagedQty=hàng hỏng
-                        if (failQty.compareTo(BigDecimal.ZERO) > 0) {
-                                hasFailItems = true;
-                                failCount++;
-                                IncidentItemEntity failItem = IncidentItemEntity.builder()
+                        // ── Tạo TỐI ĐA 1 incident item per SKU ──
+                        // Gộp FAIL + Discrepancy vào cùng 1 item để tránh trùng lặp
+                        boolean hasFail = failQty.compareTo(BigDecimal.ZERO) > 0;
+                        boolean hasDisc = expectedQty.compareTo(BigDecimal.ZERO) > 0
+                                        && totalScanned.compareTo(expectedQty) != 0;
+
+                        if (hasFail || hasDisc) {
+                                // Determine reason code
+                                String reasonCode;
+                                StringBuilder noteBuilder = new StringBuilder("[QC] ");
+                                int cmp = totalScanned.compareTo(expectedQty);
+
+                                if (hasFail && hasDisc) {
+                                        // Vừa hỏng vừa lệch số lượng
+                                        hasFailItems = true;
+                                        failCount++;
+                                        hasDiscrepancy = true;
+                                        discrepancyCount++;
+                                        BigDecimal diff = totalScanned.subtract(expectedQty).abs();
+                                        String discType = cmp < 0 ? "SHORTAGE" : "OVERAGE";
+                                        String discVi = cmp < 0 ? "Thiếu" : "Thừa";
+                                        reasonCode = "DAMAGE_" + discType;
+                                        noteBuilder.append("Hàng lỗi + ").append(discVi).append(": ")
+                                                        .append(skuCode)
+                                                        .append(" — PASS=").append(passQty)
+                                                        .append(", FAIL=").append(failQty)
+                                                        .append(", ").append(discVi).append(" ")
+                                                        .append(diff)
+                                                        .append(" (expected=").append(expectedQty)
+                                                        .append(", scanned=").append(totalScanned).append(")");
+                                } else if (hasFail) {
+                                        // Chỉ hỏng, số lượng khớp
+                                        hasFailItems = true;
+                                        failCount++;
+                                        reasonCode = "DAMAGE";
+                                        noteBuilder.append("Hàng lỗi: ").append(skuCode)
+                                                        .append(" — PASS=").append(passQty)
+                                                        .append(", FAIL=").append(failQty);
+                                } else {
+                                        // Chỉ lệch số lượng, không hỏng
+                                        hasDiscrepancy = true;
+                                        discrepancyCount++;
+                                        BigDecimal diff = totalScanned.subtract(expectedQty).abs();
+                                        String discVi = cmp < 0 ? "Thiếu" : "Thừa";
+                                        reasonCode = cmp < 0 ? "SHORTAGE" : "OVERAGE";
+                                        noteBuilder.append(discVi).append(" ").append(diff)
+                                                        .append(" ").append(skuCode)
+                                                        .append(" (expected=").append(expectedQty)
+                                                        .append(", QC scanned=").append(totalScanned)
+                                                        .append(")");
+                                }
+
+                                IncidentItemEntity item = IncidentItemEntity.builder()
                                                 .skuId(skuId)
-                                                .expectedQty(expectedQty) // SL giấy tờ (từ phiếu)
-                                                .actualQty(totalScanned) // SL thực tế (QC quét tổng)
-                                                .damagedQty(failQty) // Hàng hỏng (chỉ FAIL qty)
-                                                .reasonCode("DAMAGE")
-                                                .note("[QC] Hàng lỗi: " + skuCode + " — PASS=" + passQty + ", FAIL="
-                                                                + failQty)
+                                                .expectedQty(expectedQty)
+                                                .actualQty(totalScanned)
+                                                .damagedQty(failQty)
+                                                .reasonCode(reasonCode)
+                                                .note(noteBuilder.toString())
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)
                                                 .actionScrapQty(BigDecimal.ZERO)
                                                 .build();
-                                allIncidentItems.add(failItem);
-                                log.info("QC scan — FAIL detected: {} PASS={}, FAIL={}", skuCode, passQty, failQty);
-                        }
-
-                        // ── (B) Discrepancy: expected vs QC total scanned ──
-                        if (expectedQty.compareTo(BigDecimal.ZERO) > 0) {
-                                int cmp = totalScanned.compareTo(expectedQty);
-                                if (cmp != 0) {
-                                        hasDiscrepancy = true;
-                                        discrepancyCount++;
-                                        BigDecimal diff = totalScanned.subtract(expectedQty).abs();
-                                        String reasonCode = cmp < 0 ? "SHORTAGE" : "OVERAGE";
-                                        String typeVi = cmp < 0 ? "Thiếu" : "Thừa";
-
-                                        IncidentItemEntity discItem = IncidentItemEntity.builder()
-                                                        .skuId(skuId)
-                                                        .expectedQty(expectedQty)
-                                                        .actualQty(totalScanned)
-                                                        .damagedQty(failQty)
-                                                        .reasonCode(reasonCode)
-                                                        .note("[QC] " + typeVi + " " + diff + " " + skuCode
-                                                                        + " (expected=" + expectedQty + ", QC scanned="
-                                                                        + totalScanned + ")")
-                                                        .actionPassQty(BigDecimal.ZERO)
-                                                        .actionReturnQty(BigDecimal.ZERO)
-                                                        .actionScrapQty(BigDecimal.ZERO)
-                                                        .build();
-                                        allIncidentItems.add(discItem);
-                                        log.info("QC scan — {} detected: {} diff={} (expected={}, scanned={})",
-                                                        reasonCode, skuCode, diff, expectedQty, totalScanned);
-                                }
+                                allIncidentItems.add(item);
+                                log.info("QC scan — {} detected: {} (expected={}, scanned={}, fail={})",
+                                                reasonCode, skuCode, expectedQty, totalScanned, failQty);
                         } else if (expectedQty.compareTo(BigDecimal.ZERO) == 0
                                         && totalScanned.compareTo(BigDecimal.ZERO) > 0) {
                                 // ── (B2) Hàng ngoài phiếu đã có trong DB (thêm bởi Keeper session sync) ──
