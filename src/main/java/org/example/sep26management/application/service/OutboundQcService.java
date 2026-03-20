@@ -259,19 +259,12 @@ public class OutboundQcService {
     /**
      * Finalises the outbound dispatch:
      *
-     * For each PASS picking_task_item:
-     *   1. Decrease inventory_snapshot.quantity        (BR-DISPATCH-01)
-     *   2. Decrease inventory_snapshot.reserved_qty   (BR-DISPATCH-01)
-     *   3. Insert inventory_transaction (txn_type=DISPATCH, negative qty)
-     *   4. Close reservation (status → CLOSED)
-     *
-     * Then:
-     *   5. Update picking_task  → status=COMPLETED, completed_at=now()
-     *   6. Update sales_order   → status=DISPATCHED, dispatched_at=now()
-     *
-     * Guards:
-     *   BR-DISPATCH-02: blocks if any item is not QC-scanned.
-     *   BR-DISPATCH-03: blocks if any OPEN incident exists for the SO.
+     * Tồn kho đã được trừ tại bước confirmPicked (PickListService).
+     * confirmDispatch chỉ còn:
+     *   1. Guard: all items QC-scanned (BR-DISPATCH-02)
+     *   2. Guard: no OPEN incidents (BR-DISPATCH-03)
+     *   3. picking_task → COMPLETED
+     *   4. sales_order  → DISPATCHED
      */
     @Transactional
     public ApiResponse<Void> confirmDispatch(Long soId, Long userId) {
@@ -299,85 +292,8 @@ public class OutboundQcService {
                     "Dispatch blocked: " + openIncidents + " open incident(s) must be resolved first (BR-DISPATCH-03)");
         }
 
-        // [FIX-BUG-3] Guard: kiểm tra phải có OPEN reservation trước khi trừ tồn.
-        // Nếu bước Allocate chưa chạy hoặc bị bypass, dispatch sẽ trừ quantity nhưng
-        // không close được reservation → reserved_qty còn treo → tồn khả dụng bị tính sai.
-        List<ReservationEntity> openReservationsGuard = reservationRepository
-                .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
-        if (openReservationsGuard.isEmpty()) {
-            throw new BusinessException(
-                    "Dispatch bị chặn: Không tìm thấy reservation nào cho đơn hàng này. "
-                            + "Vui lòng thực hiện bước Phân Bổ Tồn Kho (Allocate) trước khi xuất kho.");
-        }
-
-        // Fetch PASS items for inventory deduction
-        List<PickingTaskItemEntity> passItems = pickingTaskItemRepository.findPassedItemsBySoId(soId);
-
-        if (passItems.isEmpty()) {
-            throw new BusinessException("No PASS items found for dispatch. Dispatch cannot proceed.");
-        }
-
-        // Process each PASS item
-        for (PickingTaskItemEntity item : passItems) {
-            BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
-                    ? item.getPickedQty()
-                    : item.getRequiredQty();
-
-            // [FIX] Resolve locationId đúng từ inventory_snapshot
-            // fromLocationId trong picking item có thể sai (reservation cũ không có locationId)
-            // → tìm lại từ snapshot để đảm bảo trừ đúng bin
-            Long resolvedLocationId = item.getFromLocationId();
-            if (resolvedLocationId == null) {
-                resolvedLocationId = inventorySnapshotRepository
-                        .findLocationIdByWarehouseSkuLot(so.getWarehouseId(), item.getSkuId(), item.getLotId());
-            }
-            if (resolvedLocationId == null) {
-                log.warn("Cannot resolve locationId for SKU={} lot={} — skipping deduction",
-                        item.getSkuId(), item.getLotId());
-                continue;
-            }
-
-            // 1 & 2) Decrease quantity + reserved_qty in inventory_snapshot
-            inventorySnapshotRepository.decrementQuantity(
-                    so.getWarehouseId(), item.getSkuId(), item.getLotId(), resolvedLocationId, qty);
-
-            inventorySnapshotRepository.decrementReservedByLocationSkuLot(
-                    resolvedLocationId, item.getSkuId(), item.getLotId(), qty);
-
-            // 3) Insert inventory_transaction with txn_type = DISPATCH (negative quantity)
-            InventoryTransactionEntity txn = InventoryTransactionEntity.builder()
-                    .warehouseId(so.getWarehouseId())
-                    .skuId(item.getSkuId())
-                    .lotId(item.getLotId())
-                    .locationId(resolvedLocationId)
-                    .quantity(qty.negate())  // negative = outbound movement
-                    .txnType("DISPATCH")
-                    .referenceTable("sales_orders")
-                    .referenceId(soId)
-                    .reasonCode("DISPATCH")
-                    .createdBy(userId)
-                    .build();
-            inventoryTransactionRepository.save(txn);
-
-            // 4) Close reservation cho đúng sku + lot + location
-            // [FIX-CORE] Filter thêm locationId để không đóng nhầm reservation của bin khác
-            // (trường hợp 1 SKU có stock ở nhiều bin, mỗi bin 1 reservation riêng).
-            List<ReservationEntity> openReservations = reservationRepository
-                    .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
-
-            final Long finalResolvedLocationId = resolvedLocationId;
-            openReservations.stream()
-                    .filter(r -> r.getSkuId().equals(item.getSkuId())
-                            && (item.getLotId() == null
-                            ? r.getLotId() == null
-                            : item.getLotId().equals(r.getLotId()))
-                            && (r.getLocationId() == null
-                            || r.getLocationId().equals(finalResolvedLocationId)))
-                    .forEach(r -> {
-                        r.setStatus("CLOSED");
-                        reservationRepository.save(r);
-                    });
-        }
+        // Tồn kho đã được trừ tại bước confirmPicked (PickListService).
+        // confirmDispatch chỉ còn nhiệm vụ: hoàn tất task + cập nhật SO → DISPATCHED.
 
         // 5) Complete all active picking tasks for this SO
         List<PickingTaskEntity> activeTasks = pickingTaskRepository.findByWarehouseIdAndSoId(
