@@ -345,9 +345,9 @@ public class IncidentService {
         }
         incidentRepo.save(incident);
 
-        // All actions (including WAIT_BACKORDER) now allow order to proceed
-        order.setStatus("SUBMITTED");
-        log.info("Discrepancy Incident {} resolved — order moved to SUBMITTED (receivingId={})",
+        // Keeper đã kiểm đếm rồi → chuyển thẳng PENDING_COUNT để QC kiểm chất lượng
+        order.setStatus("PENDING_COUNT");
+        log.info("Discrepancy Incident {} resolved — order moved to PENDING_COUNT (receivingId={})",
                 incident.getIncidentCode(), order.getReceivingId());
         receivingOrderRepo.save(order);
 
