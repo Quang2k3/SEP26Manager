@@ -62,7 +62,7 @@ public class IncidentController {
                     + "```\n\n"
                     + "**incidentType values:**\n"
                     + "- `SEAL_BROKEN`, `SEAL_MISMATCH`, `PACKAGING_DAMAGE` → dùng cho GATE\n"
-                    + "- `DAMAGE`, `SHORTAGE`, `OVERAGE`, `OTHER` → dùng cho QUALITY")
+                    + "- `DAMAGE`, `SHORTAGE`, `OVERAGE`, `UNEXPECTED_ITEM`, `OTHER` → dùng cho QUALITY")
     public ApiResponse<IncidentResponse> create(
             @Valid @RequestBody CreateIncidentRequest request,
             Authentication auth) {
@@ -180,7 +180,9 @@ public class IncidentController {
                     + "| `SHORTAGE` | `CLOSE_SHORT` | Chốt thiếu, chấp nhận số lượng đã nhận |\n"
                     + "| `SHORTAGE` | `WAIT_BACKORDER` | Chờ NCC giao bù phần thiếu |\n"
                     + "| `OVERAGE` | `ACCEPT` | Nhận hàng thừa, nhập kho tất cả |\n"
-                    + "| `OVERAGE` | `RETURN` | Trả hàng thừa cho NCC |\n\n"
+                    + "| `OVERAGE` | `RETURN` | Trả hàng thừa cho NCC |\n"
+                    + "| `UNEXPECTED_ITEM` | `ACCEPT` | Nhận hàng ngoài phiếu, nhập kho |\n"
+                    + "| `UNEXPECTED_ITEM` | `RETURN` | Trả hàng ngoài phiếu cho NCC |\n\n"
                     + "## Ví dụ đầy đủ\n\n"
                     + "**Bước 1**: `GET /v1/incidents/9` trả ra:\n"
                     + "```json\n"

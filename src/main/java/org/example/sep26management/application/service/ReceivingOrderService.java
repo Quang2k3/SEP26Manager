@@ -425,6 +425,7 @@ public class ReceivingOrderService {
                 // ── Mismatch detection: compare receivedQty vs expectedQty ──────────
                 List<ReceivingItemEntity> allItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
                 List<IncidentItemEntity> mismatchItems = new ArrayList<>();
+                List<IncidentItemEntity> unexpectedItems = new ArrayList<>();
                 org.example.sep26management.application.enums.IncidentType mismatchType = null;
 
                 for (ReceivingItemEntity item : allItems) {
@@ -434,45 +435,108 @@ public class ReceivingOrderService {
 
                         if (cmp != 0) {
                                 BigDecimal diff = received.subtract(expected).abs();
-                                org.example.sep26management.application.enums.IncidentType itemType =
-                                        cmp < 0
-                                                ? org.example.sep26management.application.enums.IncidentType.SHORTAGE
-                                                : org.example.sep26management.application.enums.IncidentType.OVERAGE;
-
-                                // Use the first mismatch type (or SHORTAGE if mixed)
-                                if (mismatchType == null) {
-                                        mismatchType = itemType;
-                                } else if (!mismatchType.equals(itemType)) {
-                                        mismatchType = org.example.sep26management.application.enums.IncidentType.SHORTAGE;
-                                }
-
                                 String skuCode = skuRepo.findById(item.getSkuId())
                                         .map(SkuEntity::getSkuCode).orElse("SKU-" + item.getSkuId());
-                                String note = cmp < 0
-                                        ? "Thiếu " + diff + " so với dự kiến (expected=" + expected + ", received=" + received + ")"
-                                        : "Thừa " + diff + " so với dự kiến (expected=" + expected + ", received=" + received + ")";
 
-                                IncidentItemEntity incItem = IncidentItemEntity.builder()
-                                        .skuId(item.getSkuId())
-                                        .expectedQty(expected)
-                                        .actualQty(received)
-                                        .damagedQty(diff)
-                                        .reasonCode(cmp < 0 ? "SHORTAGE" : "OVERAGE")
-                                        .note(note)
-                                        .actionPassQty(BigDecimal.ZERO)
-                                        .actionReturnQty(BigDecimal.ZERO)
-                                        .actionScrapQty(BigDecimal.ZERO)
-                                        .build();
-                                mismatchItems.add(incItem);
+                                // ── Phân biệt: UNEXPECTED_ITEM (ngoài phiếu) vs SHORTAGE/OVERAGE ──
+                                if (expected.compareTo(BigDecimal.ZERO) == 0 && received.compareTo(BigDecimal.ZERO) > 0) {
+                                        // Extra SKU không có trong phiếu nhận hàng (expectedQty=0)
+                                        IncidentItemEntity incItem = IncidentItemEntity.builder()
+                                                .skuId(item.getSkuId())
+                                                .expectedQty(BigDecimal.ZERO)
+                                                .actualQty(received)
+                                                .damagedQty(received)
+                                                .reasonCode("UNEXPECTED_ITEM")
+                                                .note("Hàng ngoài phiếu: " + skuCode + " — quét được " + received
+                                                        + " nhưng không có trong đơn nhận hàng")
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                        unexpectedItems.add(incItem);
 
-                                log.info("Mismatch detected: {} — {} {} (expected={}, received={})",
-                                        skuCode, itemType.name(), diff, expected, received);
+                                        log.info("Unexpected item detected: {} — qty={} (not on order)",
+                                                skuCode, received);
+                                } else {
+                                        // SHORTAGE hoặc OVERAGE thông thường
+                                        org.example.sep26management.application.enums.IncidentType itemType =
+                                                cmp < 0
+                                                        ? org.example.sep26management.application.enums.IncidentType.SHORTAGE
+                                                        : org.example.sep26management.application.enums.IncidentType.OVERAGE;
+
+                                        if (mismatchType == null) {
+                                                mismatchType = itemType;
+                                        } else if (!mismatchType.equals(itemType)) {
+                                                mismatchType = org.example.sep26management.application.enums.IncidentType.SHORTAGE;
+                                        }
+
+                                        String note = cmp < 0
+                                                ? "Thiếu " + diff + " so với dự kiến (expected=" + expected + ", received=" + received + ")"
+                                                : "Thừa " + diff + " so với dự kiến (expected=" + expected + ", received=" + received + ")";
+
+                                        IncidentItemEntity incItem = IncidentItemEntity.builder()
+                                                .skuId(item.getSkuId())
+                                                .expectedQty(expected)
+                                                .actualQty(received)
+                                                .damagedQty(diff)
+                                                .reasonCode(cmp < 0 ? "SHORTAGE" : "OVERAGE")
+                                                .note(note)
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                        mismatchItems.add(incItem);
+
+                                        log.info("Mismatch detected: {} — {} {} (expected={}, received={})",
+                                                skuCode, itemType.name(), diff, expected, received);
+                                }
                         }
                 }
 
-                if (!mismatchItems.isEmpty()) {
-                        // ── Create discrepancy incident → PENDING_INCIDENT (Manager duyệt) ──
+                boolean hasAnyIncident = !mismatchItems.isEmpty() || !unexpectedItems.isEmpty();
+                List<String> incidentCodes = new ArrayList<>();
+
+                // ── Tạo Incident cho hàng ngoài phiếu (UNEXPECTED_ITEM) ──
+                if (!unexpectedItems.isEmpty()) {
                         String incCode = "INC-" + System.currentTimeMillis() % 1_000_000;
+                        IncidentEntity incident = IncidentEntity.builder()
+                                .warehouseId(order.getWarehouseId())
+                                .incidentCode(incCode)
+                                .incidentType(org.example.sep26management.application.enums.IncidentType.UNEXPECTED_ITEM)
+                                .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
+                                .severity("HIGH")
+                                .occurredAt(LocalDateTime.now())
+                                .description("Phát hiện " + unexpectedItems.size()
+                                        + " SKU ngoài phiếu nhận hàng khi Keeper kiểm đếm.")
+                                .reportedBy(userId)
+                                .status("OPEN")
+                                .receivingId(id)
+                                .build();
+                        IncidentEntity savedIncident = incidentRepo.save(incident);
+
+                        for (IncidentItemEntity incItem : unexpectedItems) {
+                                incItem.setIncident(savedIncident);
+                                incidentItemRepo.save(incItem);
+                        }
+                        incidentCodes.add(incCode);
+
+                        auditLogService.logAction(
+                                userId,
+                                "RECEIVING_UNEXPECTED_ITEM_INCIDENT",
+                                "RECEIVING_ORDER",
+                                order.getReceivingId(),
+                                "Receiving Order " + order.getReceivingCode()
+                                        + " — phát hiện " + unexpectedItems.size()
+                                        + " SKU ngoài phiếu. Incident " + incCode + " gửi Manager.",
+                                null, null);
+
+                        log.info("Receiving Order {} — UNEXPECTED_ITEM Incident {} created, {} items.",
+                                order.getReceivingCode(), incCode, unexpectedItems.size());
+                }
+
+                // ── Tạo Incident cho chênh lệch số lượng (SHORTAGE/OVERAGE) ──
+                if (!mismatchItems.isEmpty()) {
+                        String incCode = "INC-" + (System.currentTimeMillis() + 1) % 1_000_000;
                         IncidentEntity incident = IncidentEntity.builder()
                                 .warehouseId(order.getWarehouseId())
                                 .incidentCode(incCode)
@@ -492,12 +556,8 @@ public class ReceivingOrderService {
                                 incItem.setIncident(savedIncident);
                                 incidentItemRepo.save(incItem);
                         }
+                        incidentCodes.add(incCode);
 
-                        order.setStatus("PENDING_INCIDENT");
-                        order.setUpdatedAt(LocalDateTime.now());
-                        receivingOrderRepo.save(order);
-
-                        // Audit log
                         auditLogService.logAction(
                                 userId,
                                 "RECEIVING_MISMATCH_INCIDENT",
@@ -508,13 +568,32 @@ public class ReceivingOrderService {
                                         + " SKU. Incident " + incCode + " gửi Manager.",
                                 null, null);
 
-                        log.info("Receiving Order {} → PENDING_INCIDENT (mismatch). Incident {} created, {} items.",
+                        log.info("Receiving Order {} — Mismatch Incident {} created, {} items.",
                                 order.getReceivingCode(), incCode, mismatchItems.size());
+                }
 
-                        // Return with hasMismatch flag
+                if (hasAnyIncident) {
+                        order.setStatus("PENDING_INCIDENT");
+                        order.setUpdatedAt(LocalDateTime.now());
+                        receivingOrderRepo.save(order);
+
+                        String allCodes = String.join(", ", incidentCodes);
+                        log.info("Receiving Order {} → PENDING_INCIDENT. Incidents: {}",
+                                order.getReceivingCode(), allCodes);
+
                         ReceivingOrderResponse resp = getOrder(id).getData();
-                        return ApiResponse.success(
-                                "Phát hiện chênh lệch số lượng — gửi Manager duyệt. Incident: " + incCode, resp);
+
+                        StringBuilder msg = new StringBuilder();
+                        if (!unexpectedItems.isEmpty()) {
+                                msg.append("Phát hiện ").append(unexpectedItems.size())
+                                        .append(" SKU ngoài phiếu nhận hàng. ");
+                        }
+                        if (!mismatchItems.isEmpty()) {
+                                msg.append("Phát hiện chênh lệch số lượng ")
+                                        .append(mismatchItems.size()).append(" SKU. ");
+                        }
+                        msg.append("Gửi Manager duyệt. Incident: ").append(allCodes);
+                        return ApiResponse.success(msg.toString(), resp);
                 }
 
                 // ── No mismatch → normal flow: PENDING_COUNT ──

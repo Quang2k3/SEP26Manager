@@ -4,6 +4,7 @@ public enum IncidentType {
     DAMAGE,
     SHORTAGE,
     OVERAGE,
+    UNEXPECTED_ITEM,
     SEAL_BROKEN,
     SEAL_MISMATCH,
     PACKAGING_DAMAGE,
