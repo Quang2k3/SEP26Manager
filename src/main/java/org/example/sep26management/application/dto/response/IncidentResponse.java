@@ -28,23 +28,31 @@ public class IncidentResponse {
     private IncidentCategory category;
     @Schema(description = "Độ Nghiêm Trọng (HIGH/MEDIUM/LOW)", example = "HIGH")
     private String severity;
-    @Schema(description = "Thời gian xảy ra/báo cáo", example = "2026-03-08T10:00:00")
+    @Schema(description = "Thời gian xảy ra/báo cáo")
     private LocalDateTime occurredAt;
-    @Schema(description = "Mô tả sự cố chi tiết", example = "Kẹp chì dứt dời")
+    @Schema(description = "Mô tả sự cố chi tiết")
     private String description;
     @Schema(description = "User ID người báo cáo", example = "2")
     private Long reportedBy;
-    @Schema(description = "Tên người báo cáo", example = "Nguyễn Văn Keeper")
+    @Schema(description = "Tên người báo cáo")
     private String reportedByName;
-    @Schema(description = "ID hình ảnh đính kèm", example = "1001")
+    @Schema(description = "ID hình ảnh đính kèm")
     private Long attachmentId;
-    @Schema(description = "Trạng thái (OPEN, APPROVED, REJECTED, RESOLVED)", example = "OPEN")
+    @Schema(description = "Trạng thái (OPEN, APPROVED, REJECTED, RESOLVED)")
     private String status;
-    @Schema(description = "ID phiếu nhập kho liên đới", example = "15")
+    @Schema(description = "ID phiếu nhập kho liên đới (inbound incidents)")
     private Long receivingId;
-    @Schema(description = "Mã phiếu nhập kho (GRN) liên đới", example = "GRN-2001")
+    @Schema(description = "Mã phiếu nhập kho (GRN) liên đới")
     private String receivingCode;
-    @Schema(description = "Ngày tạo phiếu", example = "2026-03-08T10:00:00")
+
+    /**
+     * [V20] ID Sales Order liên đới (outbound incidents — DAMAGE / SHORTAGE).
+     * Dùng để FE biết đây là incident outbound và hiển thị đúng actions.
+     */
+    @Schema(description = "ID Sales Order liên đới (outbound)", example = "42")
+    private Long soId;
+
+    @Schema(description = "Ngày tạo phiếu")
     private LocalDateTime createdAt;
 
     @Schema(description = "Danh sách sản phẩm bị lỗi trong sự cố này")

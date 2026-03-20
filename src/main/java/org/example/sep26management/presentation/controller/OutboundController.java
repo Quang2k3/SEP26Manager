@@ -20,7 +20,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.example.sep26management.application.service.ReceivingSessionService;
-
+import org.example.sep26management.application.dto.request.ResolveOutboundDamageRequest;
+import org.example.sep26management.application.dto.request.ResolveOutboundShortageRequest;
+import org.example.sep26management.application.dto.response.IncidentResponse;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -472,6 +474,42 @@ public class OutboundController {
             @PathVariable Long soId,
             @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
         return ResponseEntity.ok(pickSignedNoteService.uploadPickSignedNote(soId, photo));
+    }
+
+    // ─── THÊM VÀO OutboundController.java — sau endpoint finalize-qc ─────────────
+// Dán 2 endpoint này vào sau dòng:
+//   public ResponseEntity<ApiResponse<QcSummaryResponse>> finalizeQc(...)
+
+    // ─── [V20] Resolve DAMAGE Incident (Manager) ──────────────────────────────
+    @PostMapping("/incidents/{incidentId}/resolve-damage")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(
+            summary = "Manager xử lý hàng hỏng QC (DAMAGE)",
+            description = "Sau khi QC FAIL tạo Incident DAMAGE:\n\n"
+                    + "- `RETURN_SCRAP`: trừ tồn hàng hỏng → SO → PICKING để Keeper re-pick\n"
+                    + "- `ACCEPT`: chấp nhận xuất luôn hàng lỗi → SO → QC_SCAN → DISPATCHED"
+    )
+    public ResponseEntity<ApiResponse<IncidentResponse>> resolveOutboundDamage(
+            @PathVariable Long incidentId,
+            @Valid @RequestBody ResolveOutboundDamageRequest request) {
+        return ResponseEntity.ok(
+                outboundQcService.resolveOutboundDamage(incidentId, request, getUserId()));
+    }
+
+    // ─── [V20] Resolve SHORTAGE Incident (Manager) ────────────────────────────
+    @PostMapping("/incidents/{incidentId}/resolve-shortage")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(
+            summary = "Manager xử lý thiếu hàng (SHORTAGE)",
+            description = "Sau khi Keeper báo thiếu hàng:\n\n"
+                    + "- `WAIT_BACKORDER`: SO → WAITING_STOCK, chờ nhập bù rồi Keeper tự re-Allocate\n"
+                    + "- `CLOSE_SHORT`: cắt orderedQty về available → SO → APPROVED → re-Allocate ngay"
+    )
+    public ResponseEntity<ApiResponse<IncidentResponse>> resolveOutboundShortage(
+            @PathVariable Long incidentId,
+            @Valid @RequestBody ResolveOutboundShortageRequest request) {
+        return ResponseEntity.ok(
+                outboundQcService.resolveOutboundShortage(incidentId, request, getUserId()));
     }
 
     // ─────────────────────────────────────────────────────────────

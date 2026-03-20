@@ -23,4 +23,13 @@ public class QcScanRequest {
 
     @Schema(description = "Lý do (bắt buộc nếu FAIL)", example = "Sản phẩm bị trầy xước")
     private String reason;
+
+    /**
+     * URL ảnh chụp hàng hỏng khi result = FAIL.
+     * FE upload ảnh lên /v1/attachments (multipart) → nhận URL → truyền vào đây.
+     * Tùy chọn nhưng khuyến nghị khi FAIL để làm bằng chứng cho Incident.
+     */
+    @Schema(description = "URL ảnh hàng hỏng (optional, khuyến nghị khi FAIL)",
+            example = "https://res.cloudinary.com/.../damage_photo.jpg")
+    private String attachmentUrl;
 }
