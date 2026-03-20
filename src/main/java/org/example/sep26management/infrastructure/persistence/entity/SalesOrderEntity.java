@@ -69,6 +69,13 @@ public class SalesOrderEntity {
     @Column(name = "signed_note_uploaded_at")
     private java.time.LocalDateTime signedNoteUploadedAt;
 
+    /** Ảnh phiếu lấy hàng đã ký của nhân viên kho (upload sau khi confirmPicked) */
+    @Column(name = "pick_signed_note_url", columnDefinition = "TEXT")
+    private String pickSignedNoteUrl;
+
+    @Column(name = "pick_signed_note_uploaded_at")
+    private java.time.LocalDateTime pickSignedNoteUploadedAt;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
