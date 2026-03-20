@@ -34,7 +34,7 @@ public class IncidentEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "category", nullable = false, length = 50)
     @Builder.Default
-    private IncidentCategory category = IncidentCategory.QUALITY; // Default to QUALITY for safety
+    private IncidentCategory category = IncidentCategory.QUALITY;
 
     @Column(name = "severity", nullable = false, length = 50)
     @Builder.Default
@@ -62,9 +62,24 @@ public class IncidentEntity {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    /** FK to receiving_orders — links this incident to a specific GRN */
+    /** FK to receiving_orders — links inbound Gate Check incidents */
     @Column(name = "receiving_id")
     private Long receivingId;
+
+    /**
+     * FK to sales_orders — links outbound QC/Shortage incidents.
+     * BR-QC-04 / BR-DISPATCH-03: dùng để countOpenIncidentsBySoId
+     * thay vì reuse receivingId làm surrogate.
+     */
+    @Column(name = "so_id")
+    private Long soId;
+
+    /**
+     * FK to picking_task_items — xác định chính xác item nào bị FAIL QC.
+     * Cho phép Manager biết SKU/LOT/Location cụ thể cần xử lý.
+     */
+    @Column(name = "picking_task_item_id")
+    private Long pickingTaskItemId;
 
     @PrePersist
     protected void onCreate() {

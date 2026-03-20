@@ -359,7 +359,7 @@ public class IncidentService {
 
     // ─── Helper: convert to response ────────────────────────────────────────
 
-    private IncidentResponse toResponse(IncidentEntity e) {
+    public IncidentResponse toResponse(IncidentEntity e) {
         String reportedByName = null;
         if (e.getReportedBy() != null) {
             reportedByName = userRepo.findById(e.getReportedBy())
@@ -403,6 +403,7 @@ public class IncidentService {
                 .status(e.getStatus())
                 .receivingId(e.getReceivingId())
                 .receivingCode(receivingCode)
+                .soId(e.getSoId())             
                 .createdAt(e.getCreatedAt())
                 .items(itemResponses)
                 .build();
