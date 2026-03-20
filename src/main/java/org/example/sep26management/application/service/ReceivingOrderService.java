@@ -817,14 +817,11 @@ public class ReceivingOrderService {
                                         String reasonCode = cmp < 0 ? "SHORTAGE" : "OVERAGE";
                                         String typeVi = cmp < 0 ? "Thiếu" : "Thừa";
 
-                                        // FE expects: expectedQty=SL giấy tờ, actualQty=SL thực tế, damagedQty=hàng
-                                        // hỏng (failQty)
                                         IncidentItemEntity discItem = IncidentItemEntity.builder()
                                                         .skuId(skuId)
-                                                        .expectedQty(expectedQty) // SL giấy tờ
-                                                        .actualQty(totalScanned) // SL thực tế (QC quét tổng)
-                                                        .damagedQty(failQty) // Hàng hỏng (chỉ FAIL qty, không phải
-                                                                             // diff)
+                                                        .expectedQty(expectedQty)
+                                                        .actualQty(totalScanned)
+                                                        .damagedQty(failQty)
                                                         .reasonCode(reasonCode)
                                                         .note("[QC] " + typeVi + " " + diff + " " + skuCode
                                                                         + " (expected=" + expectedQty + ", QC scanned="
@@ -837,6 +834,27 @@ public class ReceivingOrderService {
                                         log.info("QC scan — {} detected: {} diff={} (expected={}, scanned={})",
                                                         reasonCode, skuCode, diff, expectedQty, totalScanned);
                                 }
+                        } else if (expectedQty.compareTo(BigDecimal.ZERO) == 0
+                                        && totalScanned.compareTo(BigDecimal.ZERO) > 0) {
+                                // ── (B2) Hàng ngoài phiếu đã có trong DB (thêm bởi Keeper session sync) ──
+                                // expectedQty=0 + QC cũng quét → unexpected item cần tạo incident
+                                hasUnexpectedItems = true;
+                                unexpectedCount++;
+                                IncidentItemEntity unexpItem = IncidentItemEntity.builder()
+                                                .skuId(skuId)
+                                                .expectedQty(BigDecimal.ZERO)
+                                                .actualQty(totalScanned)
+                                                .damagedQty(failQty)
+                                                .reasonCode("UNEXPECTED_ITEM")
+                                                .note("[QC] Hàng ngoài phiếu: " + skuCode
+                                                                + " — QC quét được " + totalScanned)
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                allIncidentItems.add(unexpItem);
+                                log.info("QC scan — UNEXPECTED_ITEM (in DB): {} qty={} (expectedQty=0)",
+                                                skuCode, totalScanned);
                         }
                 }
 
