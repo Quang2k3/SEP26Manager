@@ -33,6 +33,12 @@ public class ReservationEntity {
     @Column(name = "lot_id")
     private Long lotId;
 
+    // [FIX-CORE] Lưu location_id cụ thể nơi hàng được khoá khi allocate.
+    // Thiếu field này là nguyên nhân gốc rễ: Pick List resolve sai bin
+    // → dispatch trừ tồn sai vị trí.
+    @Column(name = "location_id")
+    private Long locationId;
+
     @Column(name = "quantity", nullable = false, precision = 12, scale = 2)
     private BigDecimal quantity;
 

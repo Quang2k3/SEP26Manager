@@ -22,4 +22,8 @@ public interface ReservationJpaRepository extends JpaRepository<ReservationEntit
     BigDecimal sumReservedBySkuAndWarehouse(
             @Param("warehouseId") Long warehouseId,
             @Param("skuId") Long skuId);
+
+    // [FIX-BUG-2] Dùng cho idempotency guard trong AllocateStockService
+    java.util.List<ReservationEntity> findByReferenceTableAndReferenceIdAndStatus(
+            String referenceTable, Long referenceId, String status);
 }
