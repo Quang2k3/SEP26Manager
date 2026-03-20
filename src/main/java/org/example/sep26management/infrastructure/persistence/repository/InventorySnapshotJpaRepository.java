@@ -193,6 +193,25 @@ public interface InventorySnapshotJpaRepository
                 @Param("locationId") Long locationId,
                 @Param("qty") BigDecimal qty);
 
+        // [FIX] Tìm locationId thực từ snapshot — dùng khi fromLocationId trong picking item sai/null
+        @Query(value = """
+            SELECT s.location_id
+            FROM inventory_snapshot s
+            JOIN locations l ON l.location_id = s.location_id
+            WHERE s.warehouse_id = :warehouseId
+              AND s.sku_id       = :skuId
+              AND (CASE WHEN :lotId IS NULL THEN s.lot_id IS NULL ELSE s.lot_id = :lotId END)
+              AND s.quantity > 0
+              AND l.active = true
+              AND l.is_staging = false
+            ORDER BY (s.quantity - COALESCE(s.reserved_qty, 0)) DESC
+            LIMIT 1
+            """, nativeQuery = true)
+        Long findLocationIdByWarehouseSkuLot(
+                @Param("warehouseId") Long warehouseId,
+                @Param("skuId") Long skuId,
+                @Param("lotId") Long lotId);
+
         @Modifying
         @Transactional
         @Query(value = """
