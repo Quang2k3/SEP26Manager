@@ -574,6 +574,9 @@ public class OutboundService {
                 .signedNoteUrl(so.getSignedNoteUrl())
                 .signedNoteUploadedAt(so.getSignedNoteUploadedAt() != null
                         ? so.getSignedNoteUploadedAt().toString() : null)
+                .pickSignedNoteUrl(so.getPickSignedNoteUrl())
+                .pickSignedNoteUploadedAt(so.getPickSignedNoteUploadedAt() != null
+                        ? so.getPickSignedNoteUploadedAt().toString() : null)
                 .build();
     }
 

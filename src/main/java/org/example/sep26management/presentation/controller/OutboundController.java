@@ -62,6 +62,7 @@ public class OutboundController {
     private final ReceivingSessionService receivingSessionService;
     private final DispatchPdfService dispatchPdfService;
     private final SignedNoteService signedNoteService;
+    private final PickSignedNoteService pickSignedNoteService;
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
     // createOutbound(request, createdBy, ip, ua) — warehouseId injected vào request
@@ -456,6 +457,21 @@ public class OutboundController {
     @Operation(summary = "Xem ảnh phiếu xuất kho đã ký")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getSignedNote(@PathVariable Long soId) {
         return ResponseEntity.ok(signedNoteService.getSignedNote(soId));
+    }
+
+    /**
+     * POST /v1/outbound/sales-orders/{soId}/pick-signed-note
+     * Nhân viên scan QR → chụp ảnh phiếu lấy hàng đã ký → upload.
+     * Không cần JWT — dùng QR token ngắn hạn.
+     */
+    @PostMapping(value = "/sales-orders/{soId}/pick-signed-note",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload ảnh phiếu lấy hàng đã ký (nhân viên kho)",
+            description = "Nhân viên scan QR từ màn hình picking → chụp ảnh phiếu → POST lên đây.")
+    public ResponseEntity<ApiResponse<Map<String, String>>> uploadPickSignedNote(
+            @PathVariable Long soId,
+            @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
+        return ResponseEntity.ok(pickSignedNoteService.uploadPickSignedNote(soId, photo));
     }
 
     // ─────────────────────────────────────────────────────────────

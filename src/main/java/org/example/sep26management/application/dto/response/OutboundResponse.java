@@ -85,6 +85,9 @@ public class OutboundResponse {
     private String dispatchPdfUrl;
     private String signedNoteUrl;
     private String signedNoteUploadedAt;
+    /** Ảnh phiếu lấy hàng đã ký (nhân viên kho) */
+    private String pickSignedNoteUrl;
+    private String pickSignedNoteUploadedAt;
 
     @Getter
     @Setter
