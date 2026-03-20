@@ -429,7 +429,7 @@ public class IncidentService {
                 .status(e.getStatus())
                 .receivingId(e.getReceivingId())
                 .receivingCode(receivingCode)
-                .soId(e.getSoId())             
+                .soId(e.getSoId())
                 .createdAt(e.getCreatedAt())
                 .items(itemResponses)
                 .build();
