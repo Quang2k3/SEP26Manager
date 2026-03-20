@@ -19,7 +19,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,11 +32,8 @@ public class OutboundService {
     private final CustomerJpaRepository customerRepository;
     private final WarehouseJpaRepository warehouseRepository;
     private final InventorySnapshotJpaRepository snapshotRepository;
-    private final ReservationJpaRepository reservationRepository;
-    private final InventoryTransactionJpaRepository txnRepository;
     private final SkuJpaRepository skuRepository;
     private final AuditLogService auditLogService;
-    private final LocationJpaRepository locationRepository;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
@@ -74,7 +70,6 @@ public class OutboundService {
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
         }
 
-        // checkStockAvailability chỉ tạo WARNING, không block
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 req.getWarehouseId(), req.getItems());
 
@@ -158,8 +153,6 @@ public class OutboundService {
             UpdateOutboundRequest request,
             Long userId, String ip, String ua) {
 
-        log.info("Updating outbound: type={}, id={}", type, documentId);
-
         if (type == OutboundType.SALES_ORDER) {
             return updateSalesOrder(documentId, request, userId, ip, ua);
         } else {
@@ -174,15 +167,12 @@ public class OutboundService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
 
-        if (!"DRAFT".equals(so.getStatus())) {
+        if (!"DRAFT".equals(so.getStatus()))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_EDITABLE);
-        }
-        if (!so.getCreatedBy().equals(userId)) {
+        if (!so.getCreatedBy().equals(userId))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
-        }
-        if (req.getDeliveryDate() != null && req.getDeliveryDate().isBefore(LocalDate.now())) {
+        if (req.getDeliveryDate() != null && req.getDeliveryDate().isBefore(LocalDate.now()))
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
-        }
 
         if (req.getCustomerCode() != null) {
             CustomerEntity newCustomer = customerRepository.findByCustomerCode(req.getCustomerCode())
@@ -223,15 +213,12 @@ public class OutboundService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.OUTBOUND_NOT_FOUND, transferId)));
 
-        if (!"DRAFT".equals(transfer.getStatus())) {
+        if (!"DRAFT".equals(transfer.getStatus()))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_EDITABLE);
-        }
-        if (!transfer.getCreatedBy().equals(userId)) {
+        if (!transfer.getCreatedBy().equals(userId))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
-        }
-        if (req.getTransferDate() != null && req.getTransferDate().isBefore(LocalDate.now())) {
+        if (req.getTransferDate() != null && req.getTransferDate().isBefore(LocalDate.now()))
             throw new BusinessException(MessageConstants.OUTBOUND_DATE_MUST_BE_FUTURE);
-        }
 
         if (req.getDestinationWarehouseCode() != null) {
             WarehouseEntity destWarehouse = warehouseRepository.findByWarehouseCode(req.getDestinationWarehouseCode())
@@ -265,8 +252,12 @@ public class OutboundService {
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-507: Submit
-    // Chỉ chuyển DRAFT → PENDING_APPROVAL. KHÔNG check tồn.
-    // Check tồn xảy ra tại bước Allocate (AllocateStockService).
+    //
+    // Sales Order:   DRAFT → PENDING_APPROVAL  (chờ Manager duyệt)
+    // Int. Transfer: DRAFT → APPROVED          (tự động duyệt, không cần Manager)
+    //
+    // Cả hai loại KHÔNG reserve tồn tại đây.
+    // Tồn kho sẽ được khoá (FEFO) tại bước AllocateStock.
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
@@ -274,8 +265,6 @@ public class OutboundService {
             OutboundType type, Long documentId,
             SubmitOutboundRequest request,
             Long userId, String ip, String ua) {
-
-        log.info("Submitting outbound: type={}, id={}", type, documentId);
 
         if (type == OutboundType.SALES_ORDER) {
             return submitSalesOrder(documentId, request, userId, ip, ua);
@@ -291,15 +280,12 @@ public class OutboundService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
 
-        if (!"DRAFT".equals(so.getStatus())) {
+        if (!"DRAFT".equals(so.getStatus()))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_DRAFT);
-        }
-        if (!so.getCreatedBy().equals(userId)) {
+        if (!so.getCreatedBy().equals(userId))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
-        }
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
-
         if (req.getNote() != null) so.setNote(req.getNote());
         so.setStatus("PENDING_APPROVAL");
         soRepository.save(so);
@@ -319,29 +305,20 @@ public class OutboundService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.OUTBOUND_NOT_FOUND, transferId)));
 
-        if (!"DRAFT".equals(transfer.getStatus())) {
+        if (!"DRAFT".equals(transfer.getStatus()))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_DRAFT);
-        }
-        if (!transfer.getCreatedBy().equals(userId)) {
+        if (!transfer.getCreatedBy().equals(userId))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
-        }
 
         List<TransferItemEntity> items = transferItemRepository.findByTransferId(transferId);
-
         if (req.getNote() != null) transfer.setNote(req.getNote());
 
-        // Internal transfer tự động duyệt, không cần Manager
+        // Internal Transfer tự động duyệt, không cần Manager.
+        // KHÔNG reserve tồn ở đây — Keeper sẽ gọi AllocateStock (FEFO) ở bước tiếp theo.
         transfer.setStatus("APPROVED");
         transfer.setApprovedAt(LocalDateTime.now());
         transfer.setApprovedBy(0L);
         transferRepository.save(transfer);
-
-        // [FIX-BUG-4 + FIX-CORE] reserveInventory cho Internal Transfer:
-        // Dùng stagingLocationId và lưu locationId vào reservation để PickList sau này
-        // có thể resolve đúng BIN → dispatch trừ đúng tồn.
-        reserveInventoryForTransfer(transfer.getFromWarehouseId(), items.stream()
-                .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getQuantity()))
-                .toList(), "transfers", transferId, userId);
 
         auditLogService.logAction(userId, "OUTBOUND_AUTO_APPROVED", "TRANSFER", transferId,
                 "Internal transfer " + transfer.getTransferCode() + " auto-approved", ip, ua);
@@ -352,54 +329,44 @@ public class OutboundService {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-508: Approve (MANAGER)
-    // Manager chỉ duyệt về mặt nghiệp vụ — KHÔNG block khi thiếu tồn.
-    // Tồn kho sẽ được kiểm tra và khoá tại bước Allocate (AllocateStockService).
+    // SCRUM-508: Approve (MANAGER) — Sales Order only
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public ApiResponse<OutboundResponse> approveSalesOrder(
-            Long soId,
-            ApproveOutboundRequest request,
+            Long soId, ApproveOutboundRequest request,
             Long managerId, String ip, String ua) {
-
-        log.info("Approving sales order: soId={}, managerId={}", soId, managerId);
 
         SalesOrderEntity so = soRepository.findById(soId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
 
-        if (!"PENDING_APPROVAL".equals(so.getStatus())) {
+        if (!"PENDING_APPROVAL".equals(so.getStatus()))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_PENDING_APPROVAL);
-        }
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
 
-        // Chỉ build stock snapshot để hiển thị thông tin cho Manager — KHÔNG block
+        // Build stock snapshot để hiển thị cho Manager — KHÔNG block nếu thiếu
         List<OutboundResponse.StockWarning> stockSnapshot = buildStockSnapshot(
                 so.getWarehouseId(), items.stream()
                         .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
                         .toList());
 
-        // Log cảnh báo nếu tồn thấp, nhưng KHÔNG throw exception
         for (SalesOrderItemEntity item : items) {
             BigDecimal available = getAvailableQty(so.getWarehouseId(), item.getSkuId());
             if (available.compareTo(item.getOrderedQty()) < 0) {
                 String skuCode = skuRepository.findById(item.getSkuId())
                         .map(s -> s.getSkuCode()).orElse("SKU#" + item.getSkuId());
-                log.warn("Low stock warning on approve: SO={}, SKU={}, available={}, requested={}",
+                log.warn("Low stock on approve: SO={}, SKU={}, available={}, requested={}",
                         so.getSoCode(), skuCode, available, item.getOrderedQty());
             }
         }
 
-        // Không reserve inventory tại đây — sẽ được reserve tại bước Allocate
         so.setStatus("APPROVED");
         so.setApprovedBy(managerId);
         so.setApprovedAt(LocalDateTime.now());
         if (request != null && request.getNote() != null) so.setNote(request.getNote());
         soRepository.save(so);
-
-        log.info("Sales order {} approved by managerId={}", so.getSoCode(), managerId);
 
         auditLogService.logAction(managerId, "OUTBOUND_APPROVED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " approved", ip, ua);
@@ -410,27 +377,22 @@ public class OutboundService {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // SCRUM-508 (Reject): Reject Sales Order (MANAGER)
+    // SCRUM-508 (Reject)
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public ApiResponse<OutboundResponse> rejectOutbound(
-            Long soId,
-            String rejectionReason,
+            Long soId, String rejectionReason,
             Long managerId, String ip, String ua) {
-
-        log.info("Rejecting sales order: soId={}, managerId={}", soId, managerId);
 
         SalesOrderEntity so = soRepository.findById(soId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
 
-        if (!"PENDING_APPROVAL".equals(so.getStatus())) {
+        if (!"PENDING_APPROVAL".equals(so.getStatus()))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_PENDING_APPROVAL);
-        }
-        if (rejectionReason == null || rejectionReason.trim().length() < 20) {
+        if (rejectionReason == null || rejectionReason.trim().length() < 20)
             throw new BusinessException(MessageConstants.OUTBOUND_REJECTION_REASON_REQUIRED);
-        }
 
         so.setStatus("REJECTED");
         so.setNote((so.getNote() != null ? so.getNote() + " | " : "") + "Rejected: " + rejectionReason);
@@ -448,7 +410,68 @@ public class OutboundService {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Helpers
+    // DELETE
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<Void> deleteSalesOrder(Long soId, Long userId, String ip, String ua) {
+        SalesOrderEntity so = soRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
+        if (!"DRAFT".equals(so.getStatus()))
+            throw new BusinessException("Chỉ có thể xóa lệnh xuất đang ở trạng thái DRAFT. Hiện: " + so.getStatus());
+        if (!so.getCreatedBy().equals(userId))
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+
+        soItemRepository.deleteBySoId(soId);
+        soRepository.delete(so);
+        auditLogService.logAction(userId, "OUTBOUND_DELETED", "SALES_ORDER", soId,
+                "Sales order " + so.getSoCode() + " deleted", ip, ua);
+        return ApiResponse.success("Đã xóa lệnh xuất kho thành công", null);
+    }
+
+    @Transactional
+    public ApiResponse<Void> deleteTransfer(Long transferId, Long userId, String ip, String ua) {
+        TransferEntity transfer = transferRepository.findById(transferId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, transferId)));
+        if (!"DRAFT".equals(transfer.getStatus()))
+            throw new BusinessException("Chỉ có thể xóa lệnh chuyển kho đang ở trạng thái DRAFT. Hiện: " + transfer.getStatus());
+        if (!transfer.getCreatedBy().equals(userId))
+            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+
+        transferItemRepository.deleteByTransferId(transferId);
+        transferRepository.delete(transfer);
+        auditLogService.logAction(userId, "OUTBOUND_DELETED", "TRANSFER", transferId,
+                "Transfer " + transfer.getTransferCode() + " deleted", ip, ua);
+        return ApiResponse.success("Đã xóa lệnh chuyển kho thành công", null);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Detail
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public ApiResponse<OutboundResponse> getOutboundDetail(Long documentId, String orderType) {
+        if ("INTERNAL_TRANSFER".equals(orderType)) {
+            TransferEntity transfer = transferRepository.findById(documentId)
+                    .orElseThrow(() -> new RuntimeException("Transfer not found: " + documentId));
+            List<TransferItemEntity> items = transferItemRepository.findByTransferId(documentId);
+            WarehouseEntity dest = transfer.getToWarehouseId() != null
+                    ? warehouseRepository.findById(transfer.getToWarehouseId()).orElse(null) : null;
+            return ApiResponse.success("OK", buildTransferResponse(transfer, items, dest, null));
+        } else {
+            SalesOrderEntity so = soRepository.findById(documentId)
+                    .orElseThrow(() -> new RuntimeException("Sales order not found: " + documentId));
+            List<SalesOrderItemEntity> items = soItemRepository.findBySoId(documentId);
+            CustomerEntity customer = so.getCustomerId() != null
+                    ? customerRepository.findById(so.getCustomerId()).orElse(null) : null;
+            return ApiResponse.success("OK", buildSalesOrderResponse(so, items, customer, null));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Private helpers
     // ─────────────────────────────────────────────────────────────
 
     private String generateDocCode(String prefix, Long warehouseId, boolean isSales) {
@@ -473,7 +496,7 @@ public class OutboundService {
         }
     }
 
-    // Chỉ tạo WARNING, không block — dùng khi Create/Update để hiển thị cảnh báo cho user
+    /** Cảnh báo tồn thấp khi Create/Update — không block. */
     private List<OutboundResponse.StockWarning> checkStockAvailability(
             Long warehouseId, List<CreateOutboundRequest.OutboundItemRequest> items) {
 
@@ -496,152 +519,43 @@ public class OutboundService {
 
     private List<OutboundResponse.StockWarning> buildStockSnapshot(
             Long warehouseId, List<AbstractMap.SimpleEntry<Long, BigDecimal>> items) {
-
         return items.stream().map(entry -> {
-            Long skuId = entry.getKey();
-            BigDecimal requestedQty = entry.getValue();
-            BigDecimal available = getAvailableQty(warehouseId, skuId);
-            String skuCode = skuRepository.findById(skuId)
-                    .map(s -> s.getSkuCode()).orElse("SKU#" + skuId);
+            BigDecimal available = getAvailableQty(warehouseId, entry.getKey());
+            String skuCode = skuRepository.findById(entry.getKey())
+                    .map(s -> s.getSkuCode()).orElse("SKU#" + entry.getKey());
             return OutboundResponse.StockWarning.builder()
-                    .skuId(skuId).skuCode(skuCode)
-                    .requestedQty(requestedQty).availableQty(available)
-                    .message(available.compareTo(requestedQty) < 0
+                    .skuId(entry.getKey()).skuCode(skuCode)
+                    .requestedQty(entry.getValue()).availableQty(available)
+                    .message(available.compareTo(entry.getValue()) < 0
                             ? String.format(MessageConstants.OUTBOUND_INSUFFICIENT_STOCK_WARNING,
-                            skuCode, available, requestedQty)
-                            : null)
+                            skuCode, available, entry.getValue()) : null)
                     .build();
         }).toList();
     }
 
     private BigDecimal getAvailableQty(Long warehouseId, Long skuId) {
-        BigDecimal total = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, skuId);
+        BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, skuId);
         BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, skuId);
-        if (total == null) total = BigDecimal.ZERO;
+        if (total    == null) total    = BigDecimal.ZERO;
         if (reserved == null) reserved = BigDecimal.ZERO;
         return total.subtract(reserved).max(BigDecimal.ZERO);
     }
-
-    /**
-     * [FIX-CORE] Reserve tồn kho cho Internal Transfer (submitTransfer auto-approve).
-     *
-     * Điểm khác biệt so với reserveInventory cũ:
-     *   1. Lưu locationId (stagingLocationId) vào ReservationEntity.
-     *      → PickListService.generatePickList() đọc res.getLocationId() → không còn NULL
-     *      → không cần fallback resolveLocationForReservation() → không chọn sai BIN.
-     *   2. Dùng incrementReservedByLocationAndSku (không phải ByWarehouseAndSku)
-     *      → chỉ tăng reserved_qty đúng 1 row (location+sku), không tăng nhầm tất cả BIN.
-     */
-    private void reserveInventoryForTransfer(Long warehouseId,
-                                             List<AbstractMap.SimpleEntry<Long, BigDecimal>> items,
-                                             String refTable, Long refId, Long userId) {
-
-        Long stagingLocationId = getFirstStagingOrAnyLocationId(warehouseId);
-
-        for (var entry : items) {
-            Long skuId = entry.getKey();
-            BigDecimal qty = entry.getValue();
-
-            // [FIX-CORE] Lưu locationId vào reservation — đây là fix then chốt.
-            // Trước đây locationId không được set → NULL trong DB → PickList sai BIN.
-            ReservationEntity reservation = ReservationEntity.builder()
-                    .warehouseId(warehouseId)
-                    .skuId(skuId)
-                    .locationId(stagingLocationId)   // ← FIX: thêm locationId
-                    .quantity(qty)
-                    .referenceTable(refTable)
-                    .referenceId(refId)
-                    .status("OPEN")
-                    .build();
-            reservationRepository.save(reservation);
-
-            InventoryTransactionEntity txn = InventoryTransactionEntity.builder()
-                    .warehouseId(warehouseId)
-                    .skuId(skuId)
-                    .locationId(stagingLocationId)
-                    .quantity(qty.negate())
-                    .txnType("RESERVE")
-                    .referenceTable(refTable)
-                    .referenceId(refId)
-                    .createdBy(userId)
-                    .build();
-            txnRepository.save(txn);
-
-            // [FIX-BUG-4] incrementReservedByLocationAndSku: chỉ update đúng 1 row (location+sku),
-            // không update TẤT CẢ rows của warehouse+sku như incrementReservedByWarehouseAndSku cũ.
-            snapshotRepository.incrementReservedByLocationAndSku(stagingLocationId, skuId, null, qty);
-        }
-    }
-
-    private Long getFirstStagingOrAnyLocationId(Long warehouseId) {
-        return locationRepository.findFirstStagingByWarehouse(warehouseId)
-                .map(loc -> loc.getLocationId())
-                .orElseGet(() ->
-                        locationRepository.findFirstByWarehouseId(warehouseId)
-                                .map(loc -> loc.getLocationId())
-                                .orElseThrow(() -> new BusinessException(
-                                        "No location found for warehouse " + warehouseId))
-                );
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // DELETE: Xóa lệnh xuất kho (chỉ DRAFT)
-    // ─────────────────────────────────────────────────────────────
-
-    @Transactional
-    public ApiResponse<Void> deleteSalesOrder(Long soId, Long userId, String ip, String ua) {
-        SalesOrderEntity so = soRepository.findById(soId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, soId)));
-        if (!"DRAFT".equals(so.getStatus())) {
-            throw new BusinessException("Chỉ có thể xóa lệnh xuất đang ở trạng thái DRAFT. Trạng thái hiện tại: " + so.getStatus());
-        }
-        if (!so.getCreatedBy().equals(userId)) {
-            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
-        }
-        soItemRepository.deleteBySoId(soId);
-        soRepository.delete(so);
-        auditLogService.logAction(userId, "OUTBOUND_DELETED", "SALES_ORDER", soId,
-                "Sales order " + so.getSoCode() + " deleted", ip, ua);
-        return ApiResponse.success("Đã xóa lệnh xuất kho thành công", null);
-    }
-
-    @Transactional
-    public ApiResponse<Void> deleteTransfer(Long transferId, Long userId, String ip, String ua) {
-        TransferEntity transfer = transferRepository.findById(transferId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.OUTBOUND_NOT_FOUND, transferId)));
-        if (!"DRAFT".equals(transfer.getStatus())) {
-            throw new BusinessException("Chỉ có thể xóa lệnh chuyển kho đang ở trạng thái DRAFT. Trạng thái hiện tại: " + transfer.getStatus());
-        }
-        if (!transfer.getCreatedBy().equals(userId)) {
-            throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
-        }
-        transferItemRepository.deleteByTransferId(transferId);
-        transferRepository.delete(transfer);
-        auditLogService.logAction(userId, "OUTBOUND_DELETED", "TRANSFER", transferId,
-                "Transfer " + transfer.getTransferCode() + " deleted", ip, ua);
-        return ApiResponse.success("Đã xóa lệnh chuyển kho thành công", null);
-    }
-
-    // ─── Response builders ───────────────────────────────────────
 
     private OutboundResponse buildSalesOrderResponse(
             SalesOrderEntity so, List<SalesOrderItemEntity> items,
             CustomerEntity customer, List<OutboundResponse.StockWarning> warnings) {
 
-        List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream()
-                .map(i -> {
-                    BigDecimal available = getAvailableQty(so.getWarehouseId(), i.getSkuId());
-                    String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
-                    String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
-                    return OutboundResponse.OutboundItemResponse.builder()
-                            .itemId(i.getSoItemId()).skuId(i.getSkuId())
-                            .skuCode(skuCode).skuName(skuName)
-                            .requestedQty(i.getOrderedQty()).availableQty(available)
-                            .insufficientStock(available.compareTo(i.getOrderedQty()) < 0)
-                            .note(i.getNote()).build();
-                }).toList();
+        List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream().map(i -> {
+            BigDecimal available = getAvailableQty(so.getWarehouseId(), i.getSkuId());
+            String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
+            String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
+            return OutboundResponse.OutboundItemResponse.builder()
+                    .itemId(i.getSoItemId()).skuId(i.getSkuId())
+                    .skuCode(skuCode).skuName(skuName)
+                    .requestedQty(i.getOrderedQty()).availableQty(available)
+                    .insufficientStock(available.compareTo(i.getOrderedQty()) < 0)
+                    .note(i.getNote()).build();
+        }).toList();
 
         return OutboundResponse.builder()
                 .documentId(so.getSoId()).documentCode(so.getSoCode())
@@ -658,7 +572,8 @@ public class OutboundService {
                 .stockWarnings(warnings != null && !warnings.isEmpty() ? warnings : null)
                 .dispatchPdfUrl(so.getDispatchPdfUrl())
                 .signedNoteUrl(so.getSignedNoteUrl())
-                .signedNoteUploadedAt(so.getSignedNoteUploadedAt() != null ? so.getSignedNoteUploadedAt().toString() : null)
+                .signedNoteUploadedAt(so.getSignedNoteUploadedAt() != null
+                        ? so.getSignedNoteUploadedAt().toString() : null)
                 .build();
     }
 
@@ -666,18 +581,17 @@ public class OutboundService {
             TransferEntity transfer, List<TransferItemEntity> items,
             WarehouseEntity dest, List<OutboundResponse.StockWarning> warnings) {
 
-        List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream()
-                .map(i -> {
-                    BigDecimal available = getAvailableQty(transfer.getFromWarehouseId(), i.getSkuId());
-                    String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
-                    String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
-                    return OutboundResponse.OutboundItemResponse.builder()
-                            .itemId(i.getTransferItemId()).skuId(i.getSkuId())
-                            .skuCode(skuCode).skuName(skuName)
-                            .requestedQty(i.getQuantity()).availableQty(available)
-                            .insufficientStock(available.compareTo(i.getQuantity()) < 0)
-                            .build();
-                }).toList();
+        List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream().map(i -> {
+            BigDecimal available = getAvailableQty(transfer.getFromWarehouseId(), i.getSkuId());
+            String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
+            String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
+            return OutboundResponse.OutboundItemResponse.builder()
+                    .itemId(i.getTransferItemId()).skuId(i.getSkuId())
+                    .skuCode(skuCode).skuName(skuName)
+                    .requestedQty(i.getQuantity()).availableQty(available)
+                    .insufficientStock(available.compareTo(i.getQuantity()) < 0)
+                    .build();
+        }).toList();
 
         return OutboundResponse.builder()
                 .documentId(transfer.getTransferId()).documentCode(transfer.getTransferCode())
@@ -692,25 +606,5 @@ public class OutboundService {
                 .createdAt(transfer.getCreatedAt())
                 .stockWarnings(warnings != null && !warnings.isEmpty() ? warnings : null)
                 .build();
-    }
-
-    // ─── Get single order detail (with items) ─────────────────────────────────
-    @Transactional(readOnly = true)
-    public ApiResponse<OutboundResponse> getOutboundDetail(Long documentId, String orderType) {
-        if ("INTERNAL_TRANSFER".equals(orderType)) {
-            TransferEntity transfer = transferRepository.findById(documentId)
-                    .orElseThrow(() -> new RuntimeException("Transfer not found: " + documentId));
-            List<TransferItemEntity> items = transferItemRepository.findByTransferId(documentId);
-            WarehouseEntity dest = transfer.getToWarehouseId() != null
-                    ? warehouseRepository.findById(transfer.getToWarehouseId()).orElse(null) : null;
-            return ApiResponse.success("OK", buildTransferResponse(transfer, items, dest, null));
-        } else {
-            SalesOrderEntity so = soRepository.findById(documentId)
-                    .orElseThrow(() -> new RuntimeException("Sales order not found: " + documentId));
-            List<SalesOrderItemEntity> items = soItemRepository.findBySoId(documentId);
-            CustomerEntity customer = so.getCustomerId() != null
-                    ? customerRepository.findById(so.getCustomerId()).orElse(null) : null;
-            return ApiResponse.success("OK", buildSalesOrderResponse(so, items, customer, null));
-        }
     }
 }
