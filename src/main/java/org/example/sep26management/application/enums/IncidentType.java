@@ -8,5 +8,6 @@ public enum IncidentType {
     SEAL_BROKEN,
     SEAL_MISMATCH,
     PACKAGING_DAMAGE,
+    DISCREPANCY,
     OTHER
 }

@@ -494,92 +494,77 @@ public class ReceivingOrderService {
                 }
 
                 boolean hasAnyIncident = !mismatchItems.isEmpty() || !unexpectedItems.isEmpty();
-                List<String> incidentCodes = new ArrayList<>();
 
-                // ── Tạo Incident cho hàng ngoài phiếu (UNEXPECTED_ITEM) ──
-                if (!unexpectedItems.isEmpty()) {
+                // ── Gộp tất cả items vào 1 incident duy nhất ──
+                if (hasAnyIncident) {
+                        // Xác định incidentType dựa trên loại items có mặt
+                        org.example.sep26management.application.enums.IncidentType resolvedType;
+                        if (!mismatchItems.isEmpty() && !unexpectedItems.isEmpty()) {
+                                // Hỗn hợp: vừa chênh lệch số lượng vừa hàng ngoài phiếu
+                                resolvedType = org.example.sep26management.application.enums.IncidentType.DISCREPANCY;
+                        } else if (!unexpectedItems.isEmpty()) {
+                                resolvedType = org.example.sep26management.application.enums.IncidentType.UNEXPECTED_ITEM;
+                        } else if (mismatchType != null) {
+                                resolvedType = mismatchType;
+                        } else {
+                                resolvedType = org.example.sep26management.application.enums.IncidentType.OVERAGE;
+                        }
+
+                        // Gộp tất cả items
+                        List<IncidentItemEntity> allIncidentItems = new ArrayList<>();
+                        allIncidentItems.addAll(unexpectedItems);
+                        allIncidentItems.addAll(mismatchItems);
+
+                        // Mô tả gộp
+                        StringBuilder desc = new StringBuilder();
+                        if (!unexpectedItems.isEmpty()) {
+                                desc.append("Phát hiện ").append(unexpectedItems.size())
+                                        .append(" SKU ngoài phiếu nhận hàng khi Keeper kiểm đếm. ");
+                        }
+                        if (!mismatchItems.isEmpty()) {
+                                desc.append("Phát hiện chênh lệch số lượng khi Keeper kiểm đếm. ")
+                                        .append(mismatchItems.size()).append(" SKU không khớp dự kiến.");
+                        }
+
                         String incCode = "INC-" + System.currentTimeMillis() % 1_000_000;
                         IncidentEntity incident = IncidentEntity.builder()
                                 .warehouseId(order.getWarehouseId())
                                 .incidentCode(incCode)
-                                .incidentType(org.example.sep26management.application.enums.IncidentType.UNEXPECTED_ITEM)
+                                .incidentType(resolvedType)
                                 .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
                                 .severity("HIGH")
                                 .occurredAt(LocalDateTime.now())
-                                .description("Phát hiện " + unexpectedItems.size()
-                                        + " SKU ngoài phiếu nhận hàng khi Keeper kiểm đếm.")
+                                .description(desc.toString().trim())
                                 .reportedBy(userId)
                                 .status("OPEN")
                                 .receivingId(id)
                                 .build();
                         IncidentEntity savedIncident = incidentRepo.save(incident);
 
-                        for (IncidentItemEntity incItem : unexpectedItems) {
+                        for (IncidentItemEntity incItem : allIncidentItems) {
                                 incItem.setIncident(savedIncident);
                                 incidentItemRepo.save(incItem);
                         }
-                        incidentCodes.add(incCode);
 
                         auditLogService.logAction(
                                 userId,
-                                "RECEIVING_UNEXPECTED_ITEM_INCIDENT",
+                                "RECEIVING_DISCREPANCY_INCIDENT",
                                 "RECEIVING_ORDER",
                                 order.getReceivingId(),
                                 "Receiving Order " + order.getReceivingCode()
-                                        + " — phát hiện " + unexpectedItems.size()
-                                        + " SKU ngoài phiếu. Incident " + incCode + " gửi Manager.",
+                                        + " — phát hiện " + allIncidentItems.size()
+                                        + " SKU bất thường. Incident " + incCode + " gửi Manager.",
                                 null, null);
 
-                        log.info("Receiving Order {} — UNEXPECTED_ITEM Incident {} created, {} items.",
-                                order.getReceivingCode(), incCode, unexpectedItems.size());
-                }
+                        log.info("Receiving Order {} — Incident {} created ({} type), {} items.",
+                                order.getReceivingCode(), incCode, resolvedType.name(), allIncidentItems.size());
 
-                // ── Tạo Incident cho chênh lệch số lượng (SHORTAGE/OVERAGE) ──
-                if (!mismatchItems.isEmpty()) {
-                        String incCode = "INC-" + (System.currentTimeMillis() + 1) % 1_000_000;
-                        IncidentEntity incident = IncidentEntity.builder()
-                                .warehouseId(order.getWarehouseId())
-                                .incidentCode(incCode)
-                                .incidentType(mismatchType)
-                                .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
-                                .severity("HIGH")
-                                .occurredAt(LocalDateTime.now())
-                                .description("Phát hiện chênh lệch số lượng khi Keeper kiểm đếm. "
-                                        + mismatchItems.size() + " SKU không khớp dự kiến.")
-                                .reportedBy(userId)
-                                .status("OPEN")
-                                .receivingId(id)
-                                .build();
-                        IncidentEntity savedIncident = incidentRepo.save(incident);
-
-                        for (IncidentItemEntity incItem : mismatchItems) {
-                                incItem.setIncident(savedIncident);
-                                incidentItemRepo.save(incItem);
-                        }
-                        incidentCodes.add(incCode);
-
-                        auditLogService.logAction(
-                                userId,
-                                "RECEIVING_MISMATCH_INCIDENT",
-                                "RECEIVING_ORDER",
-                                order.getReceivingId(),
-                                "Receiving Order " + order.getReceivingCode()
-                                        + " — phát hiện chênh lệch " + mismatchItems.size()
-                                        + " SKU. Incident " + incCode + " gửi Manager.",
-                                null, null);
-
-                        log.info("Receiving Order {} — Mismatch Incident {} created, {} items.",
-                                order.getReceivingCode(), incCode, mismatchItems.size());
-                }
-
-                if (hasAnyIncident) {
                         order.setStatus("PENDING_INCIDENT");
                         order.setUpdatedAt(LocalDateTime.now());
                         receivingOrderRepo.save(order);
 
-                        String allCodes = String.join(", ", incidentCodes);
-                        log.info("Receiving Order {} → PENDING_INCIDENT. Incidents: {}",
-                                order.getReceivingCode(), allCodes);
+                        log.info("Receiving Order {} → PENDING_INCIDENT. Incident: {}",
+                                order.getReceivingCode(), incCode);
 
                         ReceivingOrderResponse resp = getOrder(id).getData();
 
@@ -592,7 +577,7 @@ public class ReceivingOrderService {
                                 msg.append("Phát hiện chênh lệch số lượng ")
                                         .append(mismatchItems.size()).append(" SKU. ");
                         }
-                        msg.append("Gửi Manager duyệt. Incident: ").append(allCodes);
+                        msg.append("Gửi Manager duyệt. Incident: ").append(incCode);
                         return ApiResponse.success(msg.toString(), resp);
                 }
 
