@@ -212,6 +212,15 @@ public interface InventorySnapshotJpaRepository
                 @Param("skuId") Long skuId,
                 @Param("lotId") Long lotId);
 
+        /**
+         * Trừ quantity theo warehouseId + skuId + lotId + locationId.
+         * Nếu lotId != NULL: trừ đúng row có lot đó.
+         * Nếu lotId IS NULL: trừ theo FEFO (lot có expiry_date sớm nhất trước).
+         *
+         * FIX: lot_id IS NULL trong picking item xảy ra khi AllocateStock không ghi lotId
+         * vào reservation (reservation.lotId = NULL). Lúc này snapshot có thể có nhiều
+         * rows với lot_id khác nhau → cần trừ theo FEFO thay vì chỉ match lot_id IS NULL.
+         */
         @Modifying
         @Transactional
         @Query(value = """
@@ -219,8 +228,19 @@ public interface InventorySnapshotJpaRepository
             SET quantity = quantity - :qty, last_updated = NOW()
             WHERE warehouse_id = :warehouseId
               AND sku_id = :skuId
-              AND (CASE WHEN :lotId IS NULL THEN lot_id IS NULL ELSE lot_id = :lotId END)
               AND location_id = :locationId
+              AND (:lotId IS NOT NULL AND lot_id = :lotId
+                   OR :lotId IS NULL AND lot_id_safe = (
+                       SELECT s2.lot_id_safe
+                       FROM inventory_snapshot s2
+                       LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
+                       WHERE s2.warehouse_id = :warehouseId
+                         AND s2.sku_id       = :skuId
+                         AND s2.location_id  = :locationId
+                         AND s2.quantity     > 0
+                       ORDER BY il.expiry_date ASC NULLS LAST
+                       LIMIT 1
+                   ))
             """, nativeQuery = true)
         void decrementQuantity(
                 @Param("warehouseId") Long warehouseId,
@@ -229,11 +249,9 @@ public interface InventorySnapshotJpaRepository
                 @Param("locationId") Long locationId,
                 @Param("qty") BigDecimal qty);
 
-        // ── NEW: BR-DISPATCH-01 — Dispatch deduction ─────────────────────────────
-
         /**
-         * BR-DISPATCH-01: Decrease reserved_qty after dispatch confirmation.
-         * Called per picking_task_item (locationId + skuId + lotId).
+         * Giảm reserved_qty theo locationId + skuId + lotId.
+         * Nếu lotId IS NULL: giảm ở lot có expiry_date sớm nhất (FEFO) — cùng logic với decrementQuantity.
          */
         @Modifying
         @Transactional
@@ -243,7 +261,17 @@ public interface InventorySnapshotJpaRepository
                 last_updated  = NOW()
             WHERE location_id = :locationId
               AND sku_id       = :skuId
-              AND (CASE WHEN :lotId IS NULL THEN lot_id IS NULL ELSE lot_id = :lotId END)
+              AND (:lotId IS NOT NULL AND lot_id = :lotId
+                   OR :lotId IS NULL AND lot_id_safe = (
+                       SELECT s2.lot_id_safe
+                       FROM inventory_snapshot s2
+                       LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
+                       WHERE s2.location_id = :locationId
+                         AND s2.sku_id      = :skuId
+                         AND s2.quantity    > 0
+                       ORDER BY il.expiry_date ASC NULLS LAST
+                       LIMIT 1
+                   ))
             """, nativeQuery = true)
         void decrementReservedByLocationSkuLot(
                 @Param("locationId") Long locationId,
