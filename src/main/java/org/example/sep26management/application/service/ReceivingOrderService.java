@@ -524,9 +524,19 @@ public class ReceivingOrderService {
                                                                         : BigDecimal.ZERO,
                                                         BigDecimal::add));
 
-                        // Merge all SKU IDs (from both sides)
+                        // Merge SKU IDs — CHỈ items có trên phiếu (expectedQty > 0)
+                        // Hàng ngoài phiếu KHÔNG tham gia so sánh match để tránh loop vô hạn
+                        java.util.Set<Long> orderSkuIdsOnOrder = freshItems.stream()
+                                        .filter(it -> it.getExpectedQty() != null
+                                                        && it.getExpectedQty().compareTo(BigDecimal.ZERO) > 0)
+                                        .map(ReceivingItemEntity::getSkuId)
+                                        .collect(Collectors.toSet());
+
+                        // Chỉ so sánh SKU IDs có trên phiếu
                         java.util.Set<Long> allSkuIds = new java.util.HashSet<>(qcTotals.keySet());
                         allSkuIds.addAll(keeperTotals.keySet());
+                        // Lọc chỉ giữ items trên phiếu
+                        allSkuIds.retainAll(orderSkuIdsOnOrder);
 
                         boolean keeperMatchesQc = true;
                         List<String> rescanMismatches = new ArrayList<>();
@@ -671,9 +681,16 @@ public class ReceivingOrderService {
                 List<ReceivingItemEntity> dbItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
 
                 // ── STEP 0: So sánh QC total vs Keeper receivedQty ──────────────────
-                // Nếu chênh lệch số lượng giữa QC và Keeper → tự động yêu cầu Keeper scan lại
+                // Chỉ so sánh items CÓ trên phiếu (expectedQty > 0).
+                // Hàng ngoài phiếu (expectedQty=0) KHÔNG trigger rescan loop —
+                // sẽ được xử lý bởi incident detection ở bước sau.
                 List<String> mismatchDetails = new ArrayList<>();
                 for (ReceivingItemEntity dbItem : dbItems) {
+                        BigDecimal expectedQty = dbItem.getExpectedQty() != null
+                                        ? dbItem.getExpectedQty() : BigDecimal.ZERO;
+                        // Skip unexpected items — chỉ so sánh items có trên phiếu
+                        if (expectedQty.compareTo(BigDecimal.ZERO) == 0) continue;
+
                         Long skuId = dbItem.getSkuId();
                         Map<String, BigDecimal> skuScanData = scannedData.getOrDefault(skuId, Map.of());
                         BigDecimal qcTotal = skuScanData.values().stream()
