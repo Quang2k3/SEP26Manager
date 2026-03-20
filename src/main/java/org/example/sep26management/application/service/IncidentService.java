@@ -242,9 +242,11 @@ public class IncidentService {
                 && !org.example.sep26management.application.enums.IncidentType.OVERAGE
                 .equals(incident.getIncidentType())
                 && !org.example.sep26management.application.enums.IncidentType.UNEXPECTED_ITEM
+                .equals(incident.getIncidentType())
+                && !org.example.sep26management.application.enums.IncidentType.DISCREPANCY
                 .equals(incident.getIncidentType())) {
             throw new RuntimeException(
-                    "This API is only for resolving quantity discrepancy incidents (SHORTAGE/OVERAGE/UNEXPECTED_ITEM).");
+                    "This API is only for resolving quantity discrepancy incidents (SHORTAGE/OVERAGE/UNEXPECTED_ITEM/DISCREPANCY).");
         }
 
         ReceivingOrderEntity order = receivingOrderRepo.findById(incident.getReceivingId())
