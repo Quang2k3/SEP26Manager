@@ -360,9 +360,10 @@ public class IncidentService {
         }
         incidentRepo.save(incident);
 
-        // Keeper đã kiểm đếm rồi → chuyển thẳng PENDING_COUNT để QC kiểm chất lượng
-        order.setStatus("PENDING_COUNT");
-        log.info("Discrepancy Incident {} resolved — order moved to PENDING_COUNT (receivingId={})",
+        // QC đã scan xong + Manager đã xử lý incident → chuyển QC_APPROVED để tạo GRN
+        order.setStatus("QC_APPROVED");
+        order.setUpdatedAt(LocalDateTime.now());
+        log.info("Discrepancy Incident {} resolved — order moved to QC_APPROVED (receivingId={})",
                 incident.getIncidentCode(), order.getReceivingId());
         receivingOrderRepo.save(order);
 
