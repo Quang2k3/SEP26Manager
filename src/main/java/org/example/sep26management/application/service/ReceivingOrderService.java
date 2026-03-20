@@ -396,21 +396,128 @@ public class ReceivingOrderService {
                                         }
 
                                         for (Map.Entry<Long, BigDecimal> entry : skuTotalQty.entrySet()) {
-                                                receivingItemRepo
-                                                        .findByReceivingOrderReceivingIdAndSkuId(id,
-                                                                entry.getKey())
-                                                        .ifPresent(ri -> {
-                                                                ri.setReceivedQty(entry.getValue());
-                                                                receivingItemRepo.save(ri);
-                                                                log.info("Session sync: SKU {} → receivedQty={}",
-                                                                        entry.getKey(),
-                                                                        entry.getValue());
-                                                        });
+                                                Optional<ReceivingItemEntity> existing = receivingItemRepo
+                                                        .findByReceivingOrderReceivingIdAndSkuId(id, entry.getKey());
+
+                                                if (existing.isPresent()) {
+                                                        // Update existing item
+                                                        existing.get().setReceivedQty(entry.getValue());
+                                                        receivingItemRepo.save(existing.get());
+                                                        log.info("Session sync: SKU {} → receivedQty={}",
+                                                                entry.getKey(), entry.getValue());
+                                                } else {
+                                                        // ── Extra SKU not on order → insert with expectedQty=0 ──
+                                                        ReceivingItemEntity extraItem = ReceivingItemEntity.builder()
+                                                                .receivingOrder(order)
+                                                                .skuId(entry.getKey())
+                                                                .expectedQty(BigDecimal.ZERO)
+                                                                .receivedQty(entry.getValue())
+                                                                .build();
+                                                        receivingItemRepo.save(extraItem);
+                                                        log.info("Session sync: EXTRA SKU {} → receivedQty={} (not on order)",
+                                                                entry.getKey(), entry.getValue());
+                                                }
                                         }
                                 }
                         });
                 }
 
+                // ── Mismatch detection: compare receivedQty vs expectedQty ──────────
+                List<ReceivingItemEntity> allItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
+                List<IncidentItemEntity> mismatchItems = new ArrayList<>();
+                org.example.sep26management.application.enums.IncidentType mismatchType = null;
+
+                for (ReceivingItemEntity item : allItems) {
+                        BigDecimal expected = item.getExpectedQty() != null ? item.getExpectedQty() : BigDecimal.ZERO;
+                        BigDecimal received = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
+                        int cmp = received.compareTo(expected);
+
+                        if (cmp != 0) {
+                                BigDecimal diff = received.subtract(expected).abs();
+                                org.example.sep26management.application.enums.IncidentType itemType =
+                                        cmp < 0
+                                                ? org.example.sep26management.application.enums.IncidentType.SHORTAGE
+                                                : org.example.sep26management.application.enums.IncidentType.OVERAGE;
+
+                                // Use the first mismatch type (or SHORTAGE if mixed)
+                                if (mismatchType == null) {
+                                        mismatchType = itemType;
+                                } else if (!mismatchType.equals(itemType)) {
+                                        mismatchType = org.example.sep26management.application.enums.IncidentType.SHORTAGE;
+                                }
+
+                                String skuCode = skuRepo.findById(item.getSkuId())
+                                        .map(SkuEntity::getSkuCode).orElse("SKU-" + item.getSkuId());
+                                String note = cmp < 0
+                                        ? "Thiếu " + diff + " so với dự kiến (expected=" + expected + ", received=" + received + ")"
+                                        : "Thừa " + diff + " so với dự kiến (expected=" + expected + ", received=" + received + ")";
+
+                                IncidentItemEntity incItem = IncidentItemEntity.builder()
+                                        .skuId(item.getSkuId())
+                                        .expectedQty(expected)
+                                        .actualQty(received)
+                                        .damagedQty(diff)
+                                        .reasonCode(cmp < 0 ? "SHORTAGE" : "OVERAGE")
+                                        .note(note)
+                                        .actionPassQty(BigDecimal.ZERO)
+                                        .actionReturnQty(BigDecimal.ZERO)
+                                        .actionScrapQty(BigDecimal.ZERO)
+                                        .build();
+                                mismatchItems.add(incItem);
+
+                                log.info("Mismatch detected: {} — {} {} (expected={}, received={})",
+                                        skuCode, itemType.name(), diff, expected, received);
+                        }
+                }
+
+                if (!mismatchItems.isEmpty()) {
+                        // ── Create discrepancy incident → PENDING_INCIDENT (Manager duyệt) ──
+                        String incCode = "INC-" + System.currentTimeMillis() % 1_000_000;
+                        IncidentEntity incident = IncidentEntity.builder()
+                                .warehouseId(order.getWarehouseId())
+                                .incidentCode(incCode)
+                                .incidentType(mismatchType)
+                                .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
+                                .severity("HIGH")
+                                .occurredAt(LocalDateTime.now())
+                                .description("Phát hiện chênh lệch số lượng khi Keeper kiểm đếm. "
+                                        + mismatchItems.size() + " SKU không khớp dự kiến.")
+                                .reportedBy(userId)
+                                .status("OPEN")
+                                .receivingId(id)
+                                .build();
+                        IncidentEntity savedIncident = incidentRepo.save(incident);
+
+                        for (IncidentItemEntity incItem : mismatchItems) {
+                                incItem.setIncident(savedIncident);
+                                incidentItemRepo.save(incItem);
+                        }
+
+                        order.setStatus("PENDING_INCIDENT");
+                        order.setUpdatedAt(LocalDateTime.now());
+                        receivingOrderRepo.save(order);
+
+                        // Audit log
+                        auditLogService.logAction(
+                                userId,
+                                "RECEIVING_MISMATCH_INCIDENT",
+                                "RECEIVING_ORDER",
+                                order.getReceivingId(),
+                                "Receiving Order " + order.getReceivingCode()
+                                        + " — phát hiện chênh lệch " + mismatchItems.size()
+                                        + " SKU. Incident " + incCode + " gửi Manager.",
+                                null, null);
+
+                        log.info("Receiving Order {} → PENDING_INCIDENT (mismatch). Incident {} created, {} items.",
+                                order.getReceivingCode(), incCode, mismatchItems.size());
+
+                        // Return with hasMismatch flag
+                        ReceivingOrderResponse resp = getOrder(id).getData();
+                        return ApiResponse.success(
+                                "Phát hiện chênh lệch số lượng — gửi Manager duyệt. Incident: " + incCode, resp);
+                }
+
+                // ── No mismatch → normal flow: PENDING_COUNT ──
                 order.setStatus("PENDING_COUNT");
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
