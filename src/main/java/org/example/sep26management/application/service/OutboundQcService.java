@@ -513,6 +513,25 @@ public class OutboundQcService {
                     pickingTaskRepository.save(t);
                 });
 
+        // [BUG FIX] Release tất cả OPEN reservation sau khi dispatch thành công.
+        // Nếu không release, reserved_qty trong snapshot vẫn còn dương vĩnh viễn
+        // → các lần cancel sau sẽ negate thêm → reserved_qty bị âm.
+        List<ReservationEntity> dispatchReservations = reservationRepository
+                .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
+        for (ReservationEntity r : dispatchReservations) {
+            if (r.getLocationId() != null) {
+                inventorySnapshotRepository.incrementReservedByLocationAndSku(
+                        r.getLocationId(), r.getSkuId(), r.getLotId(),
+                        r.getQuantity().negate());
+            } else {
+                inventorySnapshotRepository.incrementReservedByWarehouseAndSku(
+                        so.getWarehouseId(), r.getSkuId(), r.getQuantity().negate());
+            }
+            r.setStatus("CANCELLED");
+            reservationRepository.save(r);
+        }
+        log.info("confirmDispatch: released {} reservation(s) for SO #{}", dispatchReservations.size(), soId);
+
         so.setStatus("DISPATCHED");
         so.setUpdatedAt(LocalDateTime.now());
         salesOrderRepository.save(so);
