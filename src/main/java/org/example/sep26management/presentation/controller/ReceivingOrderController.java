@@ -118,12 +118,14 @@ public class ReceivingOrderController {
         return receivingOrderService.submit(id, extractUserId(auth));
     }
 
-    /** POST /v1/receiving-orders/{id}/finalize-count — Keeper: PENDING_COUNT → SUBMITTED */
+    /** POST /v1/receiving-orders/{id}/finalize-count — Keeper: SUBMITTED → PENDING_COUNT */
     @PostMapping("/{id}/finalize-count")
     @Operation(summary = "Chốt kiểm đếm (Keeper)", description = "Keeper hoàn tất quét barcode, chốt số lượng thực nhận.\n\n"
-            + "Trạng thái chuyển từ **PENDING_COUNT → SUBMITTED**. "
+            + "Trạng thái **luôn** chuyển từ **SUBMITTED → PENDING_COUNT** (chờ QC kiểm đếm lại).\n"
             + "Hệ thống tự động sync dữ liệu từ scan session (nếu có) vào phiếu.\n\n"
-            + "👉 **Bước tiếp theo:** QC kiểm tra chất lượng (`POST /{id}/qc-approve` hoặc `POST /{id}/qc-submit-session`).\n\n"
+            + "⚠️ **LƯU Ý:** Sai lệch số lượng (thừa/thiếu/hàng ngoài phiếu) chỉ được **ghi nhận** vào note, "
+            + "**KHÔNG tạo Incident** tại bước này. Incident sẽ do QC tạo sau khi kiểm đếm lại.\n\n"
+            + "👉 **Bước tiếp theo:** QC kiểm đếm lại (`POST /{id}/qc-submit-session`).\n\n"
             + "**Data yêu cầu:**\n"
             + "- `@PathVariable id`: Mã Phiếu (receivingId).\n"
             + "- Body: Không cần")
@@ -149,11 +151,20 @@ public class ReceivingOrderController {
     /** POST /v1/receiving-orders/{id}/qc-submit-session — QC Scanner */
     @PostMapping("/{id}/qc-submit-session")
     @PreAuthorize("hasRole('QC')")
-    @Operation(summary = "QC Scanner hoàn tất quá trình quét (QC)", description = "Sau khi QC hoàn tất việc quét mã, gửi yêu cầu kết thúc chốt số lượng dựa trên session quét. Tự động đối chiếu với số Keeper nhận trước đó.\n\n"
+    @Operation(summary = "QC Scanner hoàn tất quá trình quét — tổng hợp Incident (QC)", description = "QC kiểm đếm lại và phân loại PASS/FAIL. Hệ thống tự động tổng hợp **TẤT CẢ** sự cố thành 1 Incident duy nhất gửi Manager.\n\n"
+            + "## Các loại sự cố được tổng hợp:\n"
+            + "| Loại | Mô tả |\n"
+            + "|---|---|\n"
+            + "| **FAIL items** | SKU bị lỗi chất lượng (condition=FAIL) |\n"
+            + "| **SHORTAGE** | Số lượng QC quét < expectedQty |\n"
+            + "| **OVERAGE** | Số lượng QC quét > expectedQty |\n"
+            + "| **UNEXPECTED_ITEM** | SKU QC quét nhưng không có trên phiếu |\n\n"
+            + "## Kết quả:\n"
+            + "- Nếu có bất kỳ sự cố nào → Tạo Incident `OPEN` → Order chuyển `PENDING_INCIDENT` → Manager duyệt\n"
+            + "- Nếu 100% khớp + 100% PASS → Order chuyển `QC_APPROVED` → Sẵn sàng tạo GRN\n\n"
             + "**Data yêu cầu:** \n"
-            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng (LẤY TỪ: attribute `receivingId` của API GET danh sách).\n"
-            + "- `@RequestParam sessionId`: ID session quét từ Redis.\n\n"
-            + "👉 **Note:** Hệ thống tự sinh `Incident` nếu có hàng `FAIL`. Nếu 100% `PASS`, đơn sẽ lên `QC_APPROVED`.")
+            + "- `@PathVariable id`: Mã Phiếu Nhận Hàng.\n"
+            + "- `@RequestParam sessionId`: ID session quét từ Redis.")
     public ApiResponse<Map<String, Object>> qcSubmitSession(
             @PathVariable Long id,
             @RequestParam String sessionId,

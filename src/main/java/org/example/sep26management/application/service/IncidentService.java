@@ -318,20 +318,35 @@ public class IncidentService {
                     break;
 
                 case "RETURN":
-                    // Trả hàng thừa: receivedQty = expectedQty (return overage to supplier)
+                    // Trả hàng thừa hoặc hàng hỏng
                     if (rcItem != null) {
-                        incItem.setActionReturnQty(incItem.getDamagedQty()); // return the overage qty
+                        incItem.setActionReturnQty(incItem.getDamagedQty()); // return the overage/damaged qty
                         rcItem.setReceivedQty(rcItem.getExpectedQty());
                         receivingItemRepo.save(rcItem);
                     }
                     incItem.setNote(appendNote(incItem.getNote(),
-                            "[Manager]: RETURN — Hoàn hàng thừa"));
+                            "[Manager]: RETURN — Hoàn hàng"));
+                    break;
+
+                case "SCRAP":
+                    // Huỷ bỏ hàng hỏng
+                    if (rcItem != null) {
+                        incItem.setActionScrapQty(incItem.getDamagedQty());
+                        // Giảm receivedQty bớt phần huỷ
+                        java.math.BigDecimal newReceived = rcItem.getReceivedQty()
+                                .subtract(incItem.getDamagedQty() != null ? incItem.getDamagedQty() : java.math.BigDecimal.ZERO);
+                        if (newReceived.compareTo(java.math.BigDecimal.ZERO) < 0) newReceived = java.math.BigDecimal.ZERO;
+                        rcItem.setReceivedQty(newReceived);
+                        receivingItemRepo.save(rcItem);
+                    }
+                    incItem.setNote(appendNote(incItem.getNote(),
+                            "[Manager]: SCRAP — Huỷ bỏ hàng hỏng"));
                     break;
 
                 default:
                     throw new IllegalArgumentException(
                             "Invalid action: " + action
-                                    + ". Must be CLOSE_SHORT, WAIT_BACKORDER, ACCEPT, or RETURN");
+                                    + ". Must be CLOSE_SHORT, WAIT_BACKORDER, ACCEPT, RETURN, or SCRAP");
             }
 
             incidentItemRepo.save(incItem);
