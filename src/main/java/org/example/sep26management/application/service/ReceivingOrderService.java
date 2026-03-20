@@ -470,7 +470,23 @@ public class ReceivingOrderService {
                         String qcSessionId = order.getQcSessionId();
                         ScanSessionData qcSession = sessionRedis.findById(qcSessionId).orElse(null);
 
-                        if (qcSession != null && qcSession.getLines() != null) {
+                        if (qcSession == null || qcSession.getLines() == null) {
+                                // QC session đã hết hạn → không so sánh được
+                                // Fallback: chuyển PENDING_COUNT để QC scan lại từ đầu
+                                order.setStatus("PENDING_COUNT");
+                                order.setQcSessionId(null);
+                                order.setUpdatedAt(LocalDateTime.now());
+                                order.setNote((order.getNote() != null ? order.getNote() + "\n" : "")
+                                        + "[System] QC session hết hạn — cần QC quét lại từ đầu.");
+                                receivingOrderRepo.save(order);
+                                log.warn("KEEPER_RESCAN: QC session {} expired. Fallback to PENDING_COUNT for order {}",
+                                        qcSessionId, order.getReceivingCode());
+                                return ApiResponse.success(
+                                        "QC session hết hạn. Chuyển sang PENDING_COUNT — chờ QC quét lại.",
+                                        getOrder(id).getData());
+                        }
+
+                        if (qcSession.getLines() != null) {
                                 // Build QC scan totals per SKU
                                 Map<Long, BigDecimal> qcTotals = qcSession.getLines().stream()
                                         .filter(l -> l.getSkuId() != null && l.getQty() != null)
@@ -598,10 +614,13 @@ public class ReceivingOrderService {
         @Transactional
         public ApiResponse<Map<String, Object>> qcSubmitSession(Long id, String sessionId, Long qcUserId) {
                 ReceivingOrderEntity order = findOrder(id);
-                validateStatus(order, "qc-submit-session", "PENDING_COUNT", "PENDING_INCIDENT");
+                validateStatus(order, "qc-submit-session", "PENDING_COUNT", "PENDING_INCIDENT", "KEEPER_RESCAN");
 
-                ScanSessionData session = sessionRedis.findById(sessionId)
-                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                ScanSessionData session = sessionRedis.findById(sessionId).orElse(null);
+                if (session == null) {
+                        log.warn("QC session not found or expired: {}", sessionId);
+                        return ApiResponse.error("Phiên scan đã hết hạn hoặc không tồn tại. Vui lòng tạo QR mới.");
+                }
 
                 List<ScanLineItem> lines = session.getLines();
                 if (lines == null || lines.isEmpty()) {
