@@ -45,6 +45,12 @@ public class PutawayTaskResponse {
     @Schema(description = "Ghi chú", example = "Cất hàng Zone A")
     private String note;
 
+    @Schema(description = "URL ảnh phiếu cất hàng đã ký")
+    private String signedNoteUrl;
+
+    @Schema(description = "Thời điểm upload ảnh ký")
+    private LocalDateTime signedNoteUploadedAt;
+
     @Schema(description = "Danh sách chi tiết hàng cần cất")
     private List<PutawayTaskItemDto> items;
 
