@@ -543,6 +543,48 @@ public class ReceivingOrderService {
 
                 List<ReceivingItemEntity> dbItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
 
+                // ── STEP 0: So sánh QC total vs Keeper receivedQty ──────────────────
+                // Nếu chênh lệch số lượng giữa QC và Keeper → tự động yêu cầu Keeper scan lại
+                List<String> mismatchDetails = new ArrayList<>();
+                for (ReceivingItemEntity dbItem : dbItems) {
+                        Long skuId = dbItem.getSkuId();
+                        Map<String, BigDecimal> skuScanData = scannedData.getOrDefault(skuId, Map.of());
+                        BigDecimal qcTotal = skuScanData.values().stream()
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        BigDecimal keeperQty = dbItem.getReceivedQty() != null
+                                ? dbItem.getReceivedQty() : BigDecimal.ZERO;
+
+                        if (qcTotal.compareTo(keeperQty) != 0) {
+                                String skuCode = skuRepo.findById(skuId)
+                                        .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
+                                mismatchDetails.add(skuCode + " (Keeper=" + keeperQty
+                                        + ", QC=" + qcTotal + ")");
+                        }
+                }
+
+                if (!mismatchDetails.isEmpty()) {
+                        // Chênh lệch → tự động yêu cầu Keeper scan lại
+                        order.setStatus("PENDING_COUNT");
+                        order.setUpdatedAt(LocalDateTime.now());
+                        String mismatchNote = "[QC vs Keeper mismatch] " + String.join(", ", mismatchDetails);
+                        order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + mismatchNote);
+                        receivingOrderRepo.save(order);
+
+                        log.info("QC scan for GRN {} — {} SKU(s) mismatch with Keeper. Auto back to PENDING_COUNT. {}",
+                                order.getReceivingCode(), mismatchDetails.size(), mismatchNote);
+
+                        Map<String, Object> result = new java.util.LinkedHashMap<>();
+                        result.put("receivingId", id);
+                        result.put("status", "PENDING_COUNT");
+                        result.put("matched", false);
+                        result.put("mismatchCount", mismatchDetails.size());
+                        result.put("mismatches", mismatchDetails);
+                        result.put("message", "Số lượng QC không khớp Keeper — đã yêu cầu Keeper quét lại ("
+                                + mismatchDetails.size() + " SKU lệch)");
+                        return ApiResponse.success(
+                                "QC/Keeper mismatch — auto rescan requested", result);
+                }
+
                 // ── Collect ALL issues: FAIL items + Discrepancy items + Unexpected items ──
                 List<IncidentItemEntity> allIncidentItems = new ArrayList<>();
                 boolean hasFailItems = false;
