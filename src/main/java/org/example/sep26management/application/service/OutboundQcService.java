@@ -268,7 +268,6 @@ public class OutboundQcService {
      * Then:
      *   5. Update picking_task  → status=COMPLETED, completed_at=now()
      *   6. Update sales_order   → status=DISPATCHED, dispatched_at=now()
-     *   7. [NEW] Tạo Phiếu Xuất Kho PDF và đính kèm vào đơn (không block nếu lỗi)
      *
      * Guards:
      *   BR-DISPATCH-02: blocks if any item is not QC-scanned.
@@ -384,15 +383,8 @@ public class OutboundQcService {
 
         log.info("Dispatch confirmed for soId={}. SO status → DISPATCHED", soId);
 
-        // 7) [NEW] Tạo Phiếu Xuất Kho PDF và đính kèm URL vào đơn
-        //    Chạy sau transaction chính — lỗi PDF không được block dispatch thành công
-        try {
-            String pdfUrl = dispatchPdfService.generateAndUploadPdf(soId);
-            log.info("Dispatch PDF created and attached for soId={}: {}", soId, pdfUrl);
-        } catch (Exception e) {
-            log.error("Dispatch PDF creation failed for soId={} (dispatch vẫn thành công): {}",
-                    soId, e.getMessage());
-        }
+        // PDF được tạo lazy khi user request GET /dispatch-pdf
+        // Không gọi ở đây để tránh Cloudinary exception làm rollback transaction dispatch
 
         return ApiResponse.success("Order dispatched successfully. Status: DISPATCHED", null);
     }
