@@ -109,8 +109,10 @@ public class DispatchPdfService {
             return pdfUrl;
 
         } catch (Exception e) {
-            log.error("Failed to generate/upload dispatch PDF for soId={}: {}", soId, e.getMessage(), e);
-            throw new org.example.sep26management.infrastructure.exception.BusinessException("Lỗi tạo PDF: " + e.getMessage());
+            // [FIX] KHÔNG throw exception — tránh đánh dấu transaction rollback-only
+            // Dispatch đã thành công, PDF chỉ là phụ — lỗi PDF không được cancel dispatch
+            log.error("Failed to generate/upload dispatch PDF for soId={}: {}", soId, e.getMessage());
+            return null;
         }
     }
 
