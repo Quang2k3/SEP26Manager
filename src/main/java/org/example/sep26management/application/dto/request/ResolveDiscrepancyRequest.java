@@ -41,7 +41,7 @@ public class ResolveDiscrepancyRequest {
         @NotBlank(message = "action is required")
         @Schema(description = "Quyết định xử lý. "
                 + "Nếu `reasonCode=SHORTAGE`: dùng `CLOSE_SHORT` (chốt thiếu) hoặc `WAIT_BACKORDER` (chờ giao bù). "
-                + "Nếu `reasonCode=OVERAGE`: dùng `ACCEPT` (nhận thêm) hoặc `RETURN` (trả NCC).",
+                + "Nếu `reasonCode=OVERAGE`: dùng `ACCEPT` (nhận thêm) hoặc `RETURN` (hoàn hàng).",
                 example = "CLOSE_SHORT",
                 allowableValues = { "CLOSE_SHORT", "WAIT_BACKORDER", "ACCEPT", "RETURN" })
         private String action;
