@@ -566,7 +566,7 @@ public class OutboundController {
     private String ua(HttpServletRequest req) {
         return req.getHeader("User-Agent");
     }
-    // ── Check stock availability — dùng cho FE realtime check khi tạo đơn ────
+    
     // GET /v1/outbound/check-stock?warehouseId=1&items=skuId:qty,skuId:qty
     @GetMapping("/check-stock")
     @PreAuthorize("isAuthenticated()")
