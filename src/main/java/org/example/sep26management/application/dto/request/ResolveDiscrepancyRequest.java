@@ -39,11 +39,18 @@ public class ResolveDiscrepancyRequest {
         private Long incidentItemId;
 
         @NotBlank(message = "action is required")
-        @Schema(description = "Quyết định xử lý. "
-                + "Nếu `reasonCode=SHORTAGE`: dùng `CLOSE_SHORT` (chốt thiếu) hoặc `WAIT_BACKORDER` (chờ giao bù). "
-                + "Nếu `reasonCode=OVERAGE`: dùng `ACCEPT` (nhận thêm) hoặc `RETURN` (hoàn hàng).",
-                example = "CLOSE_SHORT",
-                allowableValues = { "CLOSE_SHORT", "WAIT_BACKORDER", "ACCEPT", "RETURN" })
+        @Schema(description = "Quyết định xử lý chính (số lượng thừa/thiếu). "
+                + "Nếu `reasonCode=SHORTAGE`: dùng `CLOSE_SHORT` hoặc `WAIT_BACKORDER`. "
+                + "Nếu `reasonCode=OVERAGE`: dùng `ACCEPT` hoặc `RETURN`.",
+                example = "ACCEPT",
+                allowableValues = { "CLOSE_SHORT", "WAIT_BACKORDER", "ACCEPT", "RETURN", "SCRAP" })
         private String action;
+
+        @Schema(description = "Quyết định xử lý hàng hỏng (tùy chọn). "
+                + "Chỉ dùng khi item vừa có thừa/thiếu VÀ có hàng hỏng. "
+                + "Nếu chỉ có 1 vấn đề, dùng `action` là đủ.",
+                example = "RETURN",
+                allowableValues = { "RETURN", "SCRAP", "ACCEPT" })
+        private String damageAction;
     }
 }
