@@ -54,10 +54,13 @@ public class LocationResponse {
     @Schema(description = "Khu hàng lỗi không", example = "false")
     private Boolean isDefect;
 
-    @Schema(description = "Tầng BIN (1=dưới/150kg, 2=giữa/150kg, 3=trên/120kg). Null nếu không phải BIN.", example = "1")
+    @Schema(description = "Tầng BIN (1=dưới/512kg · 2=giữa/448kg · 3=trên/400kg). Null nếu AISLE/RACK.", example = "1")
     private Integer binFloor;
 
-    @Schema(description = "Số thùng tối đa ước tính theo tầng (thùng 16kg làm chuẩn)", example = "9")
+    @Schema(description = "Cột BIN (1=trái · 2=giữa · 3=phải). Null nếu AISLE/RACK.", example = "1")
+    private Integer binColumn;
+
+    @Schema(description = "Số thùng tối đa ước tính (max_weight_kg ÷ 16kg chuẩn)", example = "32")
     private Integer maxBoxCount;
 
     /** BR-LOC-17: always present — never hidden */

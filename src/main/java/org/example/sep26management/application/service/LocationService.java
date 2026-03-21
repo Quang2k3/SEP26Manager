@@ -88,7 +88,7 @@ public class LocationService {
             }
         }
 
-        // BR-LOC-NEW-02: 1 RACK tối đa 9 BIN
+        // BR-LOC-NEW-02: 1 RACK tối đa 9 BIN (3 tầng × 3 cột)
         if (request.getLocationType() == LocationType.BIN) {
             long binCount = locationRepository.countByParentLocationIdAndLocationType(
                     request.getParentLocationId(), LocationType.BIN);
@@ -97,24 +97,63 @@ public class LocationService {
             }
         }
 
-        // BR-LOC-NEW-03: BIN phải có tầng (binFloor)
+        // BR-LOC-NEW-03: BIN phải có tầng (binFloor) và cột (binColumn)
         java.math.BigDecimal resolvedWeight = request.getMaxWeightKg();
         Integer resolvedFloor = null;
+        Integer resolvedColumn = null;
         if (request.getLocationType() == LocationType.BIN) {
+            // Validate floor
             if (request.getBinFloor() == null) {
                 throw new BusinessException(MessageConstants.LOCATION_BIN_FLOOR_REQUIRED);
             }
             if (request.getBinFloor() < 1 || request.getBinFloor() > 3) {
                 throw new BusinessException(MessageConstants.LOCATION_BIN_FLOOR_INVALID);
             }
+            // Validate column
+            if (request.getBinColumn() == null) {
+                throw new BusinessException(MessageConstants.LOCATION_BIN_COLUMN_REQUIRED);
+            }
+            if (request.getBinColumn() < 1 || request.getBinColumn() > 3) {
+                throw new BusinessException(MessageConstants.LOCATION_BIN_COLUMN_INVALID);
+            }
+            resolvedFloor  = request.getBinFloor();
+            resolvedColumn = request.getBinColumn();
+
+            // BR-LOC-NEW-04: Mỗi tầng tối đa 3 BIN (3 cột)
+            long floorCount = locationRepository.countByParentLocationIdAndLocationTypeAndBinFloor(
+                    request.getParentLocationId(), LocationType.BIN, resolvedFloor);
+            if (floorCount >= 3) {
+                throw new BusinessException(String.format(
+                        MessageConstants.LOCATION_BIN_FLOOR_FULL, resolvedFloor));
+            }
+
+            // BR-LOC-NEW-05: Ô (floor × column) chưa có BIN nào
+            long slotCount = locationRepository.countByParentLocationIdAndLocationTypeAndBinFloorAndBinColumn(
+                    request.getParentLocationId(), LocationType.BIN, resolvedFloor, resolvedColumn);
+            if (slotCount > 0) {
+                throw new BusinessException(String.format(
+                        MessageConstants.LOCATION_BIN_SLOT_DUPLICATE, resolvedFloor, resolvedColumn));
+            }
+
             resolvedFloor = request.getBinFloor();
-            // Tự động gán max_weight_kg theo tầng nếu người dùng không nhập:
-            // Tầng 1, 2 (dưới, giữa): 150 kg (~9 thùng 16kg, ~11 thùng 13kg)
-            // Tầng 3 (trên): 120 kg (~7 thùng 16kg, ~9 thùng 13kg) — nhẹ hơn để an toàn
+            // Tự động gán max_weight_kg và max_volume_m3 theo tầng nếu người dùng không nhập.
+            // Cơ sở: 1 BIN chứa thùng chuẩn SKU001 (16kg, ~0.02625 m³), hệ số lấp đầy 80%.
+            // Tầng 1 (dưới): 32 thùng → 512 kg, 1.050 m³
+            // Tầng 2 (giữa): 28 thùng → 448 kg, 0.920 m³
+            // Tầng 3 (trên):  25 thùng → 400 kg, 0.820 m³
             if (resolvedWeight == null) {
-                resolvedWeight = resolvedFloor <= 2
-                        ? new java.math.BigDecimal("150.00")
-                        : new java.math.BigDecimal("120.00");
+                resolvedWeight = switch (resolvedFloor) {
+                    case 1  -> new java.math.BigDecimal("512.000");
+                    case 2  -> new java.math.BigDecimal("448.000");
+                    default -> new java.math.BigDecimal("400.000"); // tầng 3
+                };
+            }
+            if (request.getMaxVolumeM3() == null) {
+                request.setMaxVolumeM3(switch (resolvedFloor) {
+                    case 1  -> new java.math.BigDecimal("1.050");
+                    case 2  -> new java.math.BigDecimal("0.920");
+                    default -> new java.math.BigDecimal("0.820"); // tầng 3
+                });
             }
         }
 
@@ -130,6 +169,7 @@ public class LocationService {
                 .isStaging(request.getIsStaging() != null ? request.getIsStaging() : false)
                 .isDefect(request.getIsDefect() != null ? request.getIsDefect() : false)
                 .binFloor(resolvedFloor)
+                .binColumn(resolvedColumn)
                 .active(true)
                 .build();
 
@@ -171,7 +211,13 @@ public class LocationService {
             throw new BusinessException(MessageConstants.LOCATION_ALREADY_INACTIVE);
         }
 
-        // BR-LOC-09: new capacity must be >= current occupied qty
+        // BR-LOC-BIN-LOCK: BIN không được sửa tải trọng/thể tích — cố định theo tầng
+        if (location.getLocationType() == LocationType.BIN
+                && (request.getMaxWeightKg() != null || request.getMaxVolumeM3() != null)) {
+            throw new BusinessException(MessageConstants.LOCATION_BIN_CAPACITY_LOCKED);
+        }
+
+        // BR-LOC-09: new capacity must be >= current occupied qty (chỉ áp dụng AISLE/RACK)
         if (request.getMaxWeightKg() != null) {
             var currentQty = locationRepository.getCurrentOccupiedQty(locationId);
             if (currentQty != null && request.getMaxWeightKg().compareTo(currentQty) < 0) {
@@ -179,7 +225,7 @@ public class LocationService {
             }
         }
 
-        // Apply updates (locationCode, zone, type, parent are immutable)
+        // Apply updates (locationCode, zone, type, parent, weight, volume đều immutable cho BIN)
         if (request.getMaxWeightKg() != null)  location.setMaxWeightKg(request.getMaxWeightKg());
         if (request.getMaxVolumeM3() != null)   location.setMaxVolumeM3(request.getMaxVolumeM3());
         if (request.getIsPickingFace() != null) location.setIsPickingFace(request.getIsPickingFace());
@@ -437,6 +483,7 @@ public class LocationService {
                 .isStaging(l.getIsStaging())
                 .isDefect(l.getIsDefect())
                 .binFloor(l.getBinFloor())
+                .binColumn(l.getBinColumn())
                 .maxBoxCount(maxBoxCount)
                 .active(l.getActive())
                 .createdAt(l.getCreatedAt())

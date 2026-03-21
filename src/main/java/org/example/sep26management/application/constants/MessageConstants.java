@@ -156,6 +156,11 @@ public final class MessageConstants {
     public static final String LOCATION_BIN_LIMIT_EXCEEDED     = "Rack đã đủ 9 bin. Mỗi rack chỉ được tạo tối đa 9 bin.";
     public static final String LOCATION_BIN_FLOOR_REQUIRED     = "BIN phải có thông tin tầng (binFloor: 1, 2 hoặc 3).";
     public static final String LOCATION_BIN_FLOOR_INVALID      = "binFloor chỉ được nhận giá trị 1, 2 hoặc 3.";
+    public static final String LOCATION_BIN_SLOT_DUPLICATE     = "Vị trí tầng %d cột %d đã có BIN. Mỗi ô trong rack chỉ được 1 BIN.";
+    public static final String LOCATION_BIN_FLOOR_FULL         = "Tầng %d đã đủ 3 BIN (3 cột). Không thể thêm BIN vào tầng này.";
+    public static final String LOCATION_BIN_COLUMN_REQUIRED    = "BIN phải có thông tin cột (binColumn: 1=trái, 2=giữa, 3=phải).";
+    public static final String LOCATION_BIN_COLUMN_INVALID     = "binColumn chỉ được nhận giá trị 1, 2 hoặc 3.";
+    public static final String LOCATION_BIN_CAPACITY_LOCKED    = "Không thể sửa tải trọng/thể tích BIN — cố định theo tầng (T1: 512kg/1.050m³ · T2: 448kg/0.920m³ · T3: 400kg/0.820m³).";
 
     // ==================== Zone Messages ====================
     public static final String ZONE_NOT_FOUND = "Zone not found with ID: %s";
