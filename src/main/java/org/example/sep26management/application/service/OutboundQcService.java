@@ -244,6 +244,8 @@ public class OutboundQcService {
                     .actualQty(BigDecimal.ZERO)
                     .reasonCode("DAMAGE")
                     .note(noteStr)
+                    // [FIX QC] Lưu ảnh bằng chứng vào field riêng — không nhét vào note nữa
+                    .attachmentUrl(item.getQcAttachmentUrl())
                     .build());
         }
 
@@ -449,32 +451,23 @@ public class OutboundQcService {
         String action = request.getAction().toUpperCase();
         switch (action) {
             case "WAIT_BACKORDER" -> {
-                // Giữ đơn + giữ reservation phần đã lock — chờ hàng về
-                // Khi hàng về đủ, Manager gọi REALLOCATE để tiếp tục
+                // Chờ nhập hàng bù — SO giữ trạng thái WAITING_STOCK
+                // Khi hàng về, Keeper allocate lại → AllocateStockService cho phép từ WAITING_STOCK
                 so.setStatus("WAITING_STOCK");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → WAITING_STOCK (chờ hàng bù, reservation giữ nguyên)", so.getSoCode());
-            }
-            case "REALLOCATE" -> {
-                // Manager quyết định re-allocate với tồn hiện có
-                // Hủy reservation cũ → allocate lại đủ phần có → SO → ALLOCATED hoặc lại SHORTAGE_PENDING
-                // SO → APPROVED để AllocateStockService xử lý được
-                so.setStatus("APPROVED");
-                so.setUpdatedAt(LocalDateTime.now());
-                salesOrderRepository.save(so);
-                log.info("SO {} → APPROVED (REALLOCATE, sẽ allocate lại với tồn hiện có)", so.getSoCode());
+                log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
             }
             case "CLOSE_SHORT" -> {
-                // Cắt giảm orderedQty xuống còn số lượng có sẵn → APPROVED → allocate lại
+                // [GAP 3 FIX] Cắt giảm orderedQty về available → SO → APPROVED → re-Allocate
                 adjustOrderedQtyToAvailable(so);
                 so.setStatus("APPROVED");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → APPROVED (CLOSE_SHORT, qty cắt về available, allocate lại)", so.getSoCode());
+                log.info("SO {} → APPROVED (CLOSE_SHORT, re-Allocate ready)", so.getSoCode());
             }
             default -> throw new BusinessException(
-                    "Invalid action: " + action + ". Must be WAIT_BACKORDER, REALLOCATE or CLOSE_SHORT.");
+                    "Invalid action: " + action + ". Must be WAIT_BACKORDER or CLOSE_SHORT.");
         }
 
         incident.setStatus("RESOLVED");

@@ -400,6 +400,8 @@ public class IncidentService {
                     .actualQty(item.getActualQty())
                     .reasonCode(item.getReasonCode())
                     .note(item.getNote())
+                    // [FIX QC] Trả attachmentUrl — FE hiển ảnh trong IncidentDetailModal
+                    .attachmentUrl(item.getAttachmentUrl())
                     .build();
         }).collect(Collectors.toList());
 

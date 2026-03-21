@@ -52,4 +52,8 @@ public class IncidentItemEntity {
     @Column(name = "action_scrap_qty", precision = 12, scale = 2)
     @Builder.Default
     private BigDecimal actionScrapQty = BigDecimal.ZERO;
+
+    // [FIX QC] URL ảnh bằng chứng hàng hỏng — chụp trên điện thoại khi scan FAIL
+    @Column(name = "attachment_url", columnDefinition = "TEXT")
+    private String attachmentUrl;
 }
