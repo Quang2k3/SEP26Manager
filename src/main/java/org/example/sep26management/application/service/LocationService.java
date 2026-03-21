@@ -86,6 +86,12 @@ public class LocationService {
             if (rackCount >= 3) {
                 throw new BusinessException(MessageConstants.LOCATION_RACK_LIMIT_EXCEEDED);
             }
+            // Tự động gán capacity RACK theo chuẩn (= tổng 9 BIN):
+            // max_weight_kg = 3×512 + 3×448 + 3×400 = 4.080 kg
+            // max_volume_m3 = 3×1.050 + 3×0.920 + 3×0.820 = 8.370 m³
+            // Không cho phép nhập tay — cố định để tránh sai
+            request.setMaxWeightKg(new java.math.BigDecimal("4080.000"));
+            request.setMaxVolumeM3(new java.math.BigDecimal("8.370"));
         }
 
         // BR-LOC-NEW-02: 1 RACK tối đa 9 BIN (3 tầng × 3 cột)
@@ -211,8 +217,11 @@ public class LocationService {
             throw new BusinessException(MessageConstants.LOCATION_ALREADY_INACTIVE);
         }
 
-        // BR-LOC-BIN-LOCK: BIN không được sửa tải trọng/thể tích — cố định theo tầng
-        if (location.getLocationType() == LocationType.BIN
+        // BR-LOC-CAPACITY-LOCK: BIN và RACK không được sửa tải trọng/thể tích — cố định theo chuẩn
+        // BIN: cố định theo tầng (T1=512kg, T2=448kg, T3=400kg)
+        // RACK: cố định = tổng 9 BIN (4080kg, 8.370m³)
+        if ((location.getLocationType() == LocationType.BIN
+                || location.getLocationType() == LocationType.RACK)
                 && (request.getMaxWeightKg() != null || request.getMaxVolumeM3() != null)) {
             throw new BusinessException(MessageConstants.LOCATION_BIN_CAPACITY_LOCKED);
         }
@@ -461,9 +470,13 @@ public class LocationService {
     }
 
     private LocationResponse toResponse(LocationEntity l, String zoneCode, String parentCode) {
-        // Tính số thùng tối đa ước tính (chuẩn thùng 16kg)
+        // Tính số thùng tối đa ước tính (chuẩn thùng 16kg):
+        //   BIN: max_weight_kg ÷ 16
+        //   RACK: tổng 9 BIN = (3×512 + 3×448 + 3×400) ÷ 16 = 255 thùng
         Integer maxBoxCount = null;
-        if (l.getLocationType() == LocationType.BIN && l.getMaxWeightKg() != null) {
+        if (l.getMaxWeightKg() != null &&
+                (l.getLocationType() == LocationType.BIN
+                        || l.getLocationType() == LocationType.RACK)) {
             maxBoxCount = l.getMaxWeightKg()
                     .divide(new java.math.BigDecimal("16"), java.math.RoundingMode.FLOOR)
                     .intValue();
