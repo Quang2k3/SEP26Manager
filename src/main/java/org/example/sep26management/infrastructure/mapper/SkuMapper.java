@@ -34,6 +34,8 @@ public class SkuMapper {
                 .packageType(entity.getPackageType())
                 .volumeMl(entity.getVolumeMl())
                 .weightG(entity.getWeightG())
+                .weightPerCartonKg(entity.getWeightPerCartonKg())
+                .unitsPerCarton(entity.getUnitsPerCarton())
                 .originCountry(entity.getOriginCountry())
                 .scent(entity.getScent())
                 .imageUrl(entity.getImageUrl())
