@@ -138,6 +138,8 @@ public class BinService {
                                         .isPickingFace(bin.getIsPickingFace())
                                         .isStaging(bin.getIsStaging())
                                         .active(bin.getActive())
+                                        .binFloor(bin.getBinFloor())
+                                        .binColumn(bin.getBinColumn())
                                         .build();
                         })
                         // Apply occupancy status filter after calculation
@@ -221,6 +223,8 @@ public class BinService {
                         .isPickingFace(bin.getIsPickingFace())
                         .isStaging(bin.getIsStaging())
                         .active(bin.getActive())
+                        .binFloor(bin.getBinFloor())
+                        .binColumn(bin.getBinColumn())
                         .inventoryItems(items)
                         .build();
 
