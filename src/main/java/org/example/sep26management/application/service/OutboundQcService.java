@@ -383,20 +383,21 @@ public class OutboundQcService {
         String action = request.getAction().toUpperCase();
         switch (action) {
             case "WAIT_BACKORDER" -> {
-                // Chờ nhập hàng bù — SO giữ trạng thái WAITING_STOCK
+                // [BUG-FIX] Cancel toàn bộ OPEN reservations của SO này trước khi đổi status.
+                // Nếu bỏ qua bước này, reservedQty trên inventory_snapshot vẫn bị giữ cho phần
+                // đã allocate được (ví dụ 8/10 units). Khi Keeper re-allocate sau khi hàng về,
+                // idempotency block trong AllocateStockService sẽ gọi
+                // incrementReservedByWarehouseAndSku() để cancel — query đó broadcast lên TẤT CẢ
+                // rows của warehouse+sku thay vì chỉ đúng location+lot → reserved_qty âm → tồn ảo.
+                cancelOpenReservations(so.getSoId());
                 // Khi hàng về, Keeper allocate lại → AllocateStockService cho phép từ WAITING_STOCK
                 so.setStatus("WAITING_STOCK");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
+                log.info("SO {} → WAITING_STOCK (chờ hàng bù, reservations đã release)", so.getSoCode());
             }
             case "CLOSE_SHORT" -> {
-                // [BUG FIX] Phải cancel OPEN reservations của SO này trước khi tính available.
-                // Nếu không, reserved_qty trong snapshot vẫn còn qty đã lock → available = 0
-                // → adjustOrderedQtyToAvailable sẽ set orderedQty = 0 (sai).
-                cancelOpenReservations(so.getSoId(), so.getWarehouseId());
-
-                // Bây giờ reserved_qty đã được giải phóng → tính available đúng
+                // [GAP 3 FIX] Cắt giảm orderedQty về available → SO → APPROVED → re-Allocate
                 adjustOrderedQtyToAvailable(so);
                 so.setStatus("APPROVED");
                 so.setUpdatedAt(LocalDateTime.now());
@@ -418,26 +419,45 @@ public class OutboundQcService {
     }
 
     /**
-     * [BUG FIX] CLOSE_SHORT: cancel toàn bộ OPEN reservation của SO này,
-     * giải phóng reserved_qty trong inventory_snapshot trước khi tính available.
-     * Nếu không cancel trước, reserved_qty vẫn còn → available = 0 → orderedQty = 0 (sai).
+     * [BUG-FIX] Cancel toàn bộ OPEN reservations của một SO và trả lại reservedQty về snapshot.
+     *
+     * Phải dùng incrementReservedByLocationAndSku (theo location+sku+lot) thay vì
+     * incrementReservedByWarehouseAndSku để tránh broadcast cập nhật lên TẤT CẢ rows
+     * cùng warehouse+sku — đó chính là nguyên nhân gây reserved_qty âm và tồn ảo.
+     *
+     * Gọi trước khi đổi SO status sang WAITING_STOCK (WAIT_BACKORDER) để đảm bảo
+     * khi Keeper re-allocate, idempotency block trong AllocateStockService không tìm
+     * thấy OPEN reservation nào cũ còn sót → không cần cancel lần hai → không gây double-decrement.
      */
-    private void cancelOpenReservations(Long soId, Long warehouseId) {
+    private void cancelOpenReservations(Long soId) {
         List<ReservationEntity> openReservations = reservationRepository
                 .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
+
         for (ReservationEntity r : openReservations) {
             if (r.getLocationId() != null) {
+                // Giảm đúng row location+sku+lot — an toàn, không broadcast
                 inventorySnapshotRepository.incrementReservedByLocationAndSku(
                         r.getLocationId(), r.getSkuId(), r.getLotId(),
                         r.getQuantity().negate());
             } else {
+                // Fallback: location_id null (data cũ trước khi apply migration BUG-FIX #1).
+                // Dùng GREATEST(0, reserved_qty - qty) để tránh âm trong trường hợp này.
                 inventorySnapshotRepository.incrementReservedByWarehouseAndSku(
-                        warehouseId, r.getSkuId(), r.getQuantity().negate());
+                        r.getWarehouseId(), r.getSkuId(), r.getQuantity().negate());
+                log.warn("cancelOpenReservations: reservation {} có locationId=null — " +
+                                "dùng warehouse-level decrement (fallback). Kiểm tra migration BUG-FIX #1.",
+                        r.getReservationId());
             }
             r.setStatus("CANCELLED");
             reservationRepository.save(r);
+            log.info("Reservation {} cancelled (soId={}, sku={}, qty={}, loc={})",
+                    r.getReservationId(), soId, r.getSkuId(), r.getQuantity(), r.getLocationId());
         }
-        log.info("CLOSE_SHORT: cancelled {} OPEN reservation(s) for SO #{}", openReservations.size(), soId);
+
+        if (!openReservations.isEmpty()) {
+            log.info("cancelOpenReservations: SO {} — {} reservation(s) cancelled, reservedQty released",
+                    soId, openReservations.size());
+        }
     }
 
     /** CLOSE_SHORT: giảm orderedQty về số lượng available thực tế trong kho. */
@@ -512,25 +532,6 @@ public class OutboundQcService {
                     t.setCompletedAt(LocalDateTime.now());
                     pickingTaskRepository.save(t);
                 });
-
-        // [BUG FIX] Release tất cả OPEN reservation sau khi dispatch thành công.
-        // Nếu không release, reserved_qty trong snapshot vẫn còn dương vĩnh viễn
-        // → các lần cancel sau sẽ negate thêm → reserved_qty bị âm.
-        List<ReservationEntity> dispatchReservations = reservationRepository
-                .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
-        for (ReservationEntity r : dispatchReservations) {
-            if (r.getLocationId() != null) {
-                inventorySnapshotRepository.incrementReservedByLocationAndSku(
-                        r.getLocationId(), r.getSkuId(), r.getLotId(),
-                        r.getQuantity().negate());
-            } else {
-                inventorySnapshotRepository.incrementReservedByWarehouseAndSku(
-                        so.getWarehouseId(), r.getSkuId(), r.getQuantity().negate());
-            }
-            r.setStatus("CANCELLED");
-            reservationRepository.save(r);
-        }
-        log.info("confirmDispatch: released {} reservation(s) for SO #{}", dispatchReservations.size(), soId);
 
         so.setStatus("DISPATCHED");
         so.setUpdatedAt(LocalDateTime.now());
