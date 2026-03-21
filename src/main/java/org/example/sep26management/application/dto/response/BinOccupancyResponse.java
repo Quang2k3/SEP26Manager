@@ -66,6 +66,14 @@ public class BinOccupancyResponse {
     @Schema(description = "Có hoạt động không", example = "true")
     private Boolean active;
 
+    /** Tầng BIN trong rack: 1=dưới (512kg) · 2=giữa (448kg) · 3=trên (400kg) */
+    @Schema(description = "Tầng BIN (1=dưới, 2=giữa, 3=trên)", example = "1")
+    private Integer binFloor;
+
+    /** Cột BIN trong rack: 1=trái · 2=giữa · 3=phải */
+    @Schema(description = "Cột BIN (1=trái, 2=giữa, 3=phải)", example = "2")
+    private Integer binColumn;
+
     /** UC-LOC-06 3c: detailed inventory in bin (optional, only when requested) */
     @Schema(description = "Liệt kê danh sách các món ĐANG NẰM CHÌNH ÌNH TRONG CÁI TỦ NÀY ĐỂ KEEPER NHÌN DỄ KIỂU TRA")
     private List<BinInventoryItem> inventoryItems;
