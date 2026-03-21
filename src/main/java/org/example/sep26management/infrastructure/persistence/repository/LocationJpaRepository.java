@@ -32,6 +32,22 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
          */
         long countByParentLocationIdAndLocationType(Long parentLocationId, LocationType locationType);
 
+        /**
+         * Đếm BIN theo rack + tầng + cột.
+         * Dùng để enforce: mỗi ô (floor × column) chỉ có 1 BIN.
+         * 1 rack = 3 tầng × 3 cột = 9 BIN tối đa.
+         */
+        long countByParentLocationIdAndLocationTypeAndBinFloorAndBinColumn(
+                Long parentLocationId, LocationType locationType,
+                Integer binFloor, Integer binColumn);
+
+        /**
+         * Đếm số BIN theo rack + tầng (để biết tầng đó đã có mấy BIN).
+         * Mỗi tầng tối đa 3 BIN (3 cột).
+         */
+        long countByParentLocationIdAndLocationTypeAndBinFloor(
+                Long parentLocationId, LocationType locationType, Integer binFloor);
+
         List<LocationEntity> findByParentLocationId(Long parentLocationId);
 
         List<LocationEntity> findByZoneId(Long zoneId);
