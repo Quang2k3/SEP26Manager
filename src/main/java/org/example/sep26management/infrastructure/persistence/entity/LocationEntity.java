@@ -69,6 +69,11 @@ public class LocationEntity {
     @Builder.Default
     private Boolean isStaging = false;
 
+    /** Khu hàng lỗi (defect zone) — hàng FAIL QC được chuyển vào đây chờ xử lý */
+    @Column(name = "is_defect", nullable = false)
+    @Builder.Default
+    private Boolean isDefect = false;
+
     @Column(name = "active", nullable = false)
     @Builder.Default
     private Boolean active = true;
