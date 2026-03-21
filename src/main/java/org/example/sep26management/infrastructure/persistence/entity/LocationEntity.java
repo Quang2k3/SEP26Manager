@@ -74,6 +74,15 @@ public class LocationEntity {
     @Builder.Default
     private Boolean isDefect = false;
 
+    /**
+     * Tầng của BIN trong rack (1 = dưới cùng, 2 = giữa, 3 = trên cùng).
+     * Null cho AISLE và RACK.
+     * Tầng 1 & 2: max_weight_kg = 150 kg (~9 thùng 16kg)
+     * Tầng 3 (trên):  max_weight_kg = 120 kg (~7 thùng 16kg) — tải nhẹ hơn để an toàn
+     */
+    @Column(name = "bin_floor")
+    private Integer binFloor;
+
     @Column(name = "active", nullable = false)
     @Builder.Default
     private Boolean active = true;

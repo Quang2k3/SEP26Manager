@@ -59,4 +59,17 @@ public class CreateLocationRequest {
 
     @Schema(description = "Đóng vai trò điểm tập kết Staging?", example = "false")
     private Boolean isStaging;
+
+    /**
+     * Tầng của BIN trong rack. Bắt buộc khi locationType = BIN.
+     * 1 = tầng dưới (nặng nhất, max 150kg)
+     * 2 = tầng giữa (max 150kg)
+     * 3 = tầng trên (nhẹ nhất, max 120kg)
+     * Hệ thống tự gán max_weight_kg theo tầng nếu người dùng không nhập.
+     */
+    @Schema(description = "Tầng BIN trong rack (1=dưới, 2=giữa, 3=trên). Bắt buộc với BIN.", example = "1")
+    private Integer binFloor;
+
+    @Schema(description = "Đánh dấu khu hàng lỗi (defect zone). Mặc định false.", example = "false")
+    private Boolean isDefect;
 }

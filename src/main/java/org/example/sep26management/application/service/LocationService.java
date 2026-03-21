@@ -79,16 +79,57 @@ public class LocationService {
         // BR-LOC-04: validate hierarchy
         validateHierarchy(request.getLocationType(), request.getParentLocationId(), request.getZoneId());
 
+        // BR-LOC-NEW-01: 1 AISLE tối đa 3 RACK
+        if (request.getLocationType() == LocationType.RACK) {
+            long rackCount = locationRepository.countByParentLocationIdAndLocationType(
+                    request.getParentLocationId(), LocationType.RACK);
+            if (rackCount >= 3) {
+                throw new BusinessException(MessageConstants.LOCATION_RACK_LIMIT_EXCEEDED);
+            }
+        }
+
+        // BR-LOC-NEW-02: 1 RACK tối đa 9 BIN
+        if (request.getLocationType() == LocationType.BIN) {
+            long binCount = locationRepository.countByParentLocationIdAndLocationType(
+                    request.getParentLocationId(), LocationType.BIN);
+            if (binCount >= 9) {
+                throw new BusinessException(MessageConstants.LOCATION_BIN_LIMIT_EXCEEDED);
+            }
+        }
+
+        // BR-LOC-NEW-03: BIN phải có tầng (binFloor)
+        java.math.BigDecimal resolvedWeight = request.getMaxWeightKg();
+        Integer resolvedFloor = null;
+        if (request.getLocationType() == LocationType.BIN) {
+            if (request.getBinFloor() == null) {
+                throw new BusinessException(MessageConstants.LOCATION_BIN_FLOOR_REQUIRED);
+            }
+            if (request.getBinFloor() < 1 || request.getBinFloor() > 3) {
+                throw new BusinessException(MessageConstants.LOCATION_BIN_FLOOR_INVALID);
+            }
+            resolvedFloor = request.getBinFloor();
+            // Tự động gán max_weight_kg theo tầng nếu người dùng không nhập:
+            // Tầng 1, 2 (dưới, giữa): 150 kg (~9 thùng 16kg, ~11 thùng 13kg)
+            // Tầng 3 (trên): 120 kg (~7 thùng 16kg, ~9 thùng 13kg) — nhẹ hơn để an toàn
+            if (resolvedWeight == null) {
+                resolvedWeight = resolvedFloor <= 2
+                        ? new java.math.BigDecimal("150.00")
+                        : new java.math.BigDecimal("120.00");
+            }
+        }
+
         LocationEntity location = LocationEntity.builder()
                 .warehouseId(warehouseId)
                 .zoneId(request.getZoneId())
                 .locationCode(request.getLocationCode().toUpperCase().trim())
                 .locationType(request.getLocationType())
                 .parentLocationId(request.getParentLocationId())
-                .maxWeightKg(request.getMaxWeightKg())
+                .maxWeightKg(resolvedWeight)
                 .maxVolumeM3(request.getMaxVolumeM3())
                 .isPickingFace(request.getIsPickingFace() != null ? request.getIsPickingFace() : false)
                 .isStaging(request.getIsStaging() != null ? request.getIsStaging() : false)
+                .isDefect(request.getIsDefect() != null ? request.getIsDefect() : false)
+                .binFloor(resolvedFloor)
                 .active(true)
                 .build();
 
@@ -374,6 +415,13 @@ public class LocationService {
     }
 
     private LocationResponse toResponse(LocationEntity l, String zoneCode, String parentCode) {
+        // Tính số thùng tối đa ước tính (chuẩn thùng 16kg)
+        Integer maxBoxCount = null;
+        if (l.getLocationType() == LocationType.BIN && l.getMaxWeightKg() != null) {
+            maxBoxCount = l.getMaxWeightKg()
+                    .divide(new java.math.BigDecimal("16"), java.math.RoundingMode.FLOOR)
+                    .intValue();
+        }
         return LocationResponse.builder()
                 .locationId(l.getLocationId())
                 .warehouseId(l.getWarehouseId())
@@ -387,6 +435,9 @@ public class LocationService {
                 .maxVolumeM3(l.getMaxVolumeM3())
                 .isPickingFace(l.getIsPickingFace())
                 .isStaging(l.getIsStaging())
+                .isDefect(l.getIsDefect())
+                .binFloor(l.getBinFloor())
+                .maxBoxCount(maxBoxCount)
                 .active(l.getActive())
                 .createdAt(l.getCreatedAt())
                 .updatedAt(l.getUpdatedAt())
