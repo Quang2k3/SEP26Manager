@@ -34,6 +34,11 @@ public class SkuResponse {
     private BigDecimal volumeMl;
     @Schema(description = "Cân nặng", example = "250.0")
     private BigDecimal weightG;
+
+    /** Trọng lượng 1 thùng (kg) — dùng để tính putaway + hiển thị trên form nhập hàng */
+    private BigDecimal weightPerCartonKg;
+    /** Số đơn vị lẻ trong 1 thùng (VD: 4 can, 12 chai) */
+    private Integer unitsPerCarton;
     @Schema(description = "Xuất xứ", example = "USA")
     private String originCountry;
     @Schema(description = "Mùi (Nếu có)", example = "Không mùi")
