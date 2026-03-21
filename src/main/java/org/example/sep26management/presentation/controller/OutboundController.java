@@ -65,6 +65,7 @@ public class OutboundController {
     private final DispatchPdfService dispatchPdfService;
     private final SignedNoteService signedNoteService;
     private final PickSignedNoteService pickSignedNoteService;
+    private final org.example.sep26management.infrastructure.persistence.repository.InventorySnapshotJpaRepository snapshotRepository;
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
     // createOutbound(request, createdBy, ip, ua) — warehouseId injected vào request
@@ -564,5 +565,38 @@ public class OutboundController {
 
     private String ua(HttpServletRequest req) {
         return req.getHeader("User-Agent");
+    }
+    // ── Check stock availability — dùng cho FE realtime check khi tạo đơn ────
+    // GET /v1/outbound/check-stock?warehouseId=1&items=skuId:qty,skuId:qty
+    @GetMapping("/check-stock")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Check tồn kho realtime", description = "FE gọi khi nhập SKU+qty để cảnh báo thiếu hàng ngay trong form tạo đơn.")
+    public ResponseEntity<ApiResponse<java.util.List<java.util.Map<String, Object>>>> checkStock(
+            @RequestParam Long warehouseId,
+            @RequestParam String items) { // format: "skuId:qty,skuId:qty"
+        try {
+            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+            for (String pair : items.split(",")) {
+                String[] parts = pair.trim().split(":");
+                if (parts.length != 2) continue;
+                Long skuId = Long.parseLong(parts[0].trim());
+                java.math.BigDecimal qty = new java.math.BigDecimal(parts[1].trim());
+                java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, skuId);
+                java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, skuId);
+                if (total    == null) total    = java.math.BigDecimal.ZERO;
+                if (reserved == null) reserved = java.math.BigDecimal.ZERO;
+                java.math.BigDecimal available = total.subtract(reserved).max(java.math.BigDecimal.ZERO);
+                java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                row.put("skuId", skuId);
+                row.put("requestedQty", qty);
+                row.put("availableQty", available);
+                row.put("sufficient", available.compareTo(qty) >= 0);
+                row.put("shortageQty", available.compareTo(qty) < 0 ? qty.subtract(available) : java.math.BigDecimal.ZERO);
+                result.add(row);
+            }
+            return ResponseEntity.ok(ApiResponse.success("Stock check OK", result));
+        } catch (Exception e) {
+            return ResponseEntity.ok(ApiResponse.success("Stock check error", java.util.List.of()));
+        }
     }
 }
