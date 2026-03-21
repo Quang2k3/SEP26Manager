@@ -91,6 +91,8 @@ public class SecurityConfig {
                         .permitAll()
                         // Scan events — requires KEEPER or QC role (iPhone scanner)
                         .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasAnyRole("KEEPER", "QC")
+                        // [FIX QC] Upload anh hang hong tu dien thoai scan QC
+                        .requestMatchers("/v1/attachments/upload").hasAnyRole("KEEPER", "QC", "MANAGER")
                         // Manager only endpoints
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
                         // Zones: KEEPER cần GET để chọn zone khi làm putaway
