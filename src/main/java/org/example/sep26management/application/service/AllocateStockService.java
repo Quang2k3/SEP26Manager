@@ -70,6 +70,32 @@ public class AllocateStockService {
             soItemRepository.findBySoId(so.getSoId())
                     .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getOrderedQty())));
 
+            // [BUG-FIX] WAITING_STOCK guard: chỉ cho phép re-allocate khi tồn kho ĐÃ ĐỦ
+            // toàn bộ yêu cầu. Nếu chưa đủ, block và yêu cầu chờ nhập thêm.
+            // Không có guard này, Keeper có thể re-allocate bất kỳ lúc nào dù hàng
+            // vẫn còn thiếu → tạo PARTIAL allocation mới → lại phải báo thiếu lại.
+            if ("WAITING_STOCK".equals(so.getStatus())) {
+                List<String> stillShort = new java.util.ArrayList<>();
+                for (SkuQtyPair pair : required) {
+                    java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
+                    java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
+                    if (total    == null) total    = java.math.BigDecimal.ZERO;
+                    if (reserved == null) reserved = java.math.BigDecimal.ZERO;
+                    java.math.BigDecimal available = total.subtract(reserved).max(java.math.BigDecimal.ZERO);
+                    if (available.compareTo(pair.qty) < 0) {
+                        String skuCode = skuRepository.findById(pair.skuId)
+                                .map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
+                        stillShort.add(skuCode + " (cần " + pair.qty + ", có " + available + ")");
+                    }
+                }
+                if (!stillShort.isEmpty()) {
+                    throw new BusinessException(
+                            "Chưa đủ tồn kho để phân bổ — vẫn đang thiếu: " +
+                                    String.join("; ", stillShort) +
+                                    ". Vui lòng chờ nhập thêm hàng trước khi Allocate lại.");
+                }
+            }
+
         } else {
             TransferEntity transfer = transferRepository.findById(request.getDocumentId())
                     .orElseThrow(() -> new ResourceNotFoundException(
@@ -236,6 +262,29 @@ public class AllocateStockService {
 
         if (incidentItems.isEmpty()) {
             throw new BusinessException("Không có SKU nào thiếu hàng để báo cáo.");
+        }
+
+        // [BUG-FIX] Chặn báo cáo trùng lặp: nếu SO đã có OPEN shortage incident thì từ chối.
+        // Không có guard này, Keeper có thể bấm "Báo thiếu" nhiều lần → nhiều incident OPEN
+        // → Manager thấy nhiều đơn cùng SO → xử lý 1 đơn xong, đơn còn lại gây lỗi khi resolve.
+        if (orderType == OutboundType.SALES_ORDER) {
+            long openCount = incidentJpaRepository.countOpenIncidentsBySoId(documentId);
+            if (openCount > 0) {
+                throw new BusinessException(
+                        "Đã có " + openCount + " incident SHORTAGE đang chờ xử lý cho đơn này. " +
+                                "Vui lòng chờ Manager xử lý trước khi báo cáo lại.");
+            }
+        }
+
+        // [BUG-FIX] Đổi SO status → ON_HOLD để khoá Keeper không thể báo cáo lại
+        // và để FE hiển thị banner "Đang chờ Manager xử lý" thay vì cho phép thao tác tiếp.
+        if (orderType == OutboundType.SALES_ORDER) {
+            soRepository.findById(documentId).ifPresent(so -> {
+                so.setStatus("ON_HOLD");
+                so.setUpdatedAt(java.time.LocalDateTime.now());
+                soRepository.save(so);
+                log.info("SO {} → ON_HOLD (shortage reported, waiting Manager)", so.getSoCode());
+            });
         }
 
         // [V20 FIX] Tạo trực tiếp với soId — không reuse receivingId làm surrogate

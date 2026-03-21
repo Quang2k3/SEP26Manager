@@ -383,20 +383,20 @@ public class OutboundQcService {
         String action = request.getAction().toUpperCase();
         switch (action) {
             case "WAIT_BACKORDER" -> {
-                // [BUG-FIX] Cancel toàn bộ OPEN reservations của SO này trước khi đổi status.
-                // Nếu bỏ qua bước này, reservedQty trên inventory_snapshot vẫn bị giữ cho phần
-                // đã allocate được (ví dụ 8/10 units). Khi Keeper re-allocate sau khi hàng về,
-                // idempotency block trong AllocateStockService sẽ gọi
-                // incrementReservedByWarehouseAndSku() để cancel — query đó broadcast lên TẤT CẢ
-                // rows của warehouse+sku thay vì chỉ đúng location+lot → reserved_qty âm → tồn ảo.
+                // [BUG-FIX #prev] Cancel toàn bộ OPEN reservations trước khi đổi status
+                // để tránh broadcast decrement → reserved_qty âm → tồn ảo.
                 cancelOpenReservations(so.getSoId());
-                // Khi hàng về, Keeper allocate lại → AllocateStockService cho phép từ WAITING_STOCK
+                // [BUG-FIX] Đổi SO → WAITING_STOCK.
+                // AllocateStockService sẽ chặn re-allocate nếu tồn chưa đủ (guard mới).
+                // Keeper chỉ có thể Allocate lại khi tổng available >= tổng yêu cầu.
                 so.setStatus("WAITING_STOCK");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → WAITING_STOCK (chờ hàng bù, reservations đã release)", so.getSoCode());
             }
             case "CLOSE_SHORT" -> {
+                // Cancel reservations đang OPEN (nếu có) rồi mới điều chỉnh qty
+                cancelOpenReservations(so.getSoId());
                 // [GAP 3 FIX] Cắt giảm orderedQty về available → SO → APPROVED → re-Allocate
                 adjustOrderedQtyToAvailable(so);
                 so.setStatus("APPROVED");
@@ -407,6 +407,22 @@ public class OutboundQcService {
             default -> throw new BusinessException(
                     "Invalid action: " + action + ". Must be WAIT_BACKORDER or CLOSE_SHORT.");
         }
+
+        // [BUG-FIX] Cancel tất cả OPEN shortage incidents còn sót cho cùng SO này
+        // (phòng trường hợp Keeper đã bấm báo thiếu nhiều lần trước khi có guard).
+        // Chỉ resolve incident hiện tại theo flow bình thường; các incident khác cancel luôn.
+        incidentRepository.findOpenIncidentsBySoId(so.getSoId()).stream()
+                .filter(i -> !i.getIncidentId().equals(incident.getIncidentId()))
+                .filter(i -> org.example.sep26management.application.enums.IncidentType.SHORTAGE
+                        .equals(i.getIncidentType()))
+                .forEach(i -> {
+                    i.setStatus("CANCELLED");
+                    i.setDescription(i.getDescription() +
+                            "[Auto-cancelled: Manager đã xử lý incident " + incident.getIncidentCode() + "]");
+                    incidentRepository.save(i);
+                    log.info("Auto-cancelled duplicate SHORTAGE incident {} for SO {}",
+                            i.getIncidentCode(), so.getSoId());
+                });
 
         incident.setStatus("RESOLVED");
         String noteAppend = "[Manager " + managerId + "]: " + action
