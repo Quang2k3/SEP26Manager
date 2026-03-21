@@ -60,10 +60,8 @@ public class AllocateStockService {
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            // Allow allocate từ APPROVED, WAITING_STOCK (re-allocate) hoặc SHORTAGE_PENDING (partial lock khi submit)
-            if (!"APPROVED".equals(so.getStatus())
-                    && !"WAITING_STOCK".equals(so.getStatus())
-                    && !"SHORTAGE_PENDING".equals(so.getStatus())) {
+            // Allow re-allocate from APPROVED or WAITING_STOCK (after Manager resolves WAIT_BACKORDER)
+            if (!"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
                 throw new BusinessException(MessageConstants.ALLOCATE_MUST_BE_APPROVED);
             }
 
@@ -280,12 +278,17 @@ public class AllocateStockService {
 
         // [BUG-FIX] Đổi SO status → ON_HOLD để khoá Keeper không thể báo cáo lại
         // và để FE hiển thị banner "Đang chờ Manager xử lý" thay vì cho phép thao tác tiếp.
+        // [FIX TC-1A] DRAFT → WAITING_STOCK (báo thiếu từ đơn nháp, chưa qua duyệt)
+        // APPROVED → ON_HOLD (Allocate thất bại sau khi Manager đã duyệt)
         if (orderType == OutboundType.SALES_ORDER) {
             soRepository.findById(documentId).ifPresent(so -> {
-                so.setStatus("ON_HOLD");
+                String prevStatus = so.getStatus();
+                String newStatus = "DRAFT".equals(prevStatus) ? "WAITING_STOCK" : "ON_HOLD";
+                so.setStatus(newStatus);
                 so.setUpdatedAt(java.time.LocalDateTime.now());
                 soRepository.save(so);
-                log.info("SO {} → ON_HOLD (shortage reported, waiting Manager)", so.getSoCode());
+                log.info("SO {} → {} (shortage reported from {}, waiting Manager)",
+                        so.getSoCode(), newStatus, prevStatus);
             });
         }
 
