@@ -43,4 +43,10 @@ public class ScanEventRequest {
 
     /** outbound_qc | inbound */
     private String mode;
+
+    // [FIX QC] ID cụ thể của picking task item — tránh nhầm khi cùng SKU có nhiều rows
+    private Long pickingTaskItemId;
+
+    // [FIX QC] URL ảnh hàng hỏng khi FAIL — upload trước, gửi URL vào đây
+    private String attachmentUrl;
 }

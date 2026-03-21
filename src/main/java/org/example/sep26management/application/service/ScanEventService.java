@@ -281,6 +281,10 @@ public class ScanEventService {
             qcReq.setPickingTaskItemId(taskItem.getPickingTaskItemId());
             qcReq.setResult(condition);
             qcReq.setReason("FAIL".equals(condition) ? (reasonCode != null ? reasonCode : "Lỗi phát hiện khi scan") : null);
+            // [FIX QC] Truyen attachmentUrl vao QcScanRequest de luu anh hang hong
+            if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
+                qcReq.setAttachmentUrl(request.getAttachmentUrl());
+            }
             outboundQcService.scanItem(qcReq, null);
 
             log.info("Outbound QC scan OK: taskId={}, SKU={}, result={}", taskId, sku.getSkuCode(), condition);
