@@ -276,15 +276,19 @@ public class OutboundQcService {
         String action = request.getAction().toUpperCase();
         switch (action) {
             case "RETURN_SCRAP" -> {
-                // Trừ tồn kho hàng hỏng
-                deductFailItems(incident.getSoId(), managerId);
-                // Reset qc_result = null để Keeper re-pick
+                // [FIX] Trừ tồn kho hàng hỏng tại vị trí gốc
+                // và chuyển sang khu hàng lỗi (defect zone) để theo dõi
+                deductFailItems(incident.getSoId(), managerId, so.getWarehouseId());
+                // Reset picking items FAIL/HOLD để không tính vào pick list cũ
                 resetFailItemsForRepick(incident.getSoId());
-                // SO → PICKING để tạo Pick List mới
-                so.setStatus("PICKING");
+                // [FIX] SO → APPROVED (không phải PICKING) để Keeper re-allocate từ đầu.
+                // Hàng lỗi đã bị trừ khỏi kho → allocate lại sẽ lấy hàng thay thế từ bin khác.
+                // Cancel reservations cũ trước khi đổi status
+                cancelOpenReservationsForSo(incident.getSoId());
+                so.setStatus("APPROVED");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → PICKING (re-pick after DAMAGE RETURN_SCRAP)", so.getSoCode());
+                log.info("SO {} → APPROVED (re-allocate after DAMAGE RETURN_SCRAP)", so.getSoCode());
             }
             case "ACCEPT" -> {
                 // Xuất luôn hàng lỗi
@@ -307,29 +311,37 @@ public class OutboundQcService {
         return ApiResponse.success("Incident resolved. SO updated.", buildSimpleResponse(incident));
     }
 
-    /** Trừ tồn kho (quantity) cho FAIL/HOLD items — ghi txn DAMAGE_WRITE_OFF. */
-    private void deductFailItems(Long soId, Long userId) {
+    /** Trừ tồn kho hàng lỗi tại vị trí gốc, cộng vào khu hàng lỗi. */
+    private void deductFailItems(Long soId, Long userId, Long warehouseId) {
         List<PickingTaskItemEntity> failItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId)
                 .stream()
                 .filter(i -> "FAIL".equals(i.getQcResult()) || "HOLD".equals(i.getQcResult()))
                 .collect(Collectors.toList());
 
-        SalesOrderEntity so = salesOrderRepository.findById(soId).orElse(null);
-        Long warehouseId = so != null ? so.getWarehouseId() : 0L;
+        if (failItems.isEmpty()) return;
+
+        // Tìm hoặc tạo khu hàng lỗi (defect bin)
+        LocationEntity defectBin = getOrCreateDefectBin(warehouseId);
 
         for (PickingTaskItemEntity item : failItems) {
             BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
                     ? item.getPickedQty() : item.getRequiredQty();
             if (qty.compareTo(BigDecimal.ZERO) <= 0) continue;
 
-            // Trừ quantity tại location
-            inventorySnapshotRepository.decrementQuantity(
-                    warehouseId, item.getSkuId(), item.getLotId(), item.getFromLocationId(), qty);
+            Long fromLocationId = item.getFromLocationId();
 
-            // Ghi transaction
+            // 1. Trừ quantity tại vị trí gốc
+            inventorySnapshotRepository.decrementQuantity(
+                    warehouseId, item.getSkuId(), item.getLotId(), fromLocationId, qty);
+
+            // 2. Cộng quantity vào khu hàng lỗi
+            inventorySnapshotRepository.upsertInventory(
+                    warehouseId, item.getSkuId(), item.getLotId(), defectBin.getLocationId(), qty);
+
+            // 3. Ghi txn DAMAGE_WRITE_OFF (xuất khỏi bin gốc)
             inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
                     .warehouseId(warehouseId)
-                    .locationId(item.getFromLocationId())
+                    .locationId(fromLocationId)
                     .skuId(item.getSkuId())
                     .lotId(item.getLotId())
                     .quantity(qty.negate())
@@ -340,8 +352,62 @@ public class OutboundQcService {
                     .createdBy(userId != null ? userId : 0L)
                     .build());
 
-            log.info("DAMAGE_WRITE_OFF: skuId={} qty={} at locationId={}", item.getSkuId(), qty, item.getFromLocationId());
+            // 4. Ghi txn DAMAGE_TRANSFER (nhập vào khu hàng lỗi)
+            inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                    .warehouseId(warehouseId)
+                    .locationId(defectBin.getLocationId())
+                    .skuId(item.getSkuId())
+                    .lotId(item.getLotId())
+                    .quantity(qty)
+                    .txnType("DAMAGE_TRANSFER")
+                    .referenceTable("sales_orders")
+                    .referenceId(soId)
+                    .reasonCode("QC_FAIL_MOVE_TO_DEFECT")
+                    .createdBy(userId != null ? userId : 0L)
+                    .build());
+
+            log.info("DAMAGE: skuId={} qty={} moved from loc={} to defect bin={}",
+                    item.getSkuId(), qty, fromLocationId, defectBin.getLocationId());
         }
+    }
+
+    /**
+     * Tìm khu hàng lỗi (defect bin) của warehouse.
+     * Nếu chưa có → tự tạo location DEFECT-BIN với is_defect=true.
+     */
+    private LocationEntity getOrCreateDefectBin(Long warehouseId) {
+        return locationRepository.findDefectBinByWarehouse(warehouseId)
+                .orElseGet(() -> {
+                    String code = "DEFECT-BIN-WH" + warehouseId;
+                    LocationEntity defect = LocationEntity.builder()
+                            .warehouseId(warehouseId)
+                            .locationCode(code)
+                            .locationType(org.example.sep26management.application.enums.LocationType.BIN)
+                            .isPickingFace(false)
+                            .isStaging(false)
+                            .isDefect(true)
+                            .active(true)
+                            .build();
+                    LocationEntity saved = locationRepository.save(defect);
+                    log.info("Auto-created defect bin: {} (warehouseId={})", code, warehouseId);
+                    return saved;
+                });
+    }
+
+    /** Cancel OPEN reservations cho SO trước khi re-allocate sau RETURN_SCRAP. */
+    private void cancelOpenReservationsForSo(Long soId) {
+        reservationRepository.findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN")
+                .forEach(r -> {
+                    if (r.getLocationId() != null) {
+                        inventorySnapshotRepository.incrementReservedByLocationAndSku(
+                                r.getLocationId(), r.getSkuId(), r.getLotId(), r.getQuantity().negate());
+                    } else {
+                        inventorySnapshotRepository.incrementReservedByWarehouseAndSku(
+                                r.getWarehouseId(), r.getSkuId(), r.getQuantity().negate());
+                    }
+                    r.setStatus("CANCELLED");
+                    reservationRepository.save(r);
+                });
     }
 
     /** Reset qc_result → null cho FAIL/HOLD items để Keeper re-pick. */
@@ -383,20 +449,14 @@ public class OutboundQcService {
         String action = request.getAction().toUpperCase();
         switch (action) {
             case "WAIT_BACKORDER" -> {
-                // [BUG-FIX #prev] Cancel toàn bộ OPEN reservations trước khi đổi status
-                // để tránh broadcast decrement → reserved_qty âm → tồn ảo.
-                cancelOpenReservations(so.getSoId());
-                // [BUG-FIX] Đổi SO → WAITING_STOCK.
-                // AllocateStockService sẽ chặn re-allocate nếu tồn chưa đủ (guard mới).
-                // Keeper chỉ có thể Allocate lại khi tổng available >= tổng yêu cầu.
+                // Chờ nhập hàng bù — SO giữ trạng thái WAITING_STOCK
+                // Khi hàng về, Keeper allocate lại → AllocateStockService cho phép từ WAITING_STOCK
                 so.setStatus("WAITING_STOCK");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → WAITING_STOCK (chờ hàng bù, reservations đã release)", so.getSoCode());
+                log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
             }
             case "CLOSE_SHORT" -> {
-                // Cancel reservations đang OPEN (nếu có) rồi mới điều chỉnh qty
-                cancelOpenReservations(so.getSoId());
                 // [GAP 3 FIX] Cắt giảm orderedQty về available → SO → APPROVED → re-Allocate
                 adjustOrderedQtyToAvailable(so);
                 so.setStatus("APPROVED");
@@ -408,22 +468,6 @@ public class OutboundQcService {
                     "Invalid action: " + action + ". Must be WAIT_BACKORDER or CLOSE_SHORT.");
         }
 
-        // [BUG-FIX] Cancel tất cả OPEN shortage incidents còn sót cho cùng SO này
-        // (phòng trường hợp Keeper đã bấm báo thiếu nhiều lần trước khi có guard).
-        // Chỉ resolve incident hiện tại theo flow bình thường; các incident khác cancel luôn.
-        incidentRepository.findOpenIncidentsBySoId(so.getSoId()).stream()
-                .filter(i -> !i.getIncidentId().equals(incident.getIncidentId()))
-                .filter(i -> org.example.sep26management.application.enums.IncidentType.SHORTAGE
-                        .equals(i.getIncidentType()))
-                .forEach(i -> {
-                    i.setStatus("CANCELLED");
-                    i.setDescription(i.getDescription() +
-                            "[Auto-cancelled: Manager đã xử lý incident " + incident.getIncidentCode() + "]");
-                    incidentRepository.save(i);
-                    log.info("Auto-cancelled duplicate SHORTAGE incident {} for SO {}",
-                            i.getIncidentCode(), so.getSoId());
-                });
-
         incident.setStatus("RESOLVED");
         String noteAppend = "[Manager " + managerId + "]: " + action
                 + (request.getNote() != null && !request.getNote().isBlank() ? " — " + request.getNote() : "");
@@ -432,48 +476,6 @@ public class OutboundQcService {
 
         log.info("SHORTAGE Incident {} resolved, action={}", incidentId, action);
         return ApiResponse.success("Shortage incident resolved.", buildSimpleResponse(incident));
-    }
-
-    /**
-     * [BUG-FIX] Cancel toàn bộ OPEN reservations của một SO và trả lại reservedQty về snapshot.
-     *
-     * Phải dùng incrementReservedByLocationAndSku (theo location+sku+lot) thay vì
-     * incrementReservedByWarehouseAndSku để tránh broadcast cập nhật lên TẤT CẢ rows
-     * cùng warehouse+sku — đó chính là nguyên nhân gây reserved_qty âm và tồn ảo.
-     *
-     * Gọi trước khi đổi SO status sang WAITING_STOCK (WAIT_BACKORDER) để đảm bảo
-     * khi Keeper re-allocate, idempotency block trong AllocateStockService không tìm
-     * thấy OPEN reservation nào cũ còn sót → không cần cancel lần hai → không gây double-decrement.
-     */
-    private void cancelOpenReservations(Long soId) {
-        List<ReservationEntity> openReservations = reservationRepository
-                .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
-
-        for (ReservationEntity r : openReservations) {
-            if (r.getLocationId() != null) {
-                // Giảm đúng row location+sku+lot — an toàn, không broadcast
-                inventorySnapshotRepository.incrementReservedByLocationAndSku(
-                        r.getLocationId(), r.getSkuId(), r.getLotId(),
-                        r.getQuantity().negate());
-            } else {
-                // Fallback: location_id null (data cũ trước khi apply migration BUG-FIX #1).
-                // Dùng GREATEST(0, reserved_qty - qty) để tránh âm trong trường hợp này.
-                inventorySnapshotRepository.incrementReservedByWarehouseAndSku(
-                        r.getWarehouseId(), r.getSkuId(), r.getQuantity().negate());
-                log.warn("cancelOpenReservations: reservation {} có locationId=null — " +
-                                "dùng warehouse-level decrement (fallback). Kiểm tra migration BUG-FIX #1.",
-                        r.getReservationId());
-            }
-            r.setStatus("CANCELLED");
-            reservationRepository.save(r);
-            log.info("Reservation {} cancelled (soId={}, sku={}, qty={}, loc={})",
-                    r.getReservationId(), soId, r.getSkuId(), r.getQuantity(), r.getLocationId());
-        }
-
-        if (!openReservations.isEmpty()) {
-            log.info("cancelOpenReservations: SO {} — {} reservation(s) cancelled, reservedQty released",
-                    soId, openReservations.size());
-        }
     }
 
     /** CLOSE_SHORT: giảm orderedQty về số lượng available thực tế trong kho. */

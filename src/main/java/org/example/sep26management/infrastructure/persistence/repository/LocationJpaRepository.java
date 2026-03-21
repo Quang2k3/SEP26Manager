@@ -125,6 +125,21 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
         Optional<LocationEntity> findFirstStagingByWarehouse(@Param("warehouseId") Long warehouseId);
 
         /**
+         * Tìm khu hàng lỗi (defect bin) của warehouse.
+         * Dùng khi Manager xử lý DAMAGE RETURN_SCRAP: chuyển hàng lỗi vào đây.
+         * Tự động tạo nếu chưa có (handled in OutboundQcService).
+         */
+        @Query("""
+                        SELECT l FROM LocationEntity l
+                        WHERE l.warehouseId = :warehouseId
+                          AND l.isDefect = true
+                          AND l.active = true
+                        ORDER BY l.locationId ASC
+                        LIMIT 1
+                        """)
+        Optional<LocationEntity> findDefectBinByWarehouse(@Param("warehouseId") Long warehouseId);
+
+        /**
          * Fallback: lấy bất kỳ location active nào của warehouse
          */
         @Query("""
