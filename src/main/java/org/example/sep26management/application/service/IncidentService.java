@@ -389,6 +389,54 @@ public class IncidentService {
                                     + ". Must be CLOSE_SHORT, WAIT_BACKORDER, ACCEPT, RETURN, or SCRAP");
             }
 
+            // ── Process damageAction if present (item có cả thừa/thiếu VÀ hàng hỏng) ──
+            String damageAction = res.getDamageAction();
+            if (damageAction != null && !damageAction.isBlank() && rcItem != null
+                    && incItem.getDamagedQty() != null
+                    && incItem.getDamagedQty().compareTo(java.math.BigDecimal.ZERO) > 0) {
+                java.math.BigDecimal dmgQty = incItem.getDamagedQty();
+                switch (damageAction.toUpperCase()) {
+                    case "RETURN":
+                        incItem.setActionReturnQty(
+                                (incItem.getActionReturnQty() != null ? incItem.getActionReturnQty() : java.math.BigDecimal.ZERO)
+                                        .add(dmgQty));
+                        java.math.BigDecimal curRecv = rcItem.getReceivedQty() != null
+                                ? rcItem.getReceivedQty() : java.math.BigDecimal.ZERO;
+                        java.math.BigDecimal afterDmgReturn = curRecv.subtract(dmgQty);
+                        if (afterDmgReturn.compareTo(java.math.BigDecimal.ZERO) < 0)
+                            afterDmgReturn = java.math.BigDecimal.ZERO;
+                        rcItem.setReceivedQty(afterDmgReturn);
+                        receivingItemRepo.save(rcItem);
+                        incItem.setNote(appendNote(incItem.getNote(),
+                                "[Manager]: DAMAGE→RETURN — Hoàn " + dmgQty + " hàng hỏng"));
+                        break;
+                    case "SCRAP":
+                        incItem.setActionScrapQty(
+                                (incItem.getActionScrapQty() != null ? incItem.getActionScrapQty() : java.math.BigDecimal.ZERO)
+                                        .add(dmgQty));
+                        java.math.BigDecimal curRecv2 = rcItem.getReceivedQty() != null
+                                ? rcItem.getReceivedQty() : java.math.BigDecimal.ZERO;
+                        java.math.BigDecimal afterDmgScrap = curRecv2.subtract(dmgQty);
+                        if (afterDmgScrap.compareTo(java.math.BigDecimal.ZERO) < 0)
+                            afterDmgScrap = java.math.BigDecimal.ZERO;
+                        rcItem.setReceivedQty(afterDmgScrap);
+                        receivingItemRepo.save(rcItem);
+                        incItem.setNote(appendNote(incItem.getNote(),
+                                "[Manager]: DAMAGE→SCRAP — Huỷ " + dmgQty + " hàng hỏng"));
+                        break;
+                    case "ACCEPT":
+                        incItem.setActionPassQty(
+                                (incItem.getActionPassQty() != null ? incItem.getActionPassQty() : java.math.BigDecimal.ZERO)
+                                        .add(dmgQty));
+                        incItem.setNote(appendNote(incItem.getNote(),
+                                "[Manager]: DAMAGE→ACCEPT — Chấp nhận " + dmgQty + " hàng hỏng, nhập kho"));
+                        break;
+                    default:
+                        log.warn("Unknown damageAction '{}' for incidentItem {}, skipping",
+                                damageAction, incItem.getIncidentItemId());
+                }
+            }
+
             incidentItemRepo.save(incItem);
         }
 
