@@ -3,9 +3,14 @@ package org.example.sep26management.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.dto.request.QcScanRequest;
+import org.example.sep26management.application.dto.request.ResolveOutboundDamageRequest;
+import org.example.sep26management.application.dto.request.ResolveOutboundShortageRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.DispatchNoteResponse;
+import org.example.sep26management.application.dto.response.IncidentResponse;
 import org.example.sep26management.application.dto.response.QcSummaryResponse;
+import org.example.sep26management.application.enums.IncidentCategory;
+import org.example.sep26management.application.enums.IncidentType;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.*;
@@ -19,18 +24,12 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * OutboundQcService — QC Scan + Dispatch logic for the Sales Order outbound flow.
+ * OutboundQcService — QC Scan + Dispatch for Sales Order outbound flow.
  *
- * New lifecycle states introduced:
- *   picking_task.status: PICKED → QC_IN_PROGRESS → COMPLETED
- *   sales_order.status:  PICKING → QC_SCAN → DISPATCHED
- *
- * APIs covered:
- *   POST /v1/outbound/pick-list/{taskId}/start-qc      (BR-QC-01/02)
- *   POST /v1/outbound/qc-scan                          (BR-QC-01/02)
- *   GET  /v1/outbound/pick-list/{taskId}/qc-summary
- *   GET  /v1/outbound/sales-orders/{soId}/dispatch-note (BR-QC-03/04)
- *   POST /v1/outbound/sales-orders/{soId}/dispatch      (BR-DISPATCH-01/02/03)
+ * [V20 changes]:
+ *  - finalizeQc: khi có FAIL → tạo Incident(DAMAGE) + set SO → ON_HOLD
+ *  - resolveOutboundDamage: Manager xử lý DAMAGE (RETURN_SCRAP / ACCEPT)
+ *  - resolveOutboundShortage: Manager xử lý SHORTAGE (WAIT_BACKORDER / CLOSE_SHORT)
  */
 @Service
 @RequiredArgsConstructor
@@ -40,44 +39,33 @@ public class OutboundQcService {
     private final PickingTaskJpaRepository pickingTaskRepository;
     private final PickingTaskItemJpaRepository pickingTaskItemRepository;
     private final SalesOrderJpaRepository salesOrderRepository;
+    private final SalesOrderItemJpaRepository salesOrderItemRepository;
     private final InventorySnapshotJpaRepository inventorySnapshotRepository;
     private final InventoryTransactionJpaRepository inventoryTransactionRepository;
     private final ReservationQueryRepository reservationRepository;
     private final IncidentJpaRepository incidentRepository;
+    private final IncidentItemJpaRepository incidentItemRepository;
     private final InventoryLotJpaRepository inventoryLotRepository;
     private final LocationJpaRepository locationRepository;
     private final SkuJpaRepository skuRepository;
     private final UserJpaRepository userRepository;
     private final WarehouseJpaRepository warehouseRepository;
     private final CustomerJpaRepository customerRepository;
-    // ── [NEW] PDF service — tạo Phiếu Xuất Kho sau khi dispatch thành công
     private final DispatchPdfService dispatchPdfService;
 
     // ─────────────────────────────────────────────────────────────────────────
     // 1) START QC SESSION
-    // POST /v1/outbound/pick-list/{taskId}/start-qc
-    // Role: KEEPER
     // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Transitions a picking task from PICKED → QC_IN_PROGRESS.
-     * Validates that all items have been picked before starting QC.
-     */
     @Transactional
     public ApiResponse<Void> startQcSession(Long taskId, Long userId) {
-        log.info("Starting QC session for taskId={}, userId={}", taskId, userId);
-
         PickingTaskEntity task = findPickingTask(taskId);
-
         if (!"PICKED".equals(task.getStatus())) {
             throw new BusinessException(
-                    "QC session can only be started for tasks in PICKED status. Current status: " + task.getStatus());
+                    "QC session can only be started for tasks in PICKED status. Current: " + task.getStatus());
         }
-
         task.setStatus("QC_IN_PROGRESS");
         pickingTaskRepository.save(task);
 
-        // Also reflect on the Sales Order
         if (task.getSoId() != null) {
             salesOrderRepository.findById(task.getSoId()).ifPresent(so -> {
                 if ("PICKING".equals(so.getStatus())) {
@@ -87,264 +75,75 @@ public class OutboundQcService {
                 }
             });
         }
-
-        log.info("QC session started for taskId={}", taskId);
         return ApiResponse.success("QC session started. Task status: QC_IN_PROGRESS", null);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // 2) QC SCAN ITEM
-    // POST /v1/outbound/qc-scan
-    // Role: KEEPER
     // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Records QC result (PASS / FAIL / HOLD) for a single picking task item.
-     *
-     * BR-QC-01: FAIL → qc_result = FAIL, qc_note populated, keeper creates incident separately.
-     * BR-QC-02: PASS → qc_result = PASS.
-     */
     @Transactional
     public ApiResponse<Void> scanItem(QcScanRequest request, Long userId) {
-        log.info("QC scan: taskId={}, itemId={}, result={}",
-                request.getPickingTaskId(), request.getPickingTaskItemId(),
-                request.getResult());
-
-        // Validate task exists and is in QC_IN_PROGRESS
         PickingTaskEntity task = findPickingTask(request.getPickingTaskId());
         if (!"QC_IN_PROGRESS".equals(task.getStatus())) {
             throw new BusinessException(
-                    "QC scan is only allowed when task status is QC_IN_PROGRESS. Current: " + task.getStatus());
+                    "QC scan only allowed when task is QC_IN_PROGRESS. Current: " + task.getStatus());
         }
 
-        // Validate item belongs to this task
         PickingTaskItemEntity item = pickingTaskItemRepository.findById(request.getPickingTaskItemId())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "PickingTaskItem not found: " + request.getPickingTaskItemId()));
 
         if (!item.getPickingTaskId().equals(request.getPickingTaskId())) {
-            throw new BusinessException("Item " + request.getPickingTaskItemId()
-                    + " does not belong to task " + request.getPickingTaskId());
+            throw new BusinessException("Item does not belong to task " + request.getPickingTaskId());
         }
 
-        // BR-QC-01: FAIL requires a reason
         if ("FAIL".equals(request.getResult())
                 && (request.getReason() == null || request.getReason().isBlank())) {
             throw new BusinessException("reason is required when result is FAIL (BR-QC-01)");
         }
 
-        // Apply QC result
         item.setQcResult(request.getResult());
         item.setQcScannedAt(LocalDateTime.now());
-
         if ("FAIL".equals(request.getResult())) {
-            // BR-QC-01: store note; keeper will create incident via /v1/incidents
             item.setQcNote(request.getReason());
+            // [V20] Lưu ảnh hàng hỏng nếu có
+            if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
+                item.setQcAttachmentUrl(request.getAttachmentUrl());
+            }
         } else {
             item.setQcNote(null);
         }
-
         pickingTaskItemRepository.save(item);
-
-        log.info("QC scan saved: itemId={}, result={}", item.getPickingTaskItemId(), item.getQcResult());
         return ApiResponse.success("QC scan recorded: " + request.getResult(), null);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // 3) QC SUMMARY
-    // GET /v1/outbound/pick-list/{taskId}/qc-summary
     // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Returns a live summary of QC results for all items in a picking task.
-     * pendingCount = items where qc_scanned_at IS NULL.
-     */
     @Transactional(readOnly = true)
     public ApiResponse<QcSummaryResponse> getQcSummary(Long taskId) {
-        log.info("Fetching QC summary for taskId={}", taskId);
-
-        findPickingTask(taskId); // existence check
-
+        findPickingTask(taskId);
         List<PickingTaskItemEntity> items = pickingTaskItemRepository.findByPickingTaskId(taskId);
-
         int total   = items.size();
         int pass    = (int) items.stream().filter(i -> "PASS".equals(i.getQcResult())).count();
         int fail    = (int) items.stream().filter(i -> "FAIL".equals(i.getQcResult())).count();
         int hold    = (int) items.stream().filter(i -> "HOLD".equals(i.getQcResult())).count();
         int pending = (int) items.stream().filter(i -> i.getQcScannedAt() == null).count();
-
-        QcSummaryResponse summary = QcSummaryResponse.builder()
-                .pickingTaskId(taskId)
-                .totalItems(total)
-                .passCount(pass)
-                .failCount(fail)
-                .holdCount(hold)
-                .pendingCount(pending)
-                .allScanned(pending == 0 && total > 0)
-                .build();
-
-        return ApiResponse.success("QC summary retrieved", summary);
+        return ApiResponse.success("QC summary retrieved", QcSummaryResponse.builder()
+                .pickingTaskId(taskId).totalItems(total).passCount(pass)
+                .failCount(fail).holdCount(hold).pendingCount(pending)
+                .allScanned(pending == 0 && total > 0).build());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 4) DISPATCH NOTE  (generated on-the-fly, NOT stored)
-    // GET /v1/outbound/sales-orders/{soId}/dispatch-note
+    // 4) FINALIZE QC — [V20] tạo Incident DAMAGE khi có FAIL, set ON_HOLD
     // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Dynamically generates a dispatch note from PASS items.
-     *
-     * BR-QC-03: returns 400 if any item has qc_scanned_at IS NULL.
-     * BR-QC-04: returns 400 if there are OPEN incidents for this SO.
-     */
-    @Transactional(readOnly = true)
-    public ApiResponse<DispatchNoteResponse> generateDispatchNote(Long soId) {
-        log.info("Generating dispatch note for soId={}", soId);
-
-        SalesOrderEntity so = findSalesOrder(soId);
-
-        // BR-QC-03: All items must have been scanned
-        boolean allScanned = pickingTaskItemRepository.allItemsScannedForSo(soId);
-        if (!allScanned) {
-            throw new BusinessException(
-                    "Cannot generate dispatch note: some items have not been QC-scanned yet (BR-QC-03)");
-        }
-
-        // BR-QC-04: No OPEN incidents
-        long openIncidents = incidentRepository.countOpenIncidentsBySoId(soId);
-        if (openIncidents > 0) {
-            throw new BusinessException(
-                    "Cannot generate dispatch note: there are " + openIncidents
-                            + " open incident(s) linked to this order (BR-QC-04)");
-        }
-
-        // Fetch supporting data
-        WarehouseEntity warehouse = warehouseRepository.findById(so.getWarehouseId())
-                .orElseThrow(() -> new ResourceNotFoundException("Warehouse not found: " + so.getWarehouseId()));
-
-        String customerName = customerRepository.findById(so.getCustomerId())
-                .map(CustomerEntity::getCustomerName)
-                .orElse("N/A");
-
-        String createdByName = userRepository.findById(so.getCreatedBy())
-                .map(UserEntity::getFullName)
-                .orElse("N/A");
-
-        // Only PASS items go on the dispatch note
-        List<PickingTaskItemEntity> passItems = pickingTaskItemRepository.findPassedItemsBySoId(soId);
-
-        List<DispatchNoteResponse.DispatchNoteItem> noteItems = passItems.stream()
-                .map(item -> buildDispatchNoteItem(item))
-                .collect(Collectors.toList());
-
-        DispatchNoteResponse note = DispatchNoteResponse.builder()
-                .dispatchNoteCode("DN-" + so.getSoCode())
-                .warehouseName(warehouse.getWarehouseName())
-                .customerName(customerName)
-                .dispatchDate(LocalDateTime.now())
-                .items(noteItems)
-                .totalItems(noteItems.size())
-                .createdByName(createdByName)
-                .build();
-
-        return ApiResponse.success("Dispatch note generated", note);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 5) CONFIRM DISPATCH
-    // POST /v1/outbound/sales-orders/{soId}/dispatch
-    // Role: KEEPER
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Finalises the outbound dispatch:
-     *
-     * Tồn kho đã được trừ tại bước confirmPicked (PickListService).
-     * confirmDispatch chỉ còn:
-     *   1. Guard: all items QC-scanned (BR-DISPATCH-02)
-     *   2. Guard: no OPEN incidents (BR-DISPATCH-03)
-     *   3. picking_task → COMPLETED
-     *   4. sales_order  → DISPATCHED
-     */
-    @Transactional
-    public ApiResponse<Void> confirmDispatch(Long soId, Long userId) {
-        log.info("Confirming dispatch for soId={}, userId={}", soId, userId);
-
-        SalesOrderEntity so = findSalesOrder(soId);
-
-        // Guard: SO must be in QC_SCAN status before dispatch
-        if (!"QC_SCAN".equals(so.getStatus())) {
-            throw new BusinessException(
-                    "Dispatch can only be confirmed when sales order status is QC_SCAN. Current: " + so.getStatus());
-        }
-
-        // BR-DISPATCH-02: all items must be QC-scanned
-        boolean allScanned = pickingTaskItemRepository.allItemsScannedForSo(soId);
-        if (!allScanned) {
-            throw new BusinessException(
-                    "Dispatch blocked: some picking task items have not been QC-scanned (BR-DISPATCH-02)");
-        }
-
-        // BR-DISPATCH-03: no OPEN incidents
-        long openIncidents = incidentRepository.countOpenIncidentsBySoId(soId);
-        if (openIncidents > 0) {
-            throw new BusinessException(
-                    "Dispatch blocked: " + openIncidents + " open incident(s) must be resolved first (BR-DISPATCH-03)");
-        }
-
-        // Tồn kho đã được trừ tại bước confirmPicked (PickListService).
-        // confirmDispatch chỉ còn nhiệm vụ: hoàn tất task + cập nhật SO → DISPATCHED.
-
-        // 5) Complete all active picking tasks for this SO
-        List<PickingTaskEntity> activeTasks = pickingTaskRepository.findByWarehouseIdAndSoId(
-                so.getWarehouseId(), soId);
-
-        activeTasks.stream()
-                .filter(t -> !"CANCELLED".equals(t.getStatus()) && !"COMPLETED".equals(t.getStatus()))
-                .forEach(t -> {
-                    t.setStatus("COMPLETED");
-                    t.setCompletedAt(LocalDateTime.now());
-                    pickingTaskRepository.save(t);
-                });
-
-        // 6) Update Sales Order → DISPATCHED
-        so.setStatus("DISPATCHED");
-        so.setUpdatedAt(LocalDateTime.now());
-        salesOrderRepository.save(so);
-
-        log.info("Dispatch confirmed for soId={}. SO status → DISPATCHED", soId);
-
-        // PDF được tạo lazy khi user request GET /dispatch-pdf
-        // Không gọi ở đây để tránh Cloudinary exception làm rollback transaction dispatch
-
-        return ApiResponse.success("Order dispatched successfully. Status: DISPATCHED", null);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 6) FINALIZE QC — Auto-PASS all unscanned items, mark task complete
-    // POST /v1/outbound/pick-list/{taskId}/finalize-qc
-    // Role: KEEPER / QC
-    // Called from mobile "Kết thúc Scan" button
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Finalises the QC scan session from mobile:
-     *  - Ensures task is in QC_IN_PROGRESS (calls startQcSession if still PICKED)
-     *  - Auto-marks all still-unscanned items as PASS
-     *  - Updates task status → COMPLETED
-     *  - Updates sales_order status → QC_SCAN (so web can dispatch)
-     */
     @Transactional
     public ApiResponse<QcSummaryResponse> finalizeQc(Long taskId, Long userId) {
-        log.info("Finalizing QC for taskId={}, userId={}", taskId, userId);
-
         PickingTaskEntity task = findPickingTask(taskId);
 
-        // Auto-start QC if task is still PICKED
         if ("PICKED".equals(task.getStatus())) {
-            log.info("Task {} still in PICKED — auto-starting QC", taskId);
             startQcSession(taskId, userId);
-            // Re-fetch after status change
             task = findPickingTask(taskId);
         }
 
@@ -353,18 +152,15 @@ public class OutboundQcService {
                     "Cannot finalize QC: task status is " + task.getStatus() + ". Expected QC_IN_PROGRESS.");
         }
 
-        // Auto-PASS all items that were not manually scanned
-        List<PickingTaskItemEntity> unscanned = pickingTaskItemRepository.findUnscannedByTaskId(taskId);
+        // Auto-PASS all unscanned items
         LocalDateTime now = LocalDateTime.now();
-        for (PickingTaskItemEntity item : unscanned) {
+        for (PickingTaskItemEntity item : pickingTaskItemRepository.findUnscannedByTaskId(taskId)) {
             item.setQcResult("PASS");
             item.setQcScannedAt(now);
             item.setQcNote("Auto-PASS by finalize-qc");
             pickingTaskItemRepository.save(item);
         }
-        log.info("Auto-PASSed {} unscanned items for taskId={}", unscanned.size(), taskId);
 
-        // Compute summary
         List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findByPickingTaskId(taskId);
         int total   = allItems.size();
         int pass    = (int) allItems.stream().filter(i -> "PASS".equals(i.getQcResult())).count();
@@ -372,36 +168,401 @@ public class OutboundQcService {
         int hold    = (int) allItems.stream().filter(i -> "HOLD".equals(i.getQcResult())).count();
         int pending = (int) allItems.stream().filter(i -> i.getQcScannedAt() == null).count();
 
-        // Update SO → QC_SCAN so web knows QC is done and can dispatch
-        if (task.getSoId() != null) {
-            salesOrderRepository.findById(task.getSoId()).ifPresent(so -> {
+        Long soId = task.getSoId();
+
+        if ((fail > 0 || hold > 0) && soId != null) {
+            // [V20] GAP 4 FIX: tạo Incident DAMAGE + set SO → ON_HOLD
+            createDamageIncident(task, allItems, soId, userId);
+            salesOrderRepository.findById(soId).ifPresent(so -> {
+                so.setStatus("ON_HOLD");
+                so.setUpdatedAt(now);
+                salesOrderRepository.save(so);
+                log.info("SO {} → ON_HOLD (QC fail={}, hold={})", so.getSoCode(), fail, hold);
+            });
+        } else if (soId != null) {
+            // All PASS
+            salesOrderRepository.findById(soId).ifPresent(so -> {
                 if ("PICKING".equals(so.getStatus()) || "QC_SCAN".equals(so.getStatus())) {
                     so.setStatus("QC_SCAN");
-                    so.setUpdatedAt(LocalDateTime.now());
+                    so.setUpdatedAt(now);
                     salesOrderRepository.save(so);
-                    log.info("SO {} status → QC_SCAN", so.getSoCode());
                 }
             });
         }
 
-        QcSummaryResponse summary = QcSummaryResponse.builder()
-                .pickingTaskId(taskId)
-                .totalItems(total)
-                .passCount(pass)
-                .failCount(fail)
-                .holdCount(hold)
-                .pendingCount(pending)
-                .allScanned(pending == 0 && total > 0)
-                .build();
+        log.info("QC finalized taskId={}: pass={}, fail={}, hold={}", taskId, pass, fail, hold);
+        return ApiResponse.success("QC finalized.", QcSummaryResponse.builder()
+                .pickingTaskId(taskId).totalItems(total).passCount(pass)
+                .failCount(fail).holdCount(hold).pendingCount(pending)
+                .allScanned(pending == 0 && total > 0).build());
+    }
 
-        log.info("QC finalized for taskId={}: pass={}, fail={}, hold={}", taskId, pass, fail, hold);
-        return ApiResponse.success("QC finalized. All items processed.", summary);
+    /** Tạo Incident DAMAGE cho các FAIL/HOLD items trong task. */
+    private void createDamageIncident(PickingTaskEntity task,
+                                      List<PickingTaskItemEntity> allItems,
+                                      Long soId, Long reportedBy) {
+        SalesOrderEntity so = salesOrderRepository.findById(soId).orElse(null);
+        if (so == null) return;
+
+        List<PickingTaskItemEntity> failItems = allItems.stream()
+                .filter(i -> "FAIL".equals(i.getQcResult()) || "HOLD".equals(i.getQcResult()))
+                .collect(Collectors.toList());
+        if (failItems.isEmpty()) return;
+
+        String code = "INC-QC-" + soId + "-" + (System.currentTimeMillis() % 100_000);
+        StringBuilder desc = new StringBuilder("QC FAIL khi xuất " + so.getSoCode() + ": ");
+
+        IncidentEntity incident = IncidentEntity.builder()
+                .warehouseId(so.getWarehouseId())
+                .incidentCode(code)
+                .incidentType(IncidentType.DAMAGE)
+                .category(IncidentCategory.QUALITY)
+                .severity("HIGH")
+                .occurredAt(LocalDateTime.now())
+                .description("placeholder")
+                .reportedBy(reportedBy)
+                .status("OPEN")
+                .soId(soId)
+                .receivingId(null)
+                .build();
+        IncidentEntity saved = incidentRepository.save(incident);
+
+        for (PickingTaskItemEntity item : failItems) {
+            SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
+            String skuCode = sku != null ? sku.getSkuCode() : "SKU#" + item.getSkuId();
+            desc.append(skuCode).append("[").append(item.getQcResult()).append("] ");
+
+            String noteStr = item.getQcResult()
+                    + (item.getQcNote() != null ? ": " + item.getQcNote() : "")
+                    + (item.getQcAttachmentUrl() != null ? " | photo: " + item.getQcAttachmentUrl() : "");
+
+            incidentItemRepository.save(IncidentItemEntity.builder()
+                    .incident(saved)
+                    .skuId(item.getSkuId())
+                    .damagedQty(item.getRequiredQty())
+                    .expectedQty(item.getRequiredQty())
+                    .actualQty(BigDecimal.ZERO)
+                    .reasonCode("DAMAGE")
+                    .note(noteStr)
+                    // [FIX QC] Lưu ảnh bằng chứng vào field riêng — không nhét vào note nữa
+                    .attachmentUrl(item.getQcAttachmentUrl())
+                    .build());
+        }
+
+        saved.setDescription(desc.toString().trim());
+        incidentRepository.save(saved);
+        log.info("Created DAMAGE Incident {} for SO {} ({} items)", code, so.getSoCode(), failItems.size());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 5) RESOLVE DAMAGE (Manager) — [V20] GAP 5 FIX
+    // POST /v1/outbound/incidents/{incidentId}/resolve-damage
+    // ─────────────────────────────────────────────────────────────────────────
+    @Transactional
+    public ApiResponse<IncidentResponse> resolveOutboundDamage(Long incidentId,
+                                                               ResolveOutboundDamageRequest request,
+                                                               Long managerId) {
+        IncidentEntity incident = incidentRepository.findById(incidentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Incident not found: " + incidentId));
+
+        if (!"OPEN".equals(incident.getStatus()))
+            throw new BusinessException("Incident is not OPEN. Current: " + incident.getStatus());
+        if (!IncidentType.DAMAGE.equals(incident.getIncidentType()))
+            throw new BusinessException("This endpoint handles DAMAGE incidents only.");
+        if (incident.getSoId() == null)
+            throw new BusinessException("Incident has no linked soId.");
+
+        SalesOrderEntity so = salesOrderRepository.findById(incident.getSoId())
+                .orElseThrow(() -> new ResourceNotFoundException("SalesOrder not found: " + incident.getSoId()));
+
+        String action = request.getAction().toUpperCase();
+        switch (action) {
+            case "RETURN_SCRAP" -> {
+                // [FIX] Trừ tồn kho hàng hỏng tại vị trí gốc
+                // và chuyển sang khu hàng lỗi (defect zone) để theo dõi
+                deductFailItems(incident.getSoId(), managerId, so.getWarehouseId());
+                // Reset picking items FAIL/HOLD để không tính vào pick list cũ
+                resetFailItemsForRepick(incident.getSoId());
+                // [FIX] SO → APPROVED (không phải PICKING) để Keeper re-allocate từ đầu.
+                // Hàng lỗi đã bị trừ khỏi kho → allocate lại sẽ lấy hàng thay thế từ bin khác.
+                // Cancel reservations cũ trước khi đổi status
+                cancelOpenReservationsForSo(incident.getSoId());
+                so.setStatus("APPROVED");
+                so.setUpdatedAt(LocalDateTime.now());
+                salesOrderRepository.save(so);
+                log.info("SO {} → APPROVED (re-allocate after DAMAGE RETURN_SCRAP)", so.getSoCode());
+            }
+            case "ACCEPT" -> {
+                // Xuất luôn hàng lỗi
+                so.setStatus("QC_SCAN");
+                so.setUpdatedAt(LocalDateTime.now());
+                salesOrderRepository.save(so);
+                log.info("SO {} → QC_SCAN (DAMAGE ACCEPT)", so.getSoCode());
+            }
+            default -> throw new BusinessException(
+                    "Invalid action: " + action + ". Must be RETURN_SCRAP or ACCEPT.");
+        }
+
+        incident.setStatus("RESOLVED");
+        String noteAppend = "[Manager " + managerId + "]: " + action
+                + (request.getNote() != null && !request.getNote().isBlank() ? " — " + request.getNote() : "");
+        incident.setDescription(incident.getDescription() + "\n" + noteAppend);
+        incidentRepository.save(incident);
+
+        log.info("DAMAGE Incident {} resolved by manager {}, action={}", incidentId, managerId, action);
+        return ApiResponse.success("Incident resolved. SO updated.", buildSimpleResponse(incident));
+    }
+
+    /** Trừ tồn kho hàng lỗi tại vị trí gốc, cộng vào khu hàng lỗi. */
+    private void deductFailItems(Long soId, Long userId, Long warehouseId) {
+        List<PickingTaskItemEntity> failItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId)
+                .stream()
+                .filter(i -> "FAIL".equals(i.getQcResult()) || "HOLD".equals(i.getQcResult()))
+                .collect(Collectors.toList());
+
+        if (failItems.isEmpty()) return;
+
+        // Tìm hoặc tạo khu hàng lỗi (defect bin)
+        LocationEntity defectBin = getOrCreateDefectBin(warehouseId);
+
+        for (PickingTaskItemEntity item : failItems) {
+            BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
+                    ? item.getPickedQty() : item.getRequiredQty();
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            Long fromLocationId = item.getFromLocationId();
+
+            // 1. Trừ quantity tại vị trí gốc
+            inventorySnapshotRepository.decrementQuantity(
+                    warehouseId, item.getSkuId(), item.getLotId(), fromLocationId, qty);
+
+            // 2. Cộng quantity vào khu hàng lỗi
+            inventorySnapshotRepository.upsertInventory(
+                    warehouseId, item.getSkuId(), item.getLotId(), defectBin.getLocationId(), qty);
+
+            // 3. Ghi txn DAMAGE_WRITE_OFF (xuất khỏi bin gốc)
+            inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                    .warehouseId(warehouseId)
+                    .locationId(fromLocationId)
+                    .skuId(item.getSkuId())
+                    .lotId(item.getLotId())
+                    .quantity(qty.negate())
+                    .txnType("DAMAGE_WRITE_OFF")
+                    .referenceTable("sales_orders")
+                    .referenceId(soId)
+                    .reasonCode("QC_FAIL")
+                    .createdBy(userId != null ? userId : 0L)
+                    .build());
+
+            // 4. Ghi txn DAMAGE_TRANSFER (nhập vào khu hàng lỗi)
+            inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                    .warehouseId(warehouseId)
+                    .locationId(defectBin.getLocationId())
+                    .skuId(item.getSkuId())
+                    .lotId(item.getLotId())
+                    .quantity(qty)
+                    .txnType("DAMAGE_TRANSFER")
+                    .referenceTable("sales_orders")
+                    .referenceId(soId)
+                    .reasonCode("QC_FAIL_MOVE_TO_DEFECT")
+                    .createdBy(userId != null ? userId : 0L)
+                    .build());
+
+            log.info("DAMAGE: skuId={} qty={} moved from loc={} to defect bin={}",
+                    item.getSkuId(), qty, fromLocationId, defectBin.getLocationId());
+        }
+    }
+
+    /**
+     * Tìm khu hàng lỗi (defect bin) của warehouse.
+     * Nếu chưa có → tự tạo location DEFECT-BIN với is_defect=true.
+     */
+    private LocationEntity getOrCreateDefectBin(Long warehouseId) {
+        return locationRepository.findDefectBinByWarehouse(warehouseId)
+                .orElseGet(() -> {
+                    String code = "DEFECT-BIN-WH" + warehouseId;
+                    LocationEntity defect = LocationEntity.builder()
+                            .warehouseId(warehouseId)
+                            .locationCode(code)
+                            .locationType(org.example.sep26management.application.enums.LocationType.BIN)
+                            .isPickingFace(false)
+                            .isStaging(false)
+                            .isDefect(true)
+                            .active(true)
+                            .build();
+                    LocationEntity saved = locationRepository.save(defect);
+                    log.info("Auto-created defect bin: {} (warehouseId={})", code, warehouseId);
+                    return saved;
+                });
+    }
+
+    /** Cancel OPEN reservations cho SO trước khi re-allocate sau RETURN_SCRAP. */
+    private void cancelOpenReservationsForSo(Long soId) {
+        reservationRepository.findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN")
+                .forEach(r -> {
+                    if (r.getLocationId() != null) {
+                        inventorySnapshotRepository.incrementReservedByLocationAndSku(
+                                r.getLocationId(), r.getSkuId(), r.getLotId(), r.getQuantity().negate());
+                    } else {
+                        inventorySnapshotRepository.incrementReservedByWarehouseAndSku(
+                                r.getWarehouseId(), r.getSkuId(), r.getQuantity().negate());
+                    }
+                    r.setStatus("CANCELLED");
+                    reservationRepository.save(r);
+                });
+    }
+
+    /** Reset qc_result → null cho FAIL/HOLD items để Keeper re-pick. */
+    private void resetFailItemsForRepick(Long soId) {
+        List<PickingTaskItemEntity> failItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId)
+                .stream()
+                .filter(i -> "FAIL".equals(i.getQcResult()) || "HOLD".equals(i.getQcResult()))
+                .collect(Collectors.toList());
+        for (PickingTaskItemEntity item : failItems) {
+            item.setQcResult(null);
+            item.setQcScannedAt(null);
+            item.setQcNote("[Reset — re-pick required after DAMAGE RETURN_SCRAP]");
+            pickingTaskItemRepository.save(item);
+        }
+        log.info("Reset {} FAIL/HOLD items for re-pick, soId={}", failItems.size(), soId);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 6) RESOLVE SHORTAGE (Manager) — [V20] GAP 2 + GAP 3 FIX
+    // POST /v1/outbound/incidents/{incidentId}/resolve-shortage
+    // ─────────────────────────────────────────────────────────────────────────
+    @Transactional
+    public ApiResponse<IncidentResponse> resolveOutboundShortage(Long incidentId,
+                                                                 ResolveOutboundShortageRequest request,
+                                                                 Long managerId) {
+        IncidentEntity incident = incidentRepository.findById(incidentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Incident not found: " + incidentId));
+
+        if (!"OPEN".equals(incident.getStatus()))
+            throw new BusinessException("Incident is not OPEN. Current: " + incident.getStatus());
+        if (!IncidentType.SHORTAGE.equals(incident.getIncidentType()))
+            throw new BusinessException("This endpoint handles SHORTAGE incidents only.");
+        if (incident.getSoId() == null)
+            throw new BusinessException("Incident has no linked soId.");
+
+        SalesOrderEntity so = salesOrderRepository.findById(incident.getSoId())
+                .orElseThrow(() -> new ResourceNotFoundException("SalesOrder not found: " + incident.getSoId()));
+
+        String action = request.getAction().toUpperCase();
+        switch (action) {
+            case "WAIT_BACKORDER" -> {
+                // Chờ nhập hàng bù — SO giữ trạng thái WAITING_STOCK
+                // Khi hàng về, Keeper allocate lại → AllocateStockService cho phép từ WAITING_STOCK
+                so.setStatus("WAITING_STOCK");
+                so.setUpdatedAt(LocalDateTime.now());
+                salesOrderRepository.save(so);
+                log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
+            }
+            case "CLOSE_SHORT" -> {
+                // [GAP 3 FIX] Cắt giảm orderedQty về available → SO → APPROVED → re-Allocate
+                adjustOrderedQtyToAvailable(so);
+                so.setStatus("APPROVED");
+                so.setUpdatedAt(LocalDateTime.now());
+                salesOrderRepository.save(so);
+                log.info("SO {} → APPROVED (CLOSE_SHORT, re-Allocate ready)", so.getSoCode());
+            }
+            default -> throw new BusinessException(
+                    "Invalid action: " + action + ". Must be WAIT_BACKORDER or CLOSE_SHORT.");
+        }
+
+        incident.setStatus("RESOLVED");
+        String noteAppend = "[Manager " + managerId + "]: " + action
+                + (request.getNote() != null && !request.getNote().isBlank() ? " — " + request.getNote() : "");
+        incident.setDescription(incident.getDescription() + "\n" + noteAppend);
+        incidentRepository.save(incident);
+
+        log.info("SHORTAGE Incident {} resolved, action={}", incidentId, action);
+        return ApiResponse.success("Shortage incident resolved.", buildSimpleResponse(incident));
+    }
+
+    /** CLOSE_SHORT: giảm orderedQty về số lượng available thực tế trong kho. */
+    private void adjustOrderedQtyToAvailable(SalesOrderEntity so) {
+        salesOrderItemRepository.findBySoId(so.getSoId()).forEach(item -> {
+            BigDecimal total    = inventorySnapshotRepository.sumQuantityByWarehouseAndSku(so.getWarehouseId(), item.getSkuId());
+            BigDecimal reserved = inventorySnapshotRepository.sumReservedByWarehouseAndSku(so.getWarehouseId(), item.getSkuId());
+            if (total == null) total = BigDecimal.ZERO;
+            if (reserved == null) reserved = BigDecimal.ZERO;
+            BigDecimal available = total.subtract(reserved).max(BigDecimal.ZERO);
+            if (available.compareTo(item.getOrderedQty()) < 0) {
+                log.info("CLOSE_SHORT: soItem={} {} → {}", item.getSoItemId(), item.getOrderedQty(), available);
+                item.setOrderedQty(available);
+                salesOrderItemRepository.save(item);
+            }
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 7) DISPATCH NOTE
+    // ─────────────────────────────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public ApiResponse<DispatchNoteResponse> generateDispatchNote(Long soId) {
+        SalesOrderEntity so = findSalesOrder(soId);
+
+        if (!pickingTaskItemRepository.allItemsScannedForSo(soId))
+            throw new BusinessException("Cannot generate dispatch note: some items not QC-scanned (BR-QC-03)");
+
+        long openIncidents = incidentRepository.countOpenIncidentsBySoId(soId);
+        if (openIncidents > 0)
+            throw new BusinessException("Cannot generate dispatch note: " + openIncidents + " open incident(s) (BR-QC-04)");
+
+        WarehouseEntity warehouse = warehouseRepository.findById(so.getWarehouseId())
+                .orElseThrow(() -> new ResourceNotFoundException("Warehouse not found"));
+        String customerName = customerRepository.findById(so.getCustomerId())
+                .map(CustomerEntity::getCustomerName).orElse("N/A");
+        String createdByName = userRepository.findById(so.getCreatedBy())
+                .map(UserEntity::getFullName).orElse("N/A");
+
+        List<DispatchNoteResponse.DispatchNoteItem> noteItems = pickingTaskItemRepository.findPassedItemsBySoId(soId)
+                .stream().map(this::buildDispatchNoteItem).collect(Collectors.toList());
+
+        return ApiResponse.success("Dispatch note generated", DispatchNoteResponse.builder()
+                .dispatchNoteCode("DN-" + so.getSoCode())
+                .warehouseName(warehouse.getWarehouseName())
+                .customerName(customerName)
+                .dispatchDate(LocalDateTime.now())
+                .items(noteItems)
+                .totalItems(noteItems.size())
+                .createdByName(createdByName)
+                .build());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 8) CONFIRM DISPATCH
+    // ─────────────────────────────────────────────────────────────────────────
+    @Transactional
+    public ApiResponse<Void> confirmDispatch(Long soId, Long userId) {
+        SalesOrderEntity so = findSalesOrder(soId);
+        if (!"QC_SCAN".equals(so.getStatus()))
+            throw new BusinessException("Dispatch requires QC_SCAN status. Current: " + so.getStatus());
+        if (!pickingTaskItemRepository.allItemsScannedForSo(soId))
+            throw new BusinessException("Dispatch blocked: items not QC-scanned (BR-DISPATCH-02)");
+        long openIncidents = incidentRepository.countOpenIncidentsBySoId(soId);
+        if (openIncidents > 0)
+            throw new BusinessException("Dispatch blocked: " + openIncidents + " open incident(s) (BR-DISPATCH-03)");
+
+        pickingTaskRepository.findByWarehouseIdAndSoId(so.getWarehouseId(), soId).stream()
+                .filter(t -> !"CANCELLED".equals(t.getStatus()) && !"COMPLETED".equals(t.getStatus()))
+                .forEach(t -> {
+                    t.setStatus("COMPLETED");
+                    t.setCompletedAt(LocalDateTime.now());
+                    pickingTaskRepository.save(t);
+                });
+
+        so.setStatus("DISPATCHED");
+        so.setUpdatedAt(LocalDateTime.now());
+        salesOrderRepository.save(so);
+        log.info("SO {} → DISPATCHED", so.getSoCode());
+        return ApiResponse.success("Order dispatched. Status: DISPATCHED", null);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ─────────────────────────────────────────────────────────────────────────
-
     private PickingTaskEntity findPickingTask(Long taskId) {
         return pickingTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("PickingTask not found: " + taskId));
@@ -412,17 +573,21 @@ public class OutboundQcService {
                 .orElseThrow(() -> new ResourceNotFoundException("SalesOrder not found: " + soId));
     }
 
-    private DispatchNoteResponse.DispatchNoteItem buildDispatchNoteItem(PickingTaskItemEntity item) {
-        // Resolve SKU code
-        SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
-        String skuCode = sku != null ? sku.getSkuCode() : "N/A";
-        String skuName = sku != null ? sku.getSkuName() : "N/A";
-        String unit    = sku != null ? sku.getUnit()    : "";
+    private IncidentResponse buildSimpleResponse(IncidentEntity e) {
+        return IncidentResponse.builder()
+                .incidentId(e.getIncidentId())
+                .incidentCode(e.getIncidentCode())
+                .incidentType(e.getIncidentType())
+                .category(e.getCategory())
+                .status(e.getStatus())
+                .description(e.getDescription())
+                .soId(e.getSoId())
+                .build();
+    }
 
-        // Resolve lot info
-        String lotNumber       = null;
-        String manufactureDate = null;
-        String expiryDate      = null;
+    private DispatchNoteResponse.DispatchNoteItem buildDispatchNoteItem(PickingTaskItemEntity item) {
+        SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
+        String lotNumber = null, manufactureDate = null, expiryDate = null;
         if (item.getLotId() != null) {
             InventoryLotEntity lot = inventoryLotRepository.findById(item.getLotId()).orElse(null);
             if (lot != null) {
@@ -431,25 +596,15 @@ public class OutboundQcService {
                 expiryDate      = lot.getExpiryDate() != null ? lot.getExpiryDate().toString() : null;
             }
         }
-
-        // Resolve location code
-        String locationCode = locationRepository.findById(item.getFromLocationId())
-                .map(LocationEntity::getLocationCode)
-                .orElse("N/A");
-
-        BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
-                ? item.getPickedQty()
-                : item.getRequiredQty();
-
         return DispatchNoteResponse.DispatchNoteItem.builder()
-                .skuCode(skuCode)
-                .skuName(skuName)
-                .unit(unit)
-                .lotNumber(lotNumber)
-                .manufactureDate(manufactureDate)
-                .expiryDate(expiryDate)
-                .locationCode(locationCode)
-                .quantity(qty)
+                .skuCode(sku != null ? sku.getSkuCode() : "N/A")
+                .skuName(sku != null ? sku.getSkuName() : "N/A")
+                .unit(sku != null ? sku.getUnit() : "")
+                .lotNumber(lotNumber).manufactureDate(manufactureDate).expiryDate(expiryDate)
+                .locationCode(locationRepository.findById(item.getFromLocationId())
+                        .map(LocationEntity::getLocationCode).orElse("N/A"))
+                .quantity(item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
+                        ? item.getPickedQty() : item.getRequiredQty())
                 .build();
     }
 }

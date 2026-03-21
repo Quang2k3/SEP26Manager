@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.*;
+import org.example.sep26management.application.dto.response.AllocateStockResponse;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.OutboundResponse;
 import org.example.sep26management.application.enums.OutboundType;
@@ -34,6 +35,7 @@ public class OutboundService {
     private final InventorySnapshotJpaRepository snapshotRepository;
     private final SkuJpaRepository skuRepository;
     private final AuditLogService auditLogService;
+    private final AllocateStockService allocateStockService;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
@@ -287,6 +289,48 @@ public class OutboundService {
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
         if (req.getNote() != null) so.setNote(req.getNote());
+
+        // ── Kiểm tra tồn kho ngay khi submit ──────────────────────────────
+        // Không chờ đến bước Manager duyệt mới phát hiện thiếu
+        boolean hasShortage = false;
+        for (SalesOrderItemEntity item : items) {
+            BigDecimal available = getAvailableQty(so.getWarehouseId(), item.getSkuId());
+            if (available.compareTo(item.getOrderedQty()) < 0) {
+                hasShortage = true;
+                break;
+            }
+        }
+
+        if (hasShortage) {
+            // Thiếu hàng → allocate phần có sẵn (lock reservation) + tạo incident SHORTAGE
+            // SO → SHORTAGE_PENDING để Manager xử lý, không qua bước duyệt
+            so.setStatus("SHORTAGE_PENDING");
+            soRepository.save(so);
+
+            // Allocate phần có (để lock reservation, đơn khác không lấy mất)
+            AllocateStockRequest allocReq = new AllocateStockRequest();
+            allocReq.setDocumentId(soId);
+            allocReq.setOrderType(OutboundType.SALES_ORDER);
+            allocateStockService.allocateStock(allocReq, userId, ip, ua);
+
+            // Tạo incident SHORTAGE gửi Manager
+            allocateStockService.reportShortage(soId, OutboundType.SALES_ORDER, userId, ip, ua);
+
+            auditLogService.logAction(userId, "OUTBOUND_SHORTAGE_DETECTED", "SALES_ORDER", soId,
+                    "SO " + so.getSoCode() + " thiếu hàng khi submit — chuyển SHORTAGE_PENDING", ip, ua);
+
+            log.info("SO {} → SHORTAGE_PENDING (shortage detected on submit)", so.getSoCode());
+
+            CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
+            return ApiResponse.success(
+                    "Phát hiện thiếu hàng — đơn chuyển SHORTAGE_PENDING, incident đã gửi Manager.",
+                    buildSalesOrderResponse(so, items, customer,
+                            buildStockSnapshot(so.getWarehouseId(), items.stream()
+                                    .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
+                                    .toList())));
+        }
+
+        // Đủ hàng → PENDING_APPROVAL chờ Manager duyệt như bình thường
         so.setStatus("PENDING_APPROVAL");
         soRepository.save(so);
 

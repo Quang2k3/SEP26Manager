@@ -83,9 +83,12 @@ public class IncidentController {
     public ApiResponse<PageResponse<IncidentResponse>> list(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) IncidentCategory category,
+            // [BUG-FIX] soId filter: lấy incidents của đúng Sales Order
+            // FE gửi ?soId=X để hiển thị banner ON_HOLD/WAITING_STOCK đúng đơn
+            @RequestParam(required = false) Long soId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
-        return incidentService.listIncidents(status, category, page, size);
+        return incidentService.listIncidents(status, category, soId, page, size);
     }
 
     /** GET /v1/incidents/{id} */

@@ -84,12 +84,15 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/v3/api-docs/**", // Swagger JSON endpoints "/v1/health",
                                 "/v1/health/**",
-                                "/v1/outbound/sales-orders/*/signed-note", // QR upload outbound — no auth needed
-                                "/v1/putaway-tasks/*/signed-note"          // QR upload putaway — no auth needed
+                                "/v1/outbound/sales-orders/*/signed-note",      // QR upload outbound — no auth needed
+                                "/v1/outbound/sales-orders/*/pick-signed-note",  // QR upload pick note — no auth needed
+                                "/v1/putaway-tasks/*/signed-note"                // QR upload putaway — no auth needed
                         )
                         .permitAll()
                         // Scan events — requires KEEPER or QC role (iPhone scanner)
                         .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasAnyRole("KEEPER", "QC")
+                        // [FIX QC] Upload anh hang hong tu dien thoai scan QC
+                        .requestMatchers("/v1/attachments/upload").hasAnyRole("KEEPER", "QC", "MANAGER")
                         // Manager only endpoints
                         .requestMatchers("/v1/users/**").hasRole("MANAGER")
                         // Zones: KEEPER cần GET để chọn zone khi làm putaway

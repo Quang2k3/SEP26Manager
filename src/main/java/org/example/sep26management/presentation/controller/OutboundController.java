@@ -20,7 +20,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.example.sep26management.application.service.ReceivingSessionService;
-
+import org.example.sep26management.application.dto.request.ResolveOutboundDamageRequest;
+import org.example.sep26management.application.dto.request.ResolveOutboundShortageRequest;
+import org.example.sep26management.application.dto.response.IncidentResponse;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +65,7 @@ public class OutboundController {
     private final DispatchPdfService dispatchPdfService;
     private final SignedNoteService signedNoteService;
     private final PickSignedNoteService pickSignedNoteService;
+    private final org.example.sep26management.infrastructure.persistence.repository.InventorySnapshotJpaRepository snapshotRepository;
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
     // createOutbound(request, createdBy, ip, ua) — warehouseId injected vào request
@@ -474,6 +477,42 @@ public class OutboundController {
         return ResponseEntity.ok(pickSignedNoteService.uploadPickSignedNote(soId, photo));
     }
 
+    // ─── THÊM VÀO OutboundController.java — sau endpoint finalize-qc ─────────────
+// Dán 2 endpoint này vào sau dòng:
+//   public ResponseEntity<ApiResponse<QcSummaryResponse>> finalizeQc(...)
+
+    // ─── [V20] Resolve DAMAGE Incident (Manager) ──────────────────────────────
+    @PostMapping("/incidents/{incidentId}/resolve-damage")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(
+            summary = "Manager xử lý hàng hỏng QC (DAMAGE)",
+            description = "Sau khi QC FAIL tạo Incident DAMAGE:\n\n"
+                    + "- `RETURN_SCRAP`: trừ tồn hàng hỏng → SO → PICKING để Keeper re-pick\n"
+                    + "- `ACCEPT`: chấp nhận xuất luôn hàng lỗi → SO → QC_SCAN → DISPATCHED"
+    )
+    public ResponseEntity<ApiResponse<IncidentResponse>> resolveOutboundDamage(
+            @PathVariable Long incidentId,
+            @Valid @RequestBody ResolveOutboundDamageRequest request) {
+        return ResponseEntity.ok(
+                outboundQcService.resolveOutboundDamage(incidentId, request, getUserId()));
+    }
+
+    // ─── [V20] Resolve SHORTAGE Incident (Manager) ────────────────────────────
+    @PostMapping("/incidents/{incidentId}/resolve-shortage")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(
+            summary = "Manager xử lý thiếu hàng (SHORTAGE)",
+            description = "Sau khi Keeper báo thiếu hàng:\n\n"
+                    + "- `WAIT_BACKORDER`: SO → WAITING_STOCK, chờ nhập bù rồi Keeper tự re-Allocate\n"
+                    + "- `CLOSE_SHORT`: cắt orderedQty về available → SO → APPROVED → re-Allocate ngay"
+    )
+    public ResponseEntity<ApiResponse<IncidentResponse>> resolveOutboundShortage(
+            @PathVariable Long incidentId,
+            @Valid @RequestBody ResolveOutboundShortageRequest request) {
+        return ResponseEntity.ok(
+                outboundQcService.resolveOutboundShortage(incidentId, request, getUserId()));
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Helpers — giữ nguyên theo file gốc
     // ─────────────────────────────────────────────────────────────
@@ -526,5 +565,38 @@ public class OutboundController {
 
     private String ua(HttpServletRequest req) {
         return req.getHeader("User-Agent");
+    }
+    
+    // GET /v1/outbound/check-stock?warehouseId=1&items=skuId:qty,skuId:qty
+    @GetMapping("/check-stock")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Check tồn kho realtime", description = "FE gọi khi nhập SKU+qty để cảnh báo thiếu hàng ngay trong form tạo đơn.")
+    public ResponseEntity<ApiResponse<java.util.List<java.util.Map<String, Object>>>> checkStock(
+            @RequestParam Long warehouseId,
+            @RequestParam String items) { // format: "skuId:qty,skuId:qty"
+        try {
+            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+            for (String pair : items.split(",")) {
+                String[] parts = pair.trim().split(":");
+                if (parts.length != 2) continue;
+                Long skuId = Long.parseLong(parts[0].trim());
+                java.math.BigDecimal qty = new java.math.BigDecimal(parts[1].trim());
+                java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, skuId);
+                java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, skuId);
+                if (total    == null) total    = java.math.BigDecimal.ZERO;
+                if (reserved == null) reserved = java.math.BigDecimal.ZERO;
+                java.math.BigDecimal available = total.subtract(reserved).max(java.math.BigDecimal.ZERO);
+                java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                row.put("skuId", skuId);
+                row.put("requestedQty", qty);
+                row.put("availableQty", available);
+                row.put("sufficient", available.compareTo(qty) >= 0);
+                row.put("shortageQty", available.compareTo(qty) < 0 ? qty.subtract(available) : java.math.BigDecimal.ZERO);
+                result.add(row);
+            }
+            return ResponseEntity.ok(ApiResponse.success("Stock check OK", result));
+        } catch (Exception e) {
+            return ResponseEntity.ok(ApiResponse.success("Stock check error", java.util.List.of()));
+        }
     }
 }

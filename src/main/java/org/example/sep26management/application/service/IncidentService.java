@@ -87,7 +87,22 @@ public class IncidentService {
 
     @Transactional(readOnly = true)
     public ApiResponse<PageResponse<IncidentResponse>> listIncidents(String status,
-                                                                     org.example.sep26management.application.enums.IncidentCategory category, int page, int size) {
+                                                                     org.example.sep26management.application.enums.IncidentCategory category,
+                                                                     Long soId,
+                                                                     int page, int size) {
+        // [BUG-FIX] Khi soId != null: chỉ trả incidents của SO đó.
+        // Trước đây soId không được xử lý → GET /incidents?soId=X trả về tất cả
+        // → banner ON_HOLD hiển thị incidents của đơn khác, không đúng đơn.
+        if (soId != null) {
+            List<IncidentResponse> soIncidents = incidentRepo
+                    .findAllBySoIdOrderByCreatedAtDesc(soId)
+                    .stream().map(this::toResponse).collect(Collectors.toList());
+            PageResponse<IncidentResponse> soPage = PageResponse.<IncidentResponse>builder()
+                    .content(soIncidents).page(0).size(soIncidents.size())
+                    .totalElements(soIncidents.size()).totalPages(1).last(true).build();
+            return ApiResponse.success("OK", soPage);
+        }
+
         Pageable pageable = PageRequest.of(page, size);
         Page<IncidentEntity> incidentsPage;
 
@@ -411,7 +426,7 @@ public class IncidentService {
 
     // ─── Helper: convert to response ────────────────────────────────────────
 
-    private IncidentResponse toResponse(IncidentEntity e) {
+    public IncidentResponse toResponse(IncidentEntity e) {
         String reportedByName = null;
         if (e.getReportedBy() != null) {
             reportedByName = userRepo.findById(e.getReportedBy())
@@ -437,6 +452,8 @@ public class IncidentService {
                     .actualQty(item.getActualQty())
                     .reasonCode(item.getReasonCode())
                     .note(item.getNote())
+                    // [FIX QC] Trả attachmentUrl — FE hiển ảnh trong IncidentDetailModal
+                    .attachmentUrl(item.getAttachmentUrl())
                     .build();
         }).collect(Collectors.toList());
 
@@ -455,6 +472,7 @@ public class IncidentService {
                 .status(e.getStatus())
                 .receivingId(e.getReceivingId())
                 .receivingCode(receivingCode)
+                .soId(e.getSoId())
                 .createdAt(e.getCreatedAt())
                 .items(itemResponses)
                 .build();

@@ -26,33 +26,26 @@ public interface IncidentJpaRepository extends JpaRepository<IncidentEntity, Lon
 
     Page<IncidentEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
-    // ── Outbound QC / Dispatch ────────────────────────────────────
+    // ── Outbound QC / Dispatch — dùng so_id column (thêm V20) ────
 
     /**
      * BR-DISPATCH-03 / BR-QC-04:
-     * Check if there are any OPEN incidents linked to picking task items of a SO.
-     * Uses the picking_task_items ��� picking_tasks → so_id chain via a native query
-     * for simplicity, since IncidentEntity only carries warehouse_id / receiving_id.
-     *
-     * The outbound incidents are linked by referencing the soId stored in the
-     * incident description or a dedicated reference field.
-     * We rely on the convention that outbound incidents carry
-     * reference_id = soId when created via the outbound flow.
+     * Lấy tất cả OPEN incidents cho một Sales Order.
+     * Dùng cột so_id được thêm ở V20__outbound_failed_cases.sql.
      */
-    @Query("""
-            SELECT i FROM IncidentEntity i
-            WHERE i.status = 'OPEN'
-              AND i.receivingId = :soId
-            """)
+    @Query("SELECT i FROM IncidentEntity i WHERE i.status = 'OPEN' AND i.soId = :soId")
     List<IncidentEntity> findOpenIncidentsBySoId(@Param("soId") Long soId);
 
     /**
-     * Count OPEN incidents for a SO — quick guard check.
+     * Count OPEN incidents for a SO — quick guard check for dispatch.
      */
-    @Query("""
-            SELECT COUNT(i) FROM IncidentEntity i
-            WHERE i.status = 'OPEN'
-              AND i.receivingId = :soId
-            """)
+    @Query("SELECT COUNT(i) FROM IncidentEntity i WHERE i.status = 'OPEN' AND i.soId = :soId")
     long countOpenIncidentsBySoId(@Param("soId") Long soId);
+
+    /**
+     * Lấy tất cả incidents (bất kể status) cho một SO — dùng để hiển thị
+     * lịch sử incident trong OutboundDetailModal.
+     */
+    @Query("SELECT i FROM IncidentEntity i WHERE i.soId = :soId ORDER BY i.createdAt DESC")
+    List<IncidentEntity> findAllBySoIdOrderByCreatedAtDesc(@Param("soId") Long soId);
 }

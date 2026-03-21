@@ -69,6 +69,27 @@ public class LocationEntity {
     @Builder.Default
     private Boolean isStaging = false;
 
+    /** Khu hàng lỗi (defect zone) — hàng FAIL QC được chuyển vào đây chờ xử lý */
+    @Column(name = "is_defect", nullable = false)
+    @Builder.Default
+    private Boolean isDefect = false;
+
+    /**
+     * Tầng của BIN trong rack: 1=dưới (512kg), 2=giữa (448kg), 3=trên (400kg).
+     * Mỗi rack có 3 tầng × 3 cột = 9 BIN tổng.
+     * Null cho AISLE và RACK.
+     */
+    @Column(name = "bin_floor")
+    private Integer binFloor;
+
+    /**
+     * Cột của BIN trong rack: 1=trái, 2=giữa, 3=phải.
+     * Kết hợp binFloor + binColumn xác định duy nhất 1 ô trong rack.
+     * Null cho AISLE và RACK.
+     */
+    @Column(name = "bin_column")
+    private Integer binColumn;
+
     @Column(name = "active", nullable = false)
     @Builder.Default
     private Boolean active = true;

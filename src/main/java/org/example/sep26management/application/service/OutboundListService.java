@@ -26,6 +26,8 @@ public class OutboundListService {
     private final TransferItemJpaRepository transferItemRepository;
     private final CustomerJpaRepository customerRepository;
     private final WarehouseJpaRepository warehouseRepository;
+    // [FIX TC-1A] — tính hasStockShortage cho DRAFT SO trong list
+    private final InventorySnapshotJpaRepository snapshotRepository;
 
     @Transactional(readOnly = true)
     public ApiResponse<PageResponse<OutboundListResponse>> listOutbound(
@@ -168,6 +170,7 @@ public class OutboundListService {
                 .canSubmit(isDraft(so.getStatus())  && owns(so.getCreatedBy(), currentUserId))
                 .canApprove(isPending(so.getStatus()) && isManager(currentUserRole))
                 .canConfirm(isApproved(so.getStatus()) && isKeeper(currentUserRole))
+                .hasStockShortage(isDraft(so.getStatus()) && checkDraftShortage(so.getWarehouseId(), so.getSoId()))
                 .build();
     }
 
@@ -224,4 +227,17 @@ public class OutboundListService {
     private boolean owns(Long c, Long u) { return c != null && c.equals(u); }
     private boolean isManager(String r)  { return "MANAGER".equals(r) || "ROLE_MANAGER".equals(r); }
     private boolean isKeeper(String r)   { return "KEEPER".equals(r)  || "ROLE_KEEPER".equals(r); }
+
+    // [FIX TC-1A] true if any item in DRAFT SO has available < requested
+    private boolean checkDraftShortage(Long warehouseId, Long soId) {
+        return soItemRepository.findBySoId(soId).stream().anyMatch(item -> {
+            java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, item.getSkuId());
+            java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, item.getSkuId());
+            if (total    == null) total    = java.math.BigDecimal.ZERO;
+            if (reserved == null) reserved = java.math.BigDecimal.ZERO;
+            java.math.BigDecimal available = total.subtract(reserved).max(java.math.BigDecimal.ZERO);
+            return available.compareTo(item.getOrderedQty()) < 0;
+        });
+    }
+
 }

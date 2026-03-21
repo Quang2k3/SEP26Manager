@@ -26,6 +26,28 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
         /** Count active children — used in deactivation guard */
         long countByParentLocationIdAndActiveTrue(Long parentLocationId);
 
+        /**
+         * Đếm số location con theo parent + type.
+         * Dùng để enforce giới hạn: 1 AISLE tối đa 3 RACK, 1 RACK tối đa 9 BIN.
+         */
+        long countByParentLocationIdAndLocationType(Long parentLocationId, LocationType locationType);
+
+        /**
+         * Đếm BIN theo rack + tầng + cột.
+         * Dùng để enforce: mỗi ô (floor × column) chỉ có 1 BIN.
+         * 1 rack = 3 tầng × 3 cột = 9 BIN tối đa.
+         */
+        long countByParentLocationIdAndLocationTypeAndBinFloorAndBinColumn(
+                Long parentLocationId, LocationType locationType,
+                Integer binFloor, Integer binColumn);
+
+        /**
+         * Đếm số BIN theo rack + tầng (để biết tầng đó đã có mấy BIN).
+         * Mỗi tầng tối đa 3 BIN (3 cột).
+         */
+        long countByParentLocationIdAndLocationTypeAndBinFloor(
+                Long parentLocationId, LocationType locationType, Integer binFloor);
+
         List<LocationEntity> findByParentLocationId(Long parentLocationId);
 
         List<LocationEntity> findByZoneId(Long zoneId);
@@ -123,6 +145,21 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
                         LIMIT 1
                         """)
         Optional<LocationEntity> findFirstStagingByWarehouse(@Param("warehouseId") Long warehouseId);
+
+        /**
+         * Tìm khu hàng lỗi (defect bin) của warehouse.
+         * Dùng khi Manager xử lý DAMAGE RETURN_SCRAP: chuyển hàng lỗi vào đây.
+         * Tự động tạo nếu chưa có (handled in OutboundQcService).
+         */
+        @Query("""
+                        SELECT l FROM LocationEntity l
+                        WHERE l.warehouseId = :warehouseId
+                          AND l.isDefect = true
+                          AND l.active = true
+                        ORDER BY l.locationId ASC
+                        LIMIT 1
+                        """)
+        Optional<LocationEntity> findDefectBinByWarehouse(@Param("warehouseId") Long warehouseId);
 
         /**
          * Fallback: lấy bất kỳ location active nào của warehouse

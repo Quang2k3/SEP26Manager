@@ -152,9 +152,11 @@ public interface InventorySnapshotJpaRepository
         // ── Increment reserved (BR-OUT-17 / BR-WXE-20) ───────────────────────────
 
         @Modifying
+        // [BUG-FIX] GREATEST(0,...): khi qty âm (cancel), tránh reserved_qty xuống dưới 0
+        // → vi phạm CHECK constraint chk_reserved_non_negative → 500 "unexpected error".
         @Query(value = """
             UPDATE inventory_snapshot
-            SET reserved_qty = reserved_qty + :qty, last_updated = NOW()
+            SET reserved_qty = GREATEST(0, reserved_qty + :qty), last_updated = NOW()
             WHERE warehouse_id = :warehouseId AND sku_id = :skuId
             """, nativeQuery = true)
         void incrementReservedByWarehouseAndSku(
@@ -162,10 +164,12 @@ public interface InventorySnapshotJpaRepository
                 @Param("skuId") Long skuId,
                 @Param("qty") BigDecimal qty);
 
+        // [BUG-FIX] GREATEST(0,...): khi qty âm (cancel reservation), tránh reserved_qty < 0
+        // → vi phạm CHECK constraint chk_reserved_non_negative → 500 trên WAIT_BACKORDER.
         @Modifying
         @Query(value = """
             UPDATE inventory_snapshot
-            SET reserved_qty = reserved_qty + :qty, last_updated = NOW()
+            SET reserved_qty = GREATEST(0, reserved_qty + :qty), last_updated = NOW()
             WHERE location_id = :locationId
               AND sku_id = :skuId
               AND (CASE WHEN :lotId IS NULL THEN lot_id IS NULL ELSE lot_id = :lotId END)

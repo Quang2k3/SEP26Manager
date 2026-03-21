@@ -45,6 +45,19 @@ public class SkuEntity {
     @Column(name = "weight_g", precision = 12, scale = 2)
     private BigDecimal weightG;
 
+    /**
+     * Trọng lượng 1 thùng (carton) tính bằng kg.
+     * Dùng để tính sức chứa BIN khi putaway:
+     *   totalWeightKg = quantity (thùng) × weightPerCartonKg
+     * Ví dụ: SKU001 = 16.000 kg/thùng, SKU002 = 14.000 kg/thùng, SKU003 = 13.000 kg/thùng
+     */
+    @Column(name = "weight_per_carton_kg", precision = 8, scale = 3)
+    private BigDecimal weightPerCartonKg;
+
+    /** Số đơn vị lẻ (can/chai) trong 1 thùng — để đối chiếu / tính lại. */
+    @Column(name = "units_per_carton")
+    private Integer unitsPerCarton;
+
     @Column(name = "barcode", unique = true, length = 100)
     private String barcode;
 

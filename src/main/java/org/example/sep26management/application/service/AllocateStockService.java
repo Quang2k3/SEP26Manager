@@ -5,36 +5,24 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
 import org.example.sep26management.application.dto.request.AllocateStockRequest;
 import org.example.sep26management.application.dto.request.CreateIncidentRequest;
-import org.example.sep26management.application.service.IncidentService;
 import org.example.sep26management.application.dto.response.AllocateStockResponse;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.IncidentResponse;
 import org.example.sep26management.application.enums.IncidentCategory;
 import org.example.sep26management.application.enums.IncidentType;
 import org.example.sep26management.application.enums.OutboundType;
-import org.example.sep26management.infrastructure.persistence.entity.SalesOrderEntity;
-import org.example.sep26management.infrastructure.persistence.entity.TransferEntity;
-import org.example.sep26management.infrastructure.persistence.repository.WarehouseJpaRepository;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.exception.ResourceNotFoundException;
 import org.example.sep26management.infrastructure.persistence.entity.*;
 import org.example.sep26management.infrastructure.persistence.repository.*;
-import org.example.sep26management.infrastructure.persistence.repository.InventoryLotJpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * SCRUM-510: UC-WXE-05 Allocate / Reserve Stock
- * BR-WXE-18: FEFO — First Expiry First Out
- * BR-WXE-19: only available (unallocated) stock
- * BR-WXE-20: allocated stock locked from other tasks
- * BR-WXE-21: retain lot + expiry traceability
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -52,6 +40,9 @@ public class AllocateStockService {
     private final AuditLogService auditLogService;
     private final IncidentService incidentService;
     private final WarehouseJpaRepository warehouseRepository;
+    // [V20] Inject trực tiếp để set soId khi tạo Incident
+    private final IncidentJpaRepository incidentJpaRepository;
+    private final IncidentItemJpaRepository incidentItemJpaRepository;
 
     @Transactional
     public ApiResponse<AllocateStockResponse> allocateStock(
@@ -64,21 +55,46 @@ public class AllocateStockService {
         String documentCode;
         List<SkuQtyPair> required = new ArrayList<>();
 
-        // Resolve document and items
         if (request.getOrderType() == OutboundType.SALES_ORDER) {
             SalesOrderEntity so = soRepository.findById(request.getDocumentId())
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            if (!"APPROVED".equals(so.getStatus())) {
+            // Allow re-allocate from APPROVED or WAITING_STOCK (after Manager resolves WAIT_BACKORDER)
+            if (!"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
                 throw new BusinessException(MessageConstants.ALLOCATE_MUST_BE_APPROVED);
             }
 
             warehouseId = so.getWarehouseId();
             documentCode = so.getSoCode();
-
             soItemRepository.findBySoId(so.getSoId())
                     .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getOrderedQty())));
+
+            // [BUG-FIX] WAITING_STOCK guard: chỉ cho phép re-allocate khi tồn kho ĐÃ ĐỦ
+            // toàn bộ yêu cầu. Nếu chưa đủ, block và yêu cầu chờ nhập thêm.
+            // Không có guard này, Keeper có thể re-allocate bất kỳ lúc nào dù hàng
+            // vẫn còn thiếu → tạo PARTIAL allocation mới → lại phải báo thiếu lại.
+            if ("WAITING_STOCK".equals(so.getStatus())) {
+                List<String> stillShort = new java.util.ArrayList<>();
+                for (SkuQtyPair pair : required) {
+                    java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
+                    java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
+                    if (total    == null) total    = java.math.BigDecimal.ZERO;
+                    if (reserved == null) reserved = java.math.BigDecimal.ZERO;
+                    java.math.BigDecimal available = total.subtract(reserved).max(java.math.BigDecimal.ZERO);
+                    if (available.compareTo(pair.qty) < 0) {
+                        String skuCode = skuRepository.findById(pair.skuId)
+                                .map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
+                        stillShort.add(skuCode + " (cần " + pair.qty + ", có " + available + ")");
+                    }
+                }
+                if (!stillShort.isEmpty()) {
+                    throw new BusinessException(
+                            "Chưa đủ tồn kho để phân bổ — vẫn đang thiếu: " +
+                                    String.join("; ", stillShort) +
+                                    ". Vui lòng chờ nhập thêm hàng trước khi Allocate lại.");
+                }
+            }
 
         } else {
             TransferEntity transfer = transferRepository.findById(request.getDocumentId())
@@ -91,7 +107,6 @@ public class AllocateStockService {
 
             warehouseId = transfer.getFromWarehouseId();
             documentCode = transfer.getTransferCode();
-
             transferItemRepository.findByTransferId(transfer.getTransferId())
                     .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getQuantity())));
         }
@@ -100,74 +115,51 @@ public class AllocateStockService {
             throw new BusinessException(MessageConstants.ALLOCATE_NO_ITEMS);
         }
 
-        // [FIX-BUG-2] Idempotency guard: xoá reservation OPEN cũ của document này trước khi tạo mới.
-        // Nếu không có bước này, gọi allocate 2 lần sẽ double-reserve và làm reserved_qty sai.
+        // Idempotency: cancel existing OPEN reservations
         String refTableClean = request.getOrderType() == OutboundType.SALES_ORDER ? "sales_orders" : "transfers";
         List<ReservationEntity> existingReservations = reservationRepository
                 .findByReferenceTableAndReferenceIdAndStatus(refTableClean, request.getDocumentId(), "OPEN");
         for (ReservationEntity existing : existingReservations) {
-            // Hoàn trả reserved_qty đúng về location đã reserve
-            // [FIX-CORE] Sau khi ReservationEntity có locationId, dùng location-specific decrement
             if (existing.getLocationId() != null) {
                 snapshotRepository.incrementReservedByLocationAndSku(
                         existing.getLocationId(), existing.getSkuId(), existing.getLotId(),
                         existing.getQuantity().negate());
             } else {
-                // Fallback cho reservation cũ chưa có locationId
                 snapshotRepository.incrementReservedByWarehouseAndSku(
                         existing.getWarehouseId(), existing.getSkuId(), existing.getQuantity().negate());
             }
             existing.setStatus("CANCELLED");
             reservationRepository.save(existing);
         }
-        if (!existingReservations.isEmpty()) {
-            log.info("[FIX-BUG-2] Cancelled {} existing OPEN reservations for documentId={} before re-allocating",
-                    existingReservations.size(), request.getDocumentId());
-        }
 
         List<AllocateStockResponse.AllocationLine> allocations = new ArrayList<>();
         List<AllocateStockResponse.ShortageItem> shortages = new ArrayList<>();
 
-        // Process each SKU
         for (SkuQtyPair pair : required) {
             BigDecimal remaining = pair.qty;
             String skuCode = skuRepository.findById(pair.skuId).map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
             String skuName = skuRepository.findById(pair.skuId).map(s -> s.getSkuName()).orElse(null);
 
-            // BR-WXE-18: FEFO — get stock sorted by expiry date ASC
             List<InventoryAllocationRepository.FEFOAllocationProjection> stocks =
                     allocationRepository.findAvailableStockFEFO(warehouseId, pair.skuId);
-
             if (stocks.isEmpty()) {
-                // Try without lot filter
                 stocks = allocationRepository.findAvailableStockFEFONoLot(warehouseId, pair.skuId);
             }
 
             for (InventoryAllocationRepository.FEFOAllocationProjection stock : stocks) {
                 if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
-
-                // BR-WXE-19: only unallocated stock
                 BigDecimal canAllocate = stock.getAvailableQty().min(remaining);
                 if (canAllocate.compareTo(BigDecimal.ZERO) <= 0) continue;
 
-                // BR-WXE-20: lock stock — update reserved_qty in snapshot
                 snapshotRepository.incrementReservedByLocationAndSku(
                         stock.getLocationId(), pair.skuId, stock.getLotId(), canAllocate);
 
-                // Create reservation record — BR-WXE-21: with lot + location info
-                // [FIX-CORE] Lưu locationId vào reservation để PickListService biết
-                // đúng bin cần lấy hàng, và confirmDispatch trừ tồn đúng vị trí.
                 reservationRepository.save(ReservationEntity.builder()
                         .warehouseId(warehouseId).skuId(pair.skuId).lotId(stock.getLotId())
-                        .locationId(stock.getLocationId())
-                        .quantity(canAllocate)
-                        .referenceTable(request.getOrderType() == OutboundType.SALES_ORDER
-                                ? "sales_orders" : "transfers")
-                        .referenceId(request.getDocumentId())
-                        .status("OPEN")
-                        .build());
+                        .locationId(stock.getLocationId()).quantity(canAllocate)
+                        .referenceTable(request.getOrderType() == OutboundType.SALES_ORDER ? "sales_orders" : "transfers")
+                        .referenceId(request.getDocumentId()).status("OPEN").build());
 
-                // BR-WXE-21: record allocation line with lot + expiry
                 allocations.add(AllocateStockResponse.AllocationLine.builder()
                         .skuId(pair.skuId).skuCode(skuCode).skuName(skuName)
                         .lotId(stock.getLotId()).lotNumber(
@@ -177,27 +169,22 @@ public class AllocateStockService {
                         .expiryDate(stock.getExpiryDate())
                         .locationId(stock.getLocationId()).locationCode(stock.getLocationCode())
                         .zoneCode(stock.getZoneCode())
-                        .allocatedQty(canAllocate).requestedQty(pair.qty)
-                        .build());
+                        .allocatedQty(canAllocate).requestedQty(pair.qty).build());
 
                 remaining = remaining.subtract(canAllocate);
             }
 
-            // Record shortage if not fully allocated
             if (remaining.compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal totalAvail = pair.qty.subtract(remaining);
                 shortages.add(AllocateStockResponse.ShortageItem.builder()
                         .skuId(pair.skuId).skuCode(skuCode)
-                        .requestedQty(pair.qty).availableQty(totalAvail).shortageQty(remaining)
-                        .build());
+                        .requestedQty(pair.qty).availableQty(totalAvail).shortageQty(remaining).build());
             }
         }
 
-        // Determine overall status
         boolean fullyAllocated = shortages.isEmpty();
         String allocStatus = fullyAllocated ? "ALLOCATED" : "PARTIALLY_ALLOCATED";
 
-        // ── Update document status → ALLOCATED (only if fully allocated) ──────────
         if (fullyAllocated) {
             if (request.getOrderType() == OutboundType.SALES_ORDER) {
                 soRepository.findById(request.getDocumentId()).ifPresent(so -> {
@@ -219,33 +206,22 @@ public class AllocateStockService {
                 request.getDocumentId(),
                 documentCode + " stock allocation: " + allocStatus, ip, ua);
 
-        String message = fullyAllocated
-                ? MessageConstants.ALLOCATE_SUCCESS
-                : MessageConstants.ALLOCATE_PARTIAL;
+        String message = fullyAllocated ? MessageConstants.ALLOCATE_SUCCESS : MessageConstants.ALLOCATE_PARTIAL;
 
         return ApiResponse.success(message, AllocateStockResponse.builder()
-                .documentId(request.getDocumentId())
-                .documentCode(documentCode)
-                .status(allocStatus)
-                .fullyAllocated(fullyAllocated)
-                .totalSkus(required.size())
-                .allocatedSkus(required.size() - shortages.size())
-                .allocations(allocations)
-                .shortages(shortages.isEmpty() ? null : shortages)
-                .build());
+                .documentId(request.getDocumentId()).documentCode(documentCode)
+                .status(allocStatus).fullyAllocated(fullyAllocated)
+                .totalSkus(required.size()).allocatedSkus(required.size() - shortages.size())
+                .allocations(allocations).shortages(shortages.isEmpty() ? null : shortages).build());
     }
 
-    private record SkuQtyPair(Long skuId, BigDecimal qty) {}
-
     /**
-     * Keeper báo thiếu hàng sau khi allocate thất bại.
-     * Tạo incident type=SHORTAGE, category=QUALITY, gửi lên Manager xử lý.
+     * Keeper báo thiếu hàng — tạo Incident SHORTAGE với soId để Manager xử lý.
+     * [V20 FIX] Lưu soId vào incident.soId để countOpenIncidentsBySoId hoạt động.
      */
     @Transactional
     public ApiResponse<IncidentResponse> reportShortage(
-            Long documentId,
-            OutboundType orderType,
-            Long userId, String ip, String ua) {
+            Long documentId, OutboundType orderType, Long userId, String ip, String ua) {
 
         Long warehouseId;
         String documentCode;
@@ -269,15 +245,14 @@ public class AllocateStockService {
                     .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getQuantity())));
         }
 
-        // Build incident items — chỉ ghi các SKU thực sự thiếu
         List<CreateIncidentRequest.IncidentItemDto> incidentItems = new ArrayList<>();
         StringBuilder desc = new StringBuilder("Thiếu tồn kho khi phân bổ lệnh xuất " + documentCode + ": ");
+
         for (SkuQtyPair pair : required) {
             BigDecimal available = getAvailableQty(warehouseId, pair.skuId);
             if (available.compareTo(pair.qty) < 0) {
                 BigDecimal shortage = pair.qty.subtract(available);
-                String skuCode = skuRepository.findById(pair.skuId)
-                        .map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
+                String skuCode = skuRepository.findById(pair.skuId).map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
                 incidentItems.add(new CreateIncidentRequest.IncidentItemDto(
                         pair.skuId, shortage, pair.qty, available, "SHORTAGE",
                         skuCode + ": cần " + pair.qty + ", còn " + available));
@@ -289,20 +264,70 @@ public class AllocateStockService {
             throw new BusinessException("Không có SKU nào thiếu hàng để báo cáo.");
         }
 
-        CreateIncidentRequest req = CreateIncidentRequest.builder()
+        // [BUG-FIX] Chặn báo cáo trùng lặp: nếu SO đã có OPEN shortage incident thì từ chối.
+        // Không có guard này, Keeper có thể bấm "Báo thiếu" nhiều lần → nhiều incident OPEN
+        // → Manager thấy nhiều đơn cùng SO → xử lý 1 đơn xong, đơn còn lại gây lỗi khi resolve.
+        if (orderType == OutboundType.SALES_ORDER) {
+            long openCount = incidentJpaRepository.countOpenIncidentsBySoId(documentId);
+            if (openCount > 0) {
+                throw new BusinessException(
+                        "Đã có " + openCount + " incident SHORTAGE đang chờ xử lý cho đơn này. " +
+                                "Vui lòng chờ Manager xử lý trước khi báo cáo lại.");
+            }
+        }
+
+        // [BUG-FIX] Đổi SO status → ON_HOLD để khoá Keeper không thể báo cáo lại
+        // và để FE hiển thị banner "Đang chờ Manager xử lý" thay vì cho phép thao tác tiếp.
+        // [FIX TC-1A] DRAFT → WAITING_STOCK (báo thiếu từ đơn nháp, chưa qua duyệt)
+        // APPROVED → ON_HOLD (Allocate thất bại sau khi Manager đã duyệt)
+        if (orderType == OutboundType.SALES_ORDER) {
+            soRepository.findById(documentId).ifPresent(so -> {
+                String prevStatus = so.getStatus();
+                String newStatus = "DRAFT".equals(prevStatus) ? "WAITING_STOCK" : "ON_HOLD";
+                so.setStatus(newStatus);
+                so.setUpdatedAt(java.time.LocalDateTime.now());
+                soRepository.save(so);
+                log.info("SO {} → {} (shortage reported from {}, waiting Manager)",
+                        so.getSoCode(), newStatus, prevStatus);
+            });
+        }
+
+        // [V20 FIX] Tạo trực tiếp với soId — không reuse receivingId làm surrogate
+        String code = "INC-SHORT-" + documentId + "-" + System.currentTimeMillis() % 100_000;
+        IncidentEntity incident = IncidentEntity.builder()
                 .warehouseId(warehouseId)
-                .category(IncidentCategory.QUALITY)
+                .incidentCode(code)
                 .incidentType(IncidentType.SHORTAGE)
+                .category(IncidentCategory.QUALITY)
+                .severity("HIGH")
+                .occurredAt(LocalDateTime.now())
                 .description(desc.toString().trim())
-                .items(incidentItems)
+                .reportedBy(userId)
+                .status("OPEN")
+                .soId(orderType == OutboundType.SALES_ORDER ? documentId : null)
+                .receivingId(null)
                 .build();
 
-        log.info("Reporting shortage incident for document {} ({})", documentCode, orderType);
+        IncidentEntity saved = incidentJpaRepository.save(incident);
+
+        for (CreateIncidentRequest.IncidentItemDto itemDto : incidentItems) {
+            incidentItemJpaRepository.save(IncidentItemEntity.builder()
+                    .incident(saved)
+                    .skuId(itemDto.getSkuId())
+                    .damagedQty(itemDto.getDamagedQty())
+                    .expectedQty(itemDto.getExpectedQty())
+                    .actualQty(itemDto.getActualQty())
+                    .reasonCode(itemDto.getReasonCode())
+                    .note(itemDto.getNote())
+                    .build());
+        }
+
+        log.info("Shortage incident {} created for document {} ({})", code, documentCode, orderType);
         auditLogService.logAction(userId, "SHORTAGE_REPORTED",
                 orderType == OutboundType.SALES_ORDER ? "SALES_ORDER" : "TRANSFER",
                 documentId, "Shortage reported for " + documentCode, ip, ua);
 
-        return incidentService.createIncident(req, userId);
+        return ApiResponse.success("Shortage incident reported successfully.", incidentService.toResponse(saved));
     }
 
     private BigDecimal getAvailableQty(Long warehouseId, Long skuId) {
@@ -312,4 +337,6 @@ public class AllocateStockService {
         if (reserved == null) reserved = BigDecimal.ZERO;
         return total.subtract(reserved).max(BigDecimal.ZERO);
     }
+
+    private record SkuQtyPair(Long skuId, BigDecimal qty) {}
 }
