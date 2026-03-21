@@ -285,18 +285,10 @@ public class IncidentService {
                     .findFirst().orElse(null);
 
             String action = res.getAction().toUpperCase();
-            boolean isUnexpectedItem = "UNEXPECTED_ITEM".equals(incItem.getReasonCode());
 
             switch (action) {
                 case "CLOSE_SHORT":
-                    // Chốt thiếu: expectedQty = receivedQty (accept what was received)
-                    // Không ghi đè expectedQty cho hàng ngoài phiếu (giữ expectedQty=0)
-                    if (rcItem != null) {
-                        if (!isUnexpectedItem) {
-                            rcItem.setExpectedQty(rcItem.getReceivedQty());
-                        }
-                        receivingItemRepo.save(rcItem);
-                    }
+                    // Chốt thiếu: giữ nguyên expectedQty (PO gốc), receivedQty không đổi
                     incItem.setNote(appendNote(incItem.getNote(),
                             "[Manager]: CLOSE_SHORT — Chốt thiếu, chấp nhận số lượng nhận được"));
                     break;
@@ -310,11 +302,7 @@ public class IncidentService {
                         String skuCode = skuRepo.findById(rcItem.getSkuId())
                                 .map(SkuEntity::getSkuCode).orElse("SKU-" + rcItem.getSkuId());
 
-                        // Accept current received qty — set expectedQty = receivedQty
-                        // Không ghi đè expectedQty cho hàng ngoài phiếu (giữ expectedQty=0)
-                        if (!isUnexpectedItem) {
-                            rcItem.setExpectedQty(rcItem.getReceivedQty());
-                        }
+                        // Giữ nguyên expectedQty (PO gốc), receivedQty không đổi
                         receivingItemRepo.save(rcItem);
 
                         incItem.setNote(appendNote(incItem.getNote(),
@@ -329,39 +317,26 @@ public class IncidentService {
                     break;
 
                 case "ACCEPT":
-                    // Nhận hàng thừa/ngoài phiếu: accept all received
-                    // Không ghi đè expectedQty cho hàng ngoài phiếu (giữ expectedQty=0)
-                    if (rcItem != null) {
-                        if (!isUnexpectedItem) {
-                            rcItem.setExpectedQty(rcItem.getReceivedQty());
-                        }
-                        receivingItemRepo.save(rcItem);
-                    }
-                    incItem.setActionPassQty(incItem.getDamagedQty()); // pass the overage qty
+                    // Nhận hàng thừa/ngoài phiếu: chấp nhận — giữ nguyên expectedQty, receivedQty không đổi
+                    incItem.setActionPassQty(incItem.getDamagedQty());
                     incItem.setNote(appendNote(incItem.getNote(),
-                            isUnexpectedItem
+                            "UNEXPECTED_ITEM".equals(incItem.getReasonCode())
                                     ? "[Manager]: ACCEPT — Nhận hàng ngoài phiếu, nhập kho"
                                     : "[Manager]: ACCEPT — Nhận hàng thừa, nhập kho tất cả"));
                     break;
 
                 case "RETURN":
-                    // Hoàn hàng hỏng/thừa: giảm receivedQty + điều chỉnh expectedQty
+                    // Hoàn hàng: giảm receivedQty, giữ nguyên expectedQty (PO gốc)
                     if (rcItem != null) {
                         java.math.BigDecimal returnQty = incItem.getDamagedQty() != null
                                 ? incItem.getDamagedQty() : java.math.BigDecimal.ZERO;
                         incItem.setActionReturnQty(returnQty);
-                        // Giảm receivedQty trừ phần hoàn
                         java.math.BigDecimal curReceived = rcItem.getReceivedQty() != null
                                 ? rcItem.getReceivedQty() : java.math.BigDecimal.ZERO;
                         java.math.BigDecimal afterReturn = curReceived.subtract(returnQty);
                         if (afterReturn.compareTo(java.math.BigDecimal.ZERO) < 0)
                             afterReturn = java.math.BigDecimal.ZERO;
                         rcItem.setReceivedQty(afterReturn);
-                        // Điều chỉnh expectedQty = phần thực tế giữ lại
-                        // Không ghi đè expectedQty cho hàng ngoài phiếu (giữ expectedQty=0)
-                        if (!isUnexpectedItem) {
-                            rcItem.setExpectedQty(afterReturn);
-                        }
                         receivingItemRepo.save(rcItem);
                     }
                     incItem.setNote(appendNote(incItem.getNote(),
