@@ -26,6 +26,12 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
         /** Count active children — used in deactivation guard */
         long countByParentLocationIdAndActiveTrue(Long parentLocationId);
 
+        /**
+         * Đếm số location con theo parent + type.
+         * Dùng để enforce giới hạn: 1 AISLE tối đa 3 RACK, 1 RACK tối đa 9 BIN.
+         */
+        long countByParentLocationIdAndLocationType(Long parentLocationId, LocationType locationType);
+
         List<LocationEntity> findByParentLocationId(Long parentLocationId);
 
         List<LocationEntity> findByZoneId(Long zoneId);

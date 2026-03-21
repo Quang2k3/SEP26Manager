@@ -51,6 +51,15 @@ public class LocationResponse {
     @Schema(description = "Khu tập kết ngắn hạn không", example = "false")
     private Boolean isStaging;
 
+    @Schema(description = "Khu hàng lỗi không", example = "false")
+    private Boolean isDefect;
+
+    @Schema(description = "Tầng BIN (1=dưới/150kg, 2=giữa/150kg, 3=trên/120kg). Null nếu không phải BIN.", example = "1")
+    private Integer binFloor;
+
+    @Schema(description = "Số thùng tối đa ước tính theo tầng (thùng 16kg làm chuẩn)", example = "9")
+    private Integer maxBoxCount;
+
     /** BR-LOC-17: always present — never hidden */
     @Schema(description = "Trạng Thái Hoạt Động", example = "true")
     private Boolean active;
