@@ -32,4 +32,7 @@ public class OutboundListResponse {
     private boolean canSubmit;
     private boolean canApprove;
     private boolean canConfirm;
+    // [FIX TC-1A] true khi đơn DRAFT có ít nhất 1 SKU thiếu tồn kho
+    // FE đọc field này để render ngay — không cần chờ GET /outbound/{id}
+    private boolean hasStockShortage;
 }
