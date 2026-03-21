@@ -38,4 +38,8 @@ public class IncidentItemResponse {
 
     @Schema(description = "Ghi chú thêm", example = "Thùng bị móp méo")
     private String note;
+
+    // [FIX QC] URL ảnh bằng chứng hàng hỏng từ QC scan FAIL
+    @Schema(description = "URL ảnh bằng chứng hàng hỏng (chụp khi scan FAIL)")
+    private String attachmentUrl;
 }
