@@ -60,8 +60,10 @@ public class AllocateStockService {
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            // Allow re-allocate from APPROVED or WAITING_STOCK (after Manager resolves WAIT_BACKORDER)
-            if (!"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
+            // Allow allocate từ APPROVED, WAITING_STOCK (re-allocate) hoặc SHORTAGE_PENDING (partial lock khi submit)
+            if (!"APPROVED".equals(so.getStatus())
+                    && !"WAITING_STOCK".equals(so.getStatus())
+                    && !"SHORTAGE_PENDING".equals(so.getStatus())) {
                 throw new BusinessException(MessageConstants.ALLOCATE_MUST_BE_APPROVED);
             }
 
