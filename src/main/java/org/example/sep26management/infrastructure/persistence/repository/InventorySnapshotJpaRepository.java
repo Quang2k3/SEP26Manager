@@ -151,6 +151,39 @@ public interface InventorySnapshotJpaRepository
                 @Param("warehouseId") Long warehouseId,
                 @Param("skuId") Long skuId);
 
+        // [FIX] Ton kho tong hop theo SKU cho dashboard chart
+        @Query(value = """
+            SELECT s.sku_id AS skuId,
+                   sk.sku_code AS skuCode,
+                   sk.sku_name AS skuName,
+                   SUM(s.quantity) AS totalQty,
+                   SUM(COALESCE(s.reserved_qty, 0)) AS reservedQty,
+                   SUM(s.quantity - COALESCE(s.reserved_qty, 0)) AS availableQty
+            FROM inventory_snapshot s
+            JOIN locations l  ON l.location_id  = s.location_id
+            JOIN skus sk      ON sk.sku_id       = s.sku_id
+            WHERE s.warehouse_id  = :warehouseId
+              AND l.active        = true
+              AND l.is_staging    = false
+              AND l.is_defect     = false
+              AND l.location_type = 'BIN'
+              AND s.quantity      > 0
+            GROUP BY s.sku_id, sk.sku_code, sk.sku_name
+            ORDER BY SUM(s.quantity - COALESCE(s.reserved_qty, 0)) DESC
+            LIMIT 20
+            """, nativeQuery = true)
+        List<SkuStockSummaryProjection> findSkuStockSummaryByWarehouse(
+                @Param("warehouseId") Long warehouseId);
+
+        interface SkuStockSummaryProjection {
+                Long getSkuId();
+                String getSkuCode();
+                String getSkuName();
+                java.math.BigDecimal getTotalQty();
+                java.math.BigDecimal getReservedQty();
+                java.math.BigDecimal getAvailableQty();
+        }
+
         // ── Increment reserved (BR-OUT-17 / BR-WXE-20) ───────────────────────────
 
         @Modifying

@@ -48,6 +48,7 @@ public class SkuController {
     private final SkuService skuService;
     private final InventoryLotJpaRepository inventoryLotRepo;
     private final org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository skuJpaRepository;
+    private final org.example.sep26management.infrastructure.persistence.repository.InventorySnapshotJpaRepository inventorySnapshotRepo;
 
     /**
      * UC-268: View SKU Detail
@@ -379,5 +380,29 @@ public class SkuController {
             return ResponseEntity.ok(response);
         }
         return ResponseEntity.status(404).body(response);
+    }
+
+    /**
+     * GET /v1/skus/stock-summary
+     * Ton kho tong hop theo SKU - dung cho dashboard chart KEEPER & QC.
+     */
+    @GetMapping("/stock-summary")
+    @PreAuthorize("hasAnyRole('MANAGER','KEEPER','QC')")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Ton kho tong hop theo SKU")
+    public ResponseEntity<org.example.sep26management.application.dto.response.ApiResponse<java.util.List<java.util.Map<String, Object>>>> getSkuStockSummary(
+            org.springframework.security.core.Authentication authentication) {
+        Long warehouseId = extractWarehouseId(authentication);
+        var rows = inventorySnapshotRepo.findSkuStockSummaryByWarehouse(warehouseId);
+        java.util.List<java.util.Map<String, Object>> result = rows.stream().map(r -> {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("skuId",        r.getSkuId());
+            m.put("skuCode",      r.getSkuCode());
+            m.put("skuName",      r.getSkuName());
+            m.put("totalQty",     r.getTotalQty());
+            m.put("reservedQty",  r.getReservedQty());
+            m.put("availableQty", r.getAvailableQty());
+            return m;
+        }).collect(java.util.stream.Collectors.toList());
+        return ResponseEntity.ok(org.example.sep26management.application.dto.response.ApiResponse.success("OK", result));
     }
 }
