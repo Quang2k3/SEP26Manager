@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -47,6 +48,7 @@ public class OutboundQcService {
     private final IncidentItemJpaRepository incidentItemRepository;
     private final InventoryLotJpaRepository inventoryLotRepository;
     private final LocationJpaRepository locationRepository;
+    private final ZoneJpaRepository zoneRepository;
     private final SkuJpaRepository skuRepository;
     private final UserJpaRepository userRepository;
     private final WarehouseJpaRepository warehouseRepository;
@@ -136,6 +138,21 @@ public class OutboundQcService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // submitQcResults: nhan toan bo ket qua PASS/FAIL tu FE, set cho tung item, sau do finalize
+    @Transactional
+    public ApiResponse<QcSummaryResponse> submitQcResults(
+            Long taskId,
+            java.util.List<QcScanRequest> results,
+            Long userId) {
+        PickingTaskEntity task = findPickingTask(taskId);
+        if ("PICKED".equals(task.getStatus())) startQcSession(taskId, userId);
+        for (QcScanRequest req : results) {
+            try { scanItem(req, userId); }
+            catch (Exception e) { log.warn("submitQcResults skip item {}: {}", req.getPickingTaskItemId(), e.getMessage()); }
+        }
+        return finalizeQc(taskId, userId);
+    }
+
     // 4) FINALIZE QC — [V20] tạo Incident DAMAGE khi có FAIL, set ON_HOLD
     // ─────────────────────────────────────────────────────────────────────────
     @Transactional
@@ -335,14 +352,17 @@ public class OutboundQcService {
             if (qty.compareTo(BigDecimal.ZERO) <= 0) continue;
 
             Long fromLocationId = item.getFromLocationId();
-            // [BUG-FIX] fromLocationId null -> fallback snapshot
-            if (fromLocationId == null) {
+            // [BUG-FIX] Guard: fromLocationId KHONG duoc la defect bin
+            // Neu tro vao defect bin → AllocateStock lan truoc lay ham tu defect bin (sai)
+            // hoac fromLocationId = null → fallback. Ca hai truong hop: dung findLocationIdByWarehouseSkuLot
+            // (da duoc fix: exclude is_defect=true) de tim bin goc thuc su.
+            if (fromLocationId == null || fromLocationId.equals(defectBin.getLocationId())) {
                 fromLocationId = inventorySnapshotRepository
                         .findLocationIdByWarehouseSkuLot(warehouseId, item.getSkuId(), item.getLotId());
-                log.warn("deductFailItems: fromLocationId null skuId={}, fallback={}", item.getSkuId(), fromLocationId);
+                log.warn("deductFailItems: fromLocationId null/defect skuId={}, fallback={}", item.getSkuId(), fromLocationId);
             }
             if (fromLocationId == null) {
-                log.error("deductFailItems: no location skuId={} skip", item.getSkuId());
+                log.error("deductFailItems: no usable location skuId={} warehouseId={} — skip", item.getSkuId(), warehouseId);
                 continue;
             }
 
@@ -365,7 +385,7 @@ public class OutboundQcService {
                     .referenceTable("sales_orders")
                     .referenceId(soId)
                     .reasonCode("QC_FAIL")
-                    .createdBy(userId != null ? userId : 0L)
+                    .createdBy(userId != null ? userId : getSystemUserId())
                     .build());
 
             // 4. Ghi txn DAMAGE_TRANSFER (nhập vào khu hàng lỗi)
@@ -379,7 +399,7 @@ public class OutboundQcService {
                     .referenceTable("sales_orders")
                     .referenceId(soId)
                     .reasonCode("QC_FAIL_MOVE_TO_DEFECT")
-                    .createdBy(userId != null ? userId : 0L)
+                    .createdBy(userId != null ? userId : getSystemUserId())
                     .build());
 
             log.info("DAMAGE: skuId={} qty={} moved from loc={} to defect bin={}",
@@ -392,22 +412,57 @@ public class OutboundQcService {
      * Nếu chưa có → tự tạo location DEFECT-BIN với is_defect=true.
      */
     private LocationEntity getOrCreateDefectBin(Long warehouseId) {
-        return locationRepository.findDefectBinByWarehouse(warehouseId)
-                .orElseGet(() -> {
-                    String code = "DEFECT-BIN-WH" + warehouseId;
-                    LocationEntity defect = LocationEntity.builder()
-                            .warehouseId(warehouseId)
-                            .locationCode(code)
-                            .locationType(org.example.sep26management.application.enums.LocationType.BIN)
-                            .isPickingFace(false)
-                            .isStaging(false)
-                            .isDefect(true)
-                            .active(true)
-                            .build();
-                    LocationEntity saved = locationRepository.save(defect);
-                    log.info("Auto-created defect bin: {} (warehouseId={})", code, warehouseId);
-                    return saved;
-                });
+        // 1. Tim bin is_defect=true co zone (trong Z-DEFECT chinh thuc) truoc
+        Optional<LocationEntity> existing = locationRepository.findDefectBinByWarehouse(warehouseId);
+        if (existing.isPresent() && existing.get().getZoneId() != null) return existing.get();
+
+        // 2. Tim zone Z-DEFECT
+        Optional<org.example.sep26management.infrastructure.persistence.entity.ZoneEntity> defectZone =
+                zoneRepository.findByWarehouseIdAndZoneCode(warehouseId, "Z-DEFECT");
+
+        if (defectZone.isPresent()) {
+            Long zoneId = defectZone.get().getZoneId();
+            List<LocationEntity> binsInZone = locationRepository.findByZoneId(zoneId);
+
+            // 2a. Bin is_defect=true trong Z-DEFECT
+            Optional<LocationEntity> defectBinInZone = binsInZone.stream()
+                    .filter(l -> Boolean.TRUE.equals(l.getIsDefect()) && Boolean.TRUE.equals(l.getActive()))
+                    .findFirst();
+            if (defectBinInZone.isPresent()) return defectBinInZone.get();
+
+            // 2b. Lay bin dau tien trong Z-DEFECT, danh dau is_defect=true
+            Optional<LocationEntity> anyBin = binsInZone.stream()
+                    .filter(l -> Boolean.TRUE.equals(l.getActive())
+                            && org.example.sep26management.application.enums.LocationType.BIN.equals(l.getLocationType()))
+                    .findFirst();
+            if (anyBin.isPresent()) {
+                LocationEntity bin = anyBin.get();
+                bin.setIsDefect(true);
+                locationRepository.save(bin);
+                log.info("Marked {} as defect bin in Z-DEFECT zone", bin.getLocationCode());
+                return bin;
+            }
+        }
+
+        // 3. Fallback: dung bin is_defect=true hien co (du no-zone)
+        if (existing.isPresent()) {
+            log.warn("No Z-DEFECT zone bins, using existing defect bin {}", existing.get().getLocationCode());
+            return existing.get();
+        }
+
+        // 4. Fallback cuoi: tao bin moi no-zone
+        String code = "DEFECT-BIN-WH" + warehouseId;
+        LocationEntity defect = LocationEntity.builder()
+                .warehouseId(warehouseId)
+                .locationCode(code)
+                .locationType(org.example.sep26management.application.enums.LocationType.BIN)
+                .isPickingFace(false)
+                .isStaging(false)
+                .isDefect(true)
+                .active(true)
+                .build();
+        log.warn("No Z-DEFECT zone — auto-created no-zone defect bin {} (warehouseId={})", code, warehouseId);
+        return locationRepository.save(defect);
     }
 
     /** Cancel OPEN reservations cho SO trước khi re-allocate sau RETURN_SCRAP. */
@@ -621,4 +676,14 @@ public class OutboundQcService {
                         ? item.getPickedQty() : item.getRequiredQty())
                 .build();
     }
+
+    /** Lay user_id he thong (admin dau tien) de dung lam created_by khi userId=null. */
+    private Long getSystemUserId() {
+        return userRepository.findAll().stream()
+                .filter(u -> Boolean.TRUE.equals(u.getStatus()))
+                .map(u -> u.getUserId())
+                .min(Long::compareTo)
+                .orElse(1L);
+    }
+
 }

@@ -11,6 +11,8 @@ import org.example.sep26management.application.dto.request.*;
 import org.example.sep26management.application.dto.response.*;
 import org.example.sep26management.application.enums.OutboundType;
 import org.example.sep26management.application.service.*;
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -64,8 +66,8 @@ public class OutboundController {
     private final ReceivingSessionService receivingSessionService;
     private final DispatchPdfService dispatchPdfService;
     private final SignedNoteService signedNoteService;
+    private final Cloudinary cloudinary;
     private final PickSignedNoteService pickSignedNoteService;
-    private final org.example.sep26management.infrastructure.persistence.repository.InventorySnapshotJpaRepository snapshotRepository;
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
     // createOutbound(request, createdBy, ip, ua) — warehouseId injected vào request
@@ -355,6 +357,20 @@ public class OutboundController {
         return ResponseEntity.ok(outboundQcService.startQcSession(taskId, getUserId()));
     }
 
+    /**
+     * POST /v1/outbound/pick-list/{taskId}/submit-qc
+     * Nhan toan bo ket qua scan PASS/FAIL tu FE (1 lan duy nhat),
+     * set qcResult cho tung item roi finalizeQc.
+     */
+    @PostMapping("/pick-list/{taskId}/submit-qc")
+    @PreAuthorize("hasAnyRole('KEEPER','QC')")
+    @Operation(summary = "Nop ket qua QC toan bo")
+    public ResponseEntity<ApiResponse<QcSummaryResponse>> submitQcResults(
+            @PathVariable Long taskId,
+            @RequestBody java.util.List<QcScanRequest> results) {
+        return ResponseEntity.ok(outboundQcService.submitQcResults(taskId, results, getUserId()));
+    }
+
     @PostMapping("/pick-list/{taskId}/finalize-qc")
     @PreAuthorize("hasAnyRole('KEEPER','QC')")
     @Operation(summary = "Hoàn tất phiên QC từ điện thoại",
@@ -453,6 +469,32 @@ public class OutboundController {
             @PathVariable Long soId,
             @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
         return ResponseEntity.ok(signedNoteService.uploadSignedNote(soId, photo));
+    }
+
+    /**
+     * POST /v1/outbound/qc-photo
+     * Upload ảnh hàng hỏng từ điện thoại scan QC FAIL.
+     * Không gắn với SO cụ thể — trả về URL 上 Cloudinary.
+     */
+    @PostMapping(value = "/qc-photo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload ảnh hàng hỏng QC FAIL")
+    public ResponseEntity<ApiResponse<java.util.Map<String, String>>> uploadQcPhoto(
+            @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
+        if (photo == null || photo.isEmpty())
+            return ResponseEntity.badRequest().body(ApiResponse.error("Vui lòng chọn ảnh."));
+        try {
+            String publicId = "qc_damage/" + System.currentTimeMillis();
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> result = cloudinary.uploader().upload(
+                    photo.getBytes(),
+                    ObjectUtils.asMap("public_id", publicId, "resource_type", "image",
+                            "quality", "auto:good", "fetch_format", "auto"));
+            String url = (String) result.get("secure_url");
+            if (url == null) return ResponseEntity.status(500).body(ApiResponse.error("Upload thất bại"));
+            return ResponseEntity.ok(ApiResponse.success("OK", java.util.Map.of("url", url)));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.error("Lỗi upload: " + e.getMessage()));
+        }
     }
 
     @GetMapping("/sales-orders/{soId}/signed-note")
@@ -565,38 +607,5 @@ public class OutboundController {
 
     private String ua(HttpServletRequest req) {
         return req.getHeader("User-Agent");
-    }
-    
-    // GET /v1/outbound/check-stock?warehouseId=1&items=skuId:qty,skuId:qty
-    @GetMapping("/check-stock")
-    @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Check tồn kho realtime", description = "FE gọi khi nhập SKU+qty để cảnh báo thiếu hàng ngay trong form tạo đơn.")
-    public ResponseEntity<ApiResponse<java.util.List<java.util.Map<String, Object>>>> checkStock(
-            @RequestParam Long warehouseId,
-            @RequestParam String items) { // format: "skuId:qty,skuId:qty"
-        try {
-            java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
-            for (String pair : items.split(",")) {
-                String[] parts = pair.trim().split(":");
-                if (parts.length != 2) continue;
-                Long skuId = Long.parseLong(parts[0].trim());
-                java.math.BigDecimal qty = new java.math.BigDecimal(parts[1].trim());
-                java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, skuId);
-                java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, skuId);
-                if (total    == null) total    = java.math.BigDecimal.ZERO;
-                if (reserved == null) reserved = java.math.BigDecimal.ZERO;
-                java.math.BigDecimal available = total.subtract(reserved).max(java.math.BigDecimal.ZERO);
-                java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
-                row.put("skuId", skuId);
-                row.put("requestedQty", qty);
-                row.put("availableQty", available);
-                row.put("sufficient", available.compareTo(qty) >= 0);
-                row.put("shortageQty", available.compareTo(qty) < 0 ? qty.subtract(available) : java.math.BigDecimal.ZERO);
-                result.add(row);
-            }
-            return ResponseEntity.ok(ApiResponse.success("Stock check OK", result));
-        } catch (Exception e) {
-            return ResponseEntity.ok(ApiResponse.success("Stock check error", java.util.List.of()));
-        }
     }
 }
