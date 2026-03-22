@@ -96,6 +96,35 @@ public class AllocateStockService {
                 }
             }
 
+            // [FIX] APPROVED guard: kiem tra ton kho truoc khi allocate
+            // Neu available = 0 cho bat ky SKU nao -> chuyen SO ve WAITING_STOCK ngay
+            // thay vi de allocate tao shortage roi Keeper moi biet.
+            if ("APPROVED".equals(so.getStatus())) {
+                java.util.List<String> zeroStock = new java.util.ArrayList<>();
+                for (SkuQtyPair pair : required) {
+                    java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
+                    java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
+                    if (total    == null) total    = java.math.BigDecimal.ZERO;
+                    if (reserved == null) reserved = java.math.BigDecimal.ZERO;
+                    java.math.BigDecimal available = total.subtract(reserved).max(java.math.BigDecimal.ZERO);
+                    if (available.compareTo(java.math.BigDecimal.ZERO) == 0) {
+                        String skuCode = skuRepository.findById(pair.skuId)
+                                .map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
+                        zeroStock.add(skuCode + " (can " + pair.qty + ", hien co 0)");
+                    }
+                }
+                if (!zeroStock.isEmpty()) {
+                    // Chuyen SO ve WAITING_STOCK de Manager biet can xu ly
+                    so.setStatus("WAITING_STOCK");
+                    so.setUpdatedAt(java.time.LocalDateTime.now());
+                    soRepository.save(so);
+                    log.warn("SO {} -> WAITING_STOCK: ton kho = 0 cho {}", so.getSoCode(), zeroStock);
+                    throw new BusinessException(
+                            "Ton kho = 0, khong the phan bo. SO chuyen WAITING_STOCK. " +
+                                    "Manager can xu ly them hang: " + String.join("; ", zeroStock));
+                }
+            }
+
         } else {
             TransferEntity transfer = transferRepository.findById(request.getDocumentId())
                     .orElseThrow(() -> new ResourceNotFoundException(
