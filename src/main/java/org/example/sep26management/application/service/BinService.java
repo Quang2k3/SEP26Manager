@@ -31,6 +31,7 @@ public class BinService {
         private final PutawayTaskItemJpaRepository putawayTaskItemRepository;
         private final PickingTaskItemJpaRepository pickingTaskItemRepository;
         private final AuditLogService auditLogService;
+        private final SkuJpaRepository skuRepository;
         private final PutawayAllocationJpaRepository putawayAllocationRepository;
 
         // ─────────────────────────────────────────────────────────────
@@ -187,16 +188,21 @@ public class BinService {
                 // Fetch detailed inventory items in this bin
                 List<BinOccupancyResponse.BinInventoryItem> items = snapshotRepository
                         .findDetailByLocationId(locationId).stream()
-                        .map(s -> BinOccupancyResponse.BinInventoryItem.builder()
-                                .skuId(s.getSkuId())
-                                .skuCode(s.getSkuCode())
-                                .skuName(s.getSkuName())
-                                .lotId(s.getLotId())
-                                .lotNumber(s.getLotNumber())
-                                .expiryDate(s.getExpiryDate())
-                                .quantity(s.getQuantity())
-                                .reservedQty(s.getReservedQty())
-                                .build())
+                        .map(s -> {
+                                BigDecimal wKg = skuRepository.findById(s.getSkuId())
+                                        .map(sku -> sku.getWeightPerCartonKg()).orElse(null);
+                                return BinOccupancyResponse.BinInventoryItem.builder()
+                                        .skuId(s.getSkuId())
+                                        .skuCode(s.getSkuCode())
+                                        .skuName(s.getSkuName())
+                                        .lotId(s.getLotId())
+                                        .lotNumber(s.getLotNumber())
+                                        .expiryDate(s.getExpiryDate())
+                                        .quantity(s.getQuantity())
+                                        .reservedQty(s.getReservedQty())
+                                        .weightPerCartonKg(wKg)
+                                        .build();
+                        })
                         .toList();
 
                 String zoneCode = bin.getZoneId() != null
@@ -206,6 +212,12 @@ public class BinService {
                         ? locationRepository.findById(bin.getParentLocationId())
                         .map(LocationEntity::getLocationCode).orElse(null)
                         : null;
+
+                // [FIX] Tinh tong trong luong thuc (kg) tu items da build
+                BigDecimal occupiedWeightKg = items.stream()
+                        .filter(i -> i.getWeightPerCartonKg() != null)
+                        .map(i -> i.getQuantity().multiply(i.getWeightPerCartonKg()))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
 
                 BinOccupancyResponse response = BinOccupancyResponse.builder()
                         .locationId(bin.getLocationId())
@@ -217,6 +229,7 @@ public class BinService {
                         .maxWeightKg(bin.getMaxWeightKg())
                         .maxVolumeM3(bin.getMaxVolumeM3())
                         .occupiedQty(occupied)
+                        .occupiedWeightKg(occupiedWeightKg)
                         .reservedQty(reserved)
                         .availableQty(available)
                         .occupancyStatus(status)

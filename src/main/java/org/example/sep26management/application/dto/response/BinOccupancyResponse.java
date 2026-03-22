@@ -50,6 +50,8 @@ public class BinOccupancyResponse {
     // Real-time occupancy — BR-LOC-23
     @Schema(description = "Số lượng đang chiếm chỗ", example = "10.0")
     private BigDecimal occupiedQty;
+    // [FIX] Tong trong luong thuc te (kg) = sum(qty * weightPerCartonKg)
+    private BigDecimal occupiedWeightKg;
     @Schema(description = "Số lượng đang chờ xuất", example = "5.0")
     private BigDecimal reservedQty;
     @Schema(description = "Còn trống khả dụng", example = "85.0")
@@ -101,5 +103,7 @@ public class BinOccupancyResponse {
         private BigDecimal quantity;
         @Schema(description = "Số lượng ĐÃ GIỮ CHỖ (Chờ khách lấy)", example = "10.0")
         private BigDecimal reservedQty;
+        // [FIX] Trong luong 1 thung de tinh % tai trong bin
+        private BigDecimal weightPerCartonKg;
     }
 }
