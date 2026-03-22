@@ -123,6 +123,7 @@ public interface InventorySnapshotJpaRepository
               AND s.skuId = :skuId
               AND loc.active = true
               AND loc.isStaging = false
+              AND loc.isDefect = false
               AND loc.locationType = org.example.sep26management.application.enums.LocationType.BIN
             """)
         BigDecimal sumQuantityByWarehouseAndSku(
@@ -143,6 +144,7 @@ public interface InventorySnapshotJpaRepository
               AND s.skuId = :skuId
               AND loc.active = true
               AND loc.isStaging = false
+              AND loc.isDefect = false
               AND loc.locationType = org.example.sep26management.application.enums.LocationType.BIN
             """)
         BigDecimal sumReservedByWarehouseAndSku(

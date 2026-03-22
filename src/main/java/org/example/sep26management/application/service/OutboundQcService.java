@@ -232,8 +232,12 @@ public class OutboundQcService {
             String skuCode = sku != null ? sku.getSkuCode() : "SKU#" + item.getSkuId();
             desc.append(skuCode).append("[").append(item.getQcResult()).append("] ");
 
+            // Lay locationCode de hien thi trong PDF phieu hang loi
+            String fromLocCode = locationRepository.findById(item.getFromLocationId())
+                    .map(l -> l.getLocationCode()).orElse("N/A");
             String noteStr = item.getQcResult()
                     + (item.getQcNote() != null ? ": " + item.getQcNote() : "")
+                    + " | from_bin: " + fromLocCode
                     + (item.getQcAttachmentUrl() != null ? " | photo: " + item.getQcAttachmentUrl() : "");
 
             incidentItemRepository.save(IncidentItemEntity.builder()
@@ -331,6 +335,16 @@ public class OutboundQcService {
             if (qty.compareTo(BigDecimal.ZERO) <= 0) continue;
 
             Long fromLocationId = item.getFromLocationId();
+            // [BUG-FIX] fromLocationId null -> fallback snapshot
+            if (fromLocationId == null) {
+                fromLocationId = inventorySnapshotRepository
+                        .findLocationIdByWarehouseSkuLot(warehouseId, item.getSkuId(), item.getLotId());
+                log.warn("deductFailItems: fromLocationId null skuId={}, fallback={}", item.getSkuId(), fromLocationId);
+            }
+            if (fromLocationId == null) {
+                log.error("deductFailItems: no location skuId={} skip", item.getSkuId());
+                continue;
+            }
 
             // 1. Trừ quantity tại vị trí gốc
             inventorySnapshotRepository.decrementQuantity(
