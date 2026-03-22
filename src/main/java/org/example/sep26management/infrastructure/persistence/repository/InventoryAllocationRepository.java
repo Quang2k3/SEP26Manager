@@ -41,6 +41,7 @@ public interface InventoryAllocationRepository
               AND (s.quantity - s.reservedQty) > 0
               AND loc.active      = true
               AND loc.isStaging   = false
+              AND loc.isDefect    = false
               AND loc.locationType = org.example.sep26management.application.enums.LocationType.BIN
             ORDER BY l.expiryDate ASC NULLS LAST, loc.locationCode ASC
             """)
@@ -65,6 +66,7 @@ public interface InventoryAllocationRepository
               AND (s.quantity - s.reservedQty) > 0
               AND loc.active      = true
               AND loc.isStaging   = false
+              AND loc.isDefect    = false
               AND loc.locationType = org.example.sep26management.application.enums.LocationType.BIN
             ORDER BY loc.locationCode ASC
             """)
