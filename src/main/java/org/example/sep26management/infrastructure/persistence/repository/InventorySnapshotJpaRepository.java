@@ -210,6 +210,7 @@ public interface InventorySnapshotJpaRepository
               AND s.quantity > 0
               AND l.active = true
               AND l.is_staging = false
+              AND l.is_defect = false
             ORDER BY (s.quantity - COALESCE(s.reserved_qty, 0)) DESC
             LIMIT 1
             """, nativeQuery = true)
