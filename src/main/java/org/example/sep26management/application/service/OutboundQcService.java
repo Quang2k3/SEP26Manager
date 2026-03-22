@@ -680,7 +680,7 @@ public class OutboundQcService {
     /** Lay user_id he thong (admin dau tien) de dung lam created_by khi userId=null. */
     private Long getSystemUserId() {
         return userRepository.findAll().stream()
-                .filter(u -> Boolean.TRUE.equals(u.getStatus()))
+                .filter(u -> org.example.sep26management.domain.enums.UserStatus.ACTIVE.equals(u.getStatus()))
                 .map(u -> u.getUserId())
                 .min(Long::compareTo)
                 .orElse(1L);
