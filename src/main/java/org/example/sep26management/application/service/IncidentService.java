@@ -259,9 +259,11 @@ public class IncidentService {
                 && !org.example.sep26management.application.enums.IncidentType.UNEXPECTED_ITEM
                 .equals(incident.getIncidentType())
                 && !org.example.sep26management.application.enums.IncidentType.DISCREPANCY
+                .equals(incident.getIncidentType())
+                && !org.example.sep26management.application.enums.IncidentType.DAMAGE
                 .equals(incident.getIncidentType())) {
             throw new RuntimeException(
-                    "This API is only for resolving quantity discrepancy incidents (SHORTAGE/OVERAGE/UNEXPECTED_ITEM/DISCREPANCY).");
+                    "This API is only for resolving quantity discrepancy or damage incidents (SHORTAGE/OVERAGE/UNEXPECTED_ITEM/DISCREPANCY/DAMAGE).");
         }
 
         ReceivingOrderEntity order = receivingOrderRepo.findById(incident.getReceivingId())
@@ -278,11 +280,17 @@ public class IncidentService {
                         + " does not belong to incident " + id);
             }
 
-            // Find corresponding receiving item
-            org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity rcItem = receivingItemRepo
+            // Find corresponding receiving item — prefer matching by condition (FAIL items)
+            java.util.List<org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity> rcItems = receivingItemRepo
                     .findByReceivingOrderReceivingId(order.getReceivingId()).stream()
                     .filter(itm -> itm.getSkuId().equals(incItem.getSkuId()))
-                    .findFirst().orElse(null);
+                    .collect(java.util.stream.Collectors.toList());
+
+            // Ưu tiên FAIL item (QC đánh FAIL → trả hàng FAIL), fallback sang item bất kỳ
+            org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity rcItem = rcItems.stream()
+                    .filter(itm -> "FAIL".equalsIgnoreCase(itm.getCondition()))
+                    .findFirst()
+                    .orElse(rcItems.stream().findFirst().orElse(null));
 
             String action = res.getAction().toUpperCase();
 
