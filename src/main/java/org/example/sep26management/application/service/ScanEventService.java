@@ -109,6 +109,9 @@ public class ScanEventService {
                                     if (request.getReasonCode() != null && !request.getReasonCode().isBlank()) {
                                         item.setReasonCode(request.getReasonCode());
                                     }
+                                    if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
+                                        item.setAttachmentUrl(request.getAttachmentUrl());
+                                    }
                                 }
                                 receivingItemRepo.save(item);
                                 log.info("Updated ReceivingItem for order {}: SKU={}", receivingId, sku.getSkuCode());
@@ -136,6 +139,9 @@ public class ScanEventService {
             if (request.getReasonCode() != null) {
                 line.setReasonCode(request.getReasonCode());
             }
+            if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
+                line.setAttachmentUrl(request.getAttachmentUrl());
+            }
         } else {
             newQty = request.getQty();
             lines.add(ScanLineItem.builder()
@@ -146,6 +152,7 @@ public class ScanEventService {
                     .qty(newQty)
                     .condition(condition)
                     .reasonCode(request.getReasonCode())
+                    .attachmentUrl(request.getAttachmentUrl())
                     .build());
         }
 

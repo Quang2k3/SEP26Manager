@@ -24,6 +24,9 @@ public class ScanLineItem {
     /** Reason code when condition = FAIL (e.g. LEAK, TORN_PACKAGING, DENTED) */
     private String reasonCode;
 
+    /** URL ảnh bằng chứng hàng hỏng khi condition = FAIL */
+    private String attachmentUrl;
+
     private String lotNumber;
     private java.time.LocalDate manufactureDate;
     private java.time.LocalDate expiryDate;
