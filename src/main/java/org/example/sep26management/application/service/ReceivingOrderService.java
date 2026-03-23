@@ -1194,11 +1194,11 @@ public class ReceivingOrderService {
                 GrnEntity savedGrn = grnRepo.save(grn);
 
                 for (ReceivingItemEntity item : items) {
-                        // Bỏ qua các receiving item có condition = FAIL
-                        // (hàng hỏng đã được xử lý bởi resolveDiscrepancy — trả NCC hoặc huỷ)
-                        if ("FAIL".equalsIgnoreCase(item.getCondition())) {
-                                continue;
-                        }
+                        // NOTE: Không skip condition=FAIL ở đây.
+                        // QC set condition=FAIL trên toàn bộ receiving item khi có bất kỳ unit nào lỗi,
+                        // nhưng item có thể vẫn có PASS units cần nhập kho.
+                        // Logic deduction bên dưới (unresolvedDamage, managerPassQty) đã xử lý
+                        // đúng việc trừ hàng hỏng — chỉ nhập phần goodQty + managerPassQty.
 
                         Long skuId = item.getSkuId();
                         // receivedQty already reflects Manager's decision from resolveDiscrepancy()
