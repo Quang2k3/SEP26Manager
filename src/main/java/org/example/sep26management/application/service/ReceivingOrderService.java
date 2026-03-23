@@ -391,35 +391,64 @@ public class ReceivingOrderService {
 
                                         // Aggregate total qty per skuId
                                         Map<Long, BigDecimal> skuTotalQty = new java.util.HashMap<>();
+                                        // Also collect lot/expiry info per skuId (first non-null wins)
+                                        Map<Long, String> skuLotNumber = new java.util.HashMap<>();
+                                        Map<Long, java.time.LocalDate> skuManufactureDate = new java.util.HashMap<>();
+                                        Map<Long, java.time.LocalDate> skuExpiryDate = new java.util.HashMap<>();
                                         for (ScanLineItem sLine : sessionLines) {
                                                 if (sLine.getSkuId() != null && sLine.getQty() != null) {
                                                         skuTotalQty.merge(sLine.getSkuId(), sLine.getQty(),
                                                                         BigDecimal::add);
+                                                        if (sLine.getLotNumber() != null && !sLine.getLotNumber().isBlank()) {
+                                                                skuLotNumber.putIfAbsent(sLine.getSkuId(), sLine.getLotNumber());
+                                                        }
+                                                        if (sLine.getManufactureDate() != null) {
+                                                                skuManufactureDate.putIfAbsent(sLine.getSkuId(), sLine.getManufactureDate());
+                                                        }
+                                                        if (sLine.getExpiryDate() != null) {
+                                                                skuExpiryDate.putIfAbsent(sLine.getSkuId(), sLine.getExpiryDate());
+                                                        }
                                                 }
                                         }
 
                                         for (Map.Entry<Long, BigDecimal> entry : skuTotalQty.entrySet()) {
+                                                Long skuId = entry.getKey();
                                                 Optional<ReceivingItemEntity> existing = receivingItemRepo
-                                                                .findByReceivingOrderReceivingIdAndSkuId(id,
-                                                                                entry.getKey());
+                                                                .findByReceivingOrderReceivingIdAndSkuId(id, skuId);
 
                                                 if (existing.isPresent()) {
                                                         // Update existing item
-                                                        existing.get().setReceivedQty(entry.getValue());
-                                                        receivingItemRepo.save(existing.get());
-                                                        log.info("Session sync: SKU {} → receivedQty={}",
-                                                                        entry.getKey(), entry.getValue());
+                                                        ReceivingItemEntity item = existing.get();
+                                                        item.setReceivedQty(entry.getValue());
+                                                        // Persist lot/expiry from scan session
+                                                        if (skuLotNumber.containsKey(skuId) && item.getLotNumber() == null) {
+                                                                item.setLotNumber(skuLotNumber.get(skuId));
+                                                        }
+                                                        if (skuManufactureDate.containsKey(skuId) && item.getManufactureDate() == null) {
+                                                                item.setManufactureDate(skuManufactureDate.get(skuId));
+                                                        }
+                                                        if (skuExpiryDate.containsKey(skuId) && item.getExpiryDate() == null) {
+                                                                item.setExpiryDate(skuExpiryDate.get(skuId));
+                                                        }
+                                                        receivingItemRepo.save(item);
+                                                        log.info("Session sync: SKU {} → receivedQty={}, lot={}, expiry={}",
+                                                                        skuId, entry.getValue(),
+                                                                        item.getLotNumber(), item.getExpiryDate());
                                                 } else {
                                                         // ── Extra SKU not on order → insert with expectedQty=0 ──
                                                         ReceivingItemEntity extraItem = ReceivingItemEntity.builder()
                                                                         .receivingOrder(order)
-                                                                        .skuId(entry.getKey())
+                                                                        .skuId(skuId)
                                                                         .expectedQty(BigDecimal.ZERO)
                                                                         .receivedQty(entry.getValue())
+                                                                        .lotNumber(skuLotNumber.get(skuId))
+                                                                        .manufactureDate(skuManufactureDate.get(skuId))
+                                                                        .expiryDate(skuExpiryDate.get(skuId))
                                                                         .build();
                                                         receivingItemRepo.save(extraItem);
-                                                        log.info("Session sync: EXTRA SKU {} → receivedQty={} (not on order)",
-                                                                        entry.getKey(), entry.getValue());
+                                                        log.info("Session sync: EXTRA SKU {} → receivedQty={}, lot={}, expiry={} (not on order)",
+                                                                        skuId, entry.getValue(),
+                                                                        extraItem.getLotNumber(), extraItem.getExpiryDate());
                                                 }
                                         }
                                 }
