@@ -767,6 +767,13 @@ public class ReceivingOrderService {
                                         "QC/Keeper mismatch — auto rescan requested", result);
                 }
 
+                // ── Build map skuId → attachmentUrl từ FAIL scan lines ──
+                Map<Long, String> skuAttachmentMap = lines.stream()
+                        .filter(l -> "FAIL".equals(l.getCondition()) && l.getAttachmentUrl() != null
+                                && !l.getAttachmentUrl().isBlank())
+                        .collect(Collectors.toMap(ScanLineItem::getSkuId, ScanLineItem::getAttachmentUrl,
+                                (a, b) -> a));
+
                 // ── Collect ALL issues: FAIL items + Discrepancy items + Unexpected items ──
                 List<IncidentItemEntity> allIncidentItems = new ArrayList<>();
                 boolean hasFailItems = false;
@@ -868,6 +875,8 @@ public class ReceivingOrderService {
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)
                                                 .actionScrapQty(BigDecimal.ZERO)
+                                                .attachmentUrl(skuAttachmentMap.getOrDefault(skuId,
+                                                                dbItem.getAttachmentUrl()))
                                                 .build();
                                 allIncidentItems.add(item);
                                 log.info("QC scan — {} detected: {} (expected={}, scanned={}, fail={})",
@@ -889,6 +898,8 @@ public class ReceivingOrderService {
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)
                                                 .actionScrapQty(BigDecimal.ZERO)
+                                                .attachmentUrl(skuAttachmentMap.getOrDefault(skuId,
+                                                                dbItem.getAttachmentUrl()))
                                                 .build();
                                 allIncidentItems.add(unexpItem);
                                 log.info("QC scan — UNEXPECTED_ITEM (in DB): {} qty={} (expectedQty=0)",
@@ -932,6 +943,7 @@ public class ReceivingOrderService {
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)
                                                 .actionScrapQty(BigDecimal.ZERO)
+                                                .attachmentUrl(skuAttachmentMap.getOrDefault(skuId, null))
                                                 .build();
                                 allIncidentItems.add(unexpectedItem);
                                 log.info("QC scan — Unexpected item: {} qty={} (not on order)", skuCode, totalQty);
@@ -1373,6 +1385,7 @@ public class ReceivingOrderService {
                                 .note(item.getNote())
                                 .condition(item.getCondition())
                                 .reasonCode(item.getReasonCode())
+                                .attachmentUrl(item.getAttachmentUrl())
                                 .build();
         }
 
