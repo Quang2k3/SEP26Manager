@@ -1165,15 +1165,36 @@ public class ReceivingOrderService {
                 GrnEntity savedGrn = grnRepo.save(grn);
 
                 for (ReceivingItemEntity item : items) {
+                        // Bỏ qua các receiving item có condition = FAIL
+                        // (hàng hỏng đã được xử lý bởi resolveDiscrepancy — trả NCC hoặc huỷ)
+                        if ("FAIL".equalsIgnoreCase(item.getCondition())) {
+                                continue;
+                        }
+
                         Long skuId = item.getSkuId();
                         // receivedQty already reflects Manager's decision from resolveDiscrepancy()
+                        // (RETURN → đã giảm receivedQty, SCRAP → đã giảm receivedQty)
                         BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
                                         : BigDecimal.ZERO;
-                        // Only subtract actual QC damage, not discrepancy amounts
+
+                        // Chỉ trừ thêm damagedQty nếu resolveDiscrepancy chưa xử lý (chưa trừ receivedQty)
+                        // Kiểm tra: nếu incident đã có actionReturnQty hoặc actionScrapQty → đã trừ receivedQty rồi
                         BigDecimal damagedQty = skuDamagedMap.getOrDefault(skuId, BigDecimal.ZERO);
+                        BigDecimal alreadyHandledByResolve = BigDecimal.ZERO;
+                        for (IncidentItemEntity iItem : qcDamageItems) {
+                                if (iItem.getSkuId().equals(skuId)) {
+                                        BigDecimal ret = iItem.getActionReturnQty() != null ? iItem.getActionReturnQty() : BigDecimal.ZERO;
+                                        BigDecimal scr = iItem.getActionScrapQty() != null ? iItem.getActionScrapQty() : BigDecimal.ZERO;
+                                        alreadyHandledByResolve = alreadyHandledByResolve.add(ret).add(scr);
+                                }
+                        }
+                        // Phần damage chưa được resolveDiscrepancy xử lý (nếu có)
+                        BigDecimal unresolvedDamage = damagedQty.subtract(alreadyHandledByResolve);
+                        if (unresolvedDamage.compareTo(BigDecimal.ZERO) < 0) unresolvedDamage = BigDecimal.ZERO;
+
                         BigDecimal managerPassQty = skuManagerPassMap.getOrDefault(skuId, BigDecimal.ZERO);
 
-                        BigDecimal goodQty = receivedQty.subtract(damagedQty);
+                        BigDecimal goodQty = receivedQty.subtract(unresolvedDamage);
                         if (goodQty.compareTo(BigDecimal.ZERO) < 0)
                                 goodQty = BigDecimal.ZERO;
 
