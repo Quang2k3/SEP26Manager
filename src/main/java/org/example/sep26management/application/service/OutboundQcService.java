@@ -410,43 +410,64 @@ public class OutboundQcService {
     /**
      * Tìm khu hàng lỗi (defect bin) của warehouse.
      * Nếu chưa có → tự tạo location DEFECT-BIN với is_defect=true.
+     *
+     * FIX: zone có thể được đặt tên là "DEFEQ", "Z-DEFEQ", "DEFECT", "Z-DEFECT", v.v.
+     * Trước đây chỉ tìm chính xác "Z-DEFECT" → DEFEQ không được nhận dạng
+     * → bins trong DEFEQ không được đánh is_defect=true → allocation queries
+     *    (dù có AND loc.isDefect = false) vẫn include chúng.
      */
     private LocationEntity getOrCreateDefectBin(Long warehouseId) {
         // 1. Tim bin is_defect=true co zone (trong Z-DEFECT chinh thuc) truoc
         Optional<LocationEntity> existing = locationRepository.findDefectBinByWarehouse(warehouseId);
         if (existing.isPresent() && existing.get().getZoneId() != null) return existing.get();
 
-        // 2. Tim zone Z-DEFECT
-        Optional<org.example.sep26management.infrastructure.persistence.entity.ZoneEntity> defectZone =
-                zoneRepository.findByWarehouseIdAndZoneCode(warehouseId, "Z-DEFECT");
+        // 2. Tim zone defect theo tên — hỗ trợ nhiều variant: Z-DEFECT, DEFEQ, Z-DEFEQ, DEFECT, DAMAGE
+        List<String> defectZoneCandidates = List.of("Z-DEFECT", "DEFEQ", "Z-DEFEQ", "DEFECT", "Z-DAMAGE", "DAMAGE");
+        org.example.sep26management.infrastructure.persistence.entity.ZoneEntity foundDefectZone = null;
+        for (String candidate : defectZoneCandidates) {
+            Optional<org.example.sep26management.infrastructure.persistence.entity.ZoneEntity> z =
+                    zoneRepository.findByWarehouseIdAndZoneCode(warehouseId, candidate);
+            if (z.isPresent()) {
+                foundDefectZone = z.get();
+                log.info("getOrCreateDefectBin: found defect zone '{}' (id={})", candidate, z.get().getZoneId());
+                break;
+            }
+        }
 
-        if (defectZone.isPresent()) {
-            Long zoneId = defectZone.get().getZoneId();
+        if (foundDefectZone != null) {
+            Long zoneId = foundDefectZone.getZoneId();
             List<LocationEntity> binsInZone = locationRepository.findByZoneId(zoneId);
 
-            // 2a. Bin is_defect=true trong Z-DEFECT
+            // 2a. Bin is_defect=true trong zone defect
             Optional<LocationEntity> defectBinInZone = binsInZone.stream()
                     .filter(l -> Boolean.TRUE.equals(l.getIsDefect()) && Boolean.TRUE.equals(l.getActive()))
                     .findFirst();
             if (defectBinInZone.isPresent()) return defectBinInZone.get();
 
-            // 2b. Lay bin dau tien trong Z-DEFECT, danh dau is_defect=true
-            Optional<LocationEntity> anyBin = binsInZone.stream()
+            // 2b. Lay bin dau tien trong zone defect, danh dau is_defect=true cho TẤT CẢ bins trong zone
+            // (không chỉ 1 bin) để allocation queries loại trừ được toàn bộ zone
+            List<LocationEntity> activeBins = binsInZone.stream()
                     .filter(l -> Boolean.TRUE.equals(l.getActive())
                             && org.example.sep26management.application.enums.LocationType.BIN.equals(l.getLocationType()))
-                    .findFirst();
-            if (anyBin.isPresent()) {
-                LocationEntity bin = anyBin.get();
-                bin.setIsDefect(true);
-                locationRepository.save(bin);
-                log.info("Marked {} as defect bin in Z-DEFECT zone", bin.getLocationCode());
-                return bin;
+                    .collect(java.util.stream.Collectors.toList());
+
+            if (!activeBins.isEmpty()) {
+                // Đánh is_defect=true cho TẤT CẢ bins trong zone defect
+                for (LocationEntity bin : activeBins) {
+                    if (!Boolean.TRUE.equals(bin.getIsDefect())) {
+                        bin.setIsDefect(true);
+                        locationRepository.save(bin);
+                        log.info("Marked ALL bins as is_defect=true in defect zone '{}': {}",
+                                foundDefectZone.getZoneCode(), bin.getLocationCode());
+                    }
+                }
+                return activeBins.get(0);
             }
         }
 
         // 3. Fallback: dung bin is_defect=true hien co (du no-zone)
         if (existing.isPresent()) {
-            log.warn("No Z-DEFECT zone bins, using existing defect bin {}", existing.get().getLocationCode());
+            log.warn("No defect zone bins, using existing defect bin {}", existing.get().getLocationCode());
             return existing.get();
         }
 
@@ -461,7 +482,7 @@ public class OutboundQcService {
                 .isDefect(true)
                 .active(true)
                 .build();
-        log.warn("No Z-DEFECT zone — auto-created no-zone defect bin {} (warehouseId={})", code, warehouseId);
+        log.warn("No defect zone — auto-created no-zone defect bin {} (warehouseId={})", code, warehouseId);
         return locationRepository.save(defect);
     }
 

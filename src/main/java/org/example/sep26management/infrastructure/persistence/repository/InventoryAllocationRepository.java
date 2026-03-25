@@ -26,6 +26,9 @@ public interface InventoryAllocationRepository
     /**
      * BR-WXE-18/19: Lấy stock khả dụng của một SKU theo FEFO (hạn gần nhất trước).
      * Chỉ xét BIN thực (locationType=BIN, isStaging=false, active=true).
+     * FIX: thêm AND loc.isDefect = false (đã có) VÀ filter thêm zone_code
+     *      để loại bỏ các zone có tên chứa DEFECT/DEFEQ/DAMAGE dù bin chưa được
+     *      đánh dấu is_defect=true bởi getOrCreateDefectBin.
      * SKU phải có lot — dùng khi SKU được quản lý theo lô.
      */
     @Query("""
@@ -43,6 +46,9 @@ public interface InventoryAllocationRepository
               AND loc.isStaging   = false
               AND loc.isDefect    = false
               AND loc.locationType = org.example.sep26management.application.enums.LocationType.BIN
+              AND UPPER(z.zoneCode) NOT LIKE '%DEFECT%'
+              AND UPPER(z.zoneCode) NOT LIKE '%DEFEQ%'
+              AND UPPER(z.zoneCode) NOT LIKE '%DAMAGE%'
             ORDER BY l.expiryDate ASC NULLS LAST, loc.locationCode ASC
             """)
     List<FEFOAllocationProjection> findAvailableStockFEFO(
@@ -52,6 +58,7 @@ public interface InventoryAllocationRepository
     /**
      * Fallback khi SKU không có lot (LEFT JOIN lot).
      * Chỉ xét BIN thực (locationType=BIN, isStaging=false, active=true).
+     * FIX: thêm zone_code exclusion để loại DEFEQ/DEFECT dù is_defect chưa được set.
      */
     @Query("""
             SELECT s.locationId, s.lotId, null AS expiryDate, s.quantity, s.reservedQty,
@@ -68,6 +75,9 @@ public interface InventoryAllocationRepository
               AND loc.isStaging   = false
               AND loc.isDefect    = false
               AND loc.locationType = org.example.sep26management.application.enums.LocationType.BIN
+              AND UPPER(z.zoneCode) NOT LIKE '%DEFECT%'
+              AND UPPER(z.zoneCode) NOT LIKE '%DEFEQ%'
+              AND UPPER(z.zoneCode) NOT LIKE '%DAMAGE%'
             ORDER BY loc.locationCode ASC
             """)
     List<FEFOAllocationProjection> findAvailableStockFEFONoLot(
