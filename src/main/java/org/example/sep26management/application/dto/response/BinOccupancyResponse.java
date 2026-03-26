@@ -93,10 +93,24 @@ public class BinOccupancyResponse {
         private String skuCode;
         @Schema(description = "Tên", example = "Iphone 15 Pro")
         private String skuName;
+        @Schema(description = "Thương hiệu", example = "Apple")
+        private String brand;
+        @Schema(description = "Danh mục", example = "Điện tử")
+        private String categoryName;
+        @Schema(description = "Barcode", example = "8938500920016")
+        private String barcode;
+        @Schema(description = "Đơn vị tính", example = "thùng")
+        private String unit;
+        @Schema(description = "Số lượng đơn vị / thùng", example = "24")
+        private Integer unitsPerCarton;
+        @Schema(description = "Ảnh SKU")
+        private String imageUrl;
         @Schema(description = "ID Lô (Trong tủ này lô nào đang cất)", example = "10")
         private Long lotId;
         @Schema(description = "Số Lô Nhập", example = "LOT-2023")
         private String lotNumber;
+        @Schema(description = "Ngày sản xuất")
+        private java.time.LocalDate manufactureDate;
         @Schema(description = "Hạn Sử Dụng của Lô", example = "2025-12-31")
         private java.time.LocalDate expiryDate;
         @Schema(description = "Số Lượng Đang Tồn ở Kệ", example = "50.0")
