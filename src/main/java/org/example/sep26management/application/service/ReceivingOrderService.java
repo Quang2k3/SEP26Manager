@@ -133,6 +133,16 @@ public class ReceivingOrderService {
                 }
 
                 log.info("Draft GRN {} created by userId={}", receivingCode, userId);
+
+                // ── Realtime: notify tất cả role có đơn inbound mới được tạo ─────
+                String supplierNameNew = supplierId != null
+                        ? supplierRepo.findById(supplierId).map(s -> s.getSupplierName()).orElse("—")
+                        : "—";
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
+                        "receiving_pending_qc",
+                        savedOrder.getReceivingId(), receivingCode,
+                        supplierNameNew + " — Đơn inbound mới");
+
                 return getOrder(savedOrder.getReceivingId());
         }
 
@@ -196,6 +206,13 @@ public class ReceivingOrderService {
                 receivingOrderRepo.save(order);
 
                 log.info("Draft GRN {} updated by userId={}", order.getReceivingCode(), userId);
+
+                // ── Realtime: notify tất cả role đơn inbound vừa được cập nhật ──
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
+                        "receiving_pending_qc",
+                        order.getReceivingId(), order.getReceivingCode(),
+                        "Đơn inbound đã cập nhật");
+
                 return getOrder(id);
         }
 
@@ -213,10 +230,21 @@ public class ReceivingOrderService {
                 List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
                 receivingItemRepo.deleteAll(items);
 
+                // Lưu thông tin trước khi xóa để notify
+                String deletedCode = order.getReceivingCode();
+                Long deletedId = order.getReceivingId();
+
                 // Delete order
                 receivingOrderRepo.delete(order);
 
-                log.info("Draft GRN {} deleted by userId={}", order.getReceivingCode(), userId);
+                log.info("Draft GRN {} deleted by userId={}", deletedCode, userId);
+
+                // ── Realtime: notify tất cả role đơn inbound vừa bị xóa ──────────
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
+                        "receiving_pending_qc",
+                        deletedId, deletedCode,
+                        "Đơn inbound đã bị xóa");
+
                 return ApiResponse.success("Draft order deleted successfully", null);
         }
 

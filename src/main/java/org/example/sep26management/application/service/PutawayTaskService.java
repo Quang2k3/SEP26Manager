@@ -50,6 +50,7 @@ public class PutawayTaskService {
     private final SkuJpaRepository skuRepo;
     private final PutawayAllocationJpaRepository allocationRepo;
     private final GrnJpaRepository grnRepo;
+    private final NotificationService notificationService;
     private final ReceivingOrderJpaRepository receivingOrderRepo;
 
     // ─── List tasks ────────────────────────────────────────────────────────────
@@ -274,6 +275,16 @@ public class PutawayTaskService {
 
         putawayTaskRepo.save(task);
         log.info("Putaway task {} confirmed all allocations by userId={}, status={}", taskId, userId, task.getStatus());
+
+        // ── Realtime: notify tất cả role putaway hoàn thành ──────────────────
+        if (allDone) {
+            String grnCode = grnRepo.findById(task.getGrnId())
+                    .map(g -> g.getGrnCode()).orElse("GRN #" + task.getGrnId());
+            notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
+                    "putaway_pending",
+                    task.getPutawayTaskId(), "Task #" + task.getPutawayTaskId(),
+                    grnCode + " — Putaway hoàn thành");
+        }
 
         return ApiResponse.success("Putaway confirmed. Status: " + task.getStatus(), toResponse(task));
     }
