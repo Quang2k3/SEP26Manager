@@ -43,6 +43,7 @@ public class AllocateStockService {
     // [V20] Inject trực tiếp để set soId khi tạo Incident
     private final IncidentJpaRepository incidentJpaRepository;
     private final IncidentItemJpaRepository incidentItemJpaRepository;
+    private final NotificationService notificationService;
 
     @Transactional
     public ApiResponse<AllocateStockResponse> allocateStock(
@@ -220,11 +221,17 @@ public class AllocateStockService {
                     so.setStatus("ALLOCATED");
                     soRepository.save(so);
                     log.info("SO {} status → ALLOCATED", so.getSoCode());
+                    // ── Realtime: notify KEEPER đơn đã phân bổ, cần tạo pick list ──
+                    notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                            so.getSoId(), so.getSoCode(), "Đã phân bổ tồn kho — cần tạo Pick List");
                 });
             } else {
                 transferRepository.findById(request.getDocumentId()).ifPresent(t -> {
                     t.setStatus("ALLOCATED");
                     transferRepository.save(t);
+                    // ── Realtime: notify KEEPER transfer đã phân bổ ────────────────
+                    notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                            t.getTransferId(), t.getTransferCode(), "Transfer đã phân bổ — cần tạo Pick List");
                 });
             }
         }
@@ -355,6 +362,11 @@ public class AllocateStockService {
         auditLogService.logAction(userId, "SHORTAGE_REPORTED",
                 orderType == OutboundType.SALES_ORDER ? "SALES_ORDER" : "TRANSFER",
                 documentId, "Shortage reported for " + documentCode, ip, ua);
+
+        // ── Realtime: notify MANAGER có sự cố thiếu hàng mới ────────────────
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                saved.getIncidentId(), saved.getIncidentCode(),
+                documentCode + " — thiếu tồn kho");
 
         return ApiResponse.success("Shortage incident reported successfully.", incidentService.toResponse(saved));
     }

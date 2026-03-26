@@ -84,7 +84,7 @@ public class IncidentService {
         // ── Realtime: notify MANAGER + KEEPER có sự cố mới chưa xử lý ────────
         String desc = request.getDescription() != null
                 ? request.getDescription() : request.getIncidentType().name();
-        notificationService.notifyRoles(new String[]{"MANAGER", "KEEPER"}, "incident_open",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
                 saved.getIncidentId(), saved.getIncidentCode(), desc);
 
         return ApiResponse.success("Incident reported successfully", toResponse(saved));
@@ -164,6 +164,11 @@ public class IncidentService {
 
         log.info("Incident {} approved by managerId={}", incident.getIncidentCode(), managerId);
 
+        // ── Realtime: notify KEEPER incident được duyệt, có thể tiếp tục dỡ hàng
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                incident.getIncidentId(), incident.getIncidentCode(),
+                "Incident đã duyệt — tiếp tục nhận hàng");
+
         return ApiResponse.success("Incident approved. Keeper can start unloading.", toResponse(incident));
     }
 
@@ -186,6 +191,11 @@ public class IncidentService {
         incidentRepo.save(incident);
 
         log.info("Incident {} rejected by managerId={}, reason: {}", incident.getIncidentCode(), managerId, reason);
+
+        // ── Realtime: notify KEEPER incident bị từ chối ───────────────────────
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                incident.getIncidentId(), incident.getIncidentCode(),
+                "Incident bị từ chối — " + (reason != null ? reason : ""));
 
         return ApiResponse.success("Incident rejected. Truck will not be unloaded.", toResponse(incident));
     }
@@ -242,6 +252,10 @@ public class IncidentService {
         incidentRepo.save(incident);
 
         log.info("Incident {} resolved by managerId={}", incident.getIncidentCode(), managerId);
+
+        // ── Realtime: notify KEEPER incident đã xử lý xong ───────────────────
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                incident.getIncidentId(), incident.getIncidentCode(), "Incident đã được xử lý xong");
 
         return ApiResponse.success("Incident resolved successfully.", toResponse(incident));
     }
@@ -361,6 +375,19 @@ public class IncidentService {
                     incident.getIncidentCode(), order.getReceivingId());
         }
         receivingOrderRepo.save(order);
+
+        // ── Realtime: notify theo trạng thái kết quả ─────────────────────────
+        if (hasWaitBackorder) {
+            // Vẫn còn chờ → notify MANAGER + KEEPER để biết
+            notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                    incident.getIncidentId(), incident.getIncidentCode(),
+                    order.getReceivingCode() + " — Chờ giao bù hàng thiếu");
+        } else {
+            // Xử lý xong → QC tiếp tục kiểm đếm
+            notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_pending_qc",
+                    order.getReceivingId(), order.getReceivingCode(),
+                    "Discrepancy đã xử lý — tiếp tục QC");
+        }
 
         log.info("Discrepancy Incident {} resolved by managerId={}, hasWaitBackorder={}",
                 incident.getIncidentCode(), managerId, hasWaitBackorder);

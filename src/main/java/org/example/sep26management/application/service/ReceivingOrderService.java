@@ -361,6 +361,13 @@ public class ReceivingOrderService {
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
 
+                // ── Realtime: notify QC có phiếu nhận hàng mới chờ kiểm ────────────
+                String supplierName = order.getSupplierId() != null
+                        ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
+                        : "—";
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_pending_qc",
+                        order.getReceivingId(), order.getReceivingCode(), supplierName);
+
                 log.info("Receiving Order {} submitted (DRAFT → SUBMITTED) by userId={}",
                         order.getReceivingCode(), userId);
                 return ApiResponse.success("Submitted successfully. Status: SUBMITTED. Keeper can now scan QR.",
@@ -420,6 +427,14 @@ public class ReceivingOrderService {
                 // Tồn sẽ bị trừ khỏi Z-INB sau khi confirm putaway.
                 addInboundStockToStaging(order, userId);
 
+                // ── Realtime: notify QC phiếu đã scan xong, chờ QC kiểm đếm ─────────
+                String supplierNamePc = order.getSupplierId() != null
+                        ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
+                        : "—";
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_pending_qc",
+                        order.getReceivingId(), order.getReceivingCode(),
+                        supplierNamePc + " — sẵn sàng kiểm đếm");
+
                 log.info("Receiving Order {} finalized (SUBMITTED → PENDING_COUNT) by userId={}",
                         order.getReceivingCode(), userId);
                 return ApiResponse.success("Count finalized. Status: PENDING_COUNT. Ready for QC review.",
@@ -457,7 +472,7 @@ public class ReceivingOrderService {
                         ? supplierRepo.findById(order.getSupplierId())
                         .map(s -> s.getSupplierName()).orElse("—")
                         : "—";
-                notificationService.notifyRole("KEEPER", "grn_create_ready",
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_create_ready",
                         order.getReceivingId(), order.getReceivingCode(),
                         supplierName + " — QC đã kiểm đếm xong");
 
@@ -558,6 +573,11 @@ public class ReceivingOrderService {
                         order.setUpdatedAt(LocalDateTime.now());
                         receivingOrderRepo.save(order);
 
+                        // ── Realtime: notify MANAGER + KEEPER có sự cố inbound ────────
+                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                                savedIncident.getIncidentId(), savedIncident.getIncidentCode(),
+                                order.getReceivingCode() + " — QC phát hiện hàng lỗi");
+
                         // Audit log: QC rejected (fail items found)
                         auditLogService.logAction(
                                 qcUserId,
@@ -578,6 +598,14 @@ public class ReceivingOrderService {
                         order.setApprovedAt(LocalDateTime.now());
                         order.setUpdatedAt(LocalDateTime.now());
                         receivingOrderRepo.save(order);
+
+                        // ── Realtime: notify KEEPER QC xong 100% pass → cần tạo GRN ──
+                        String supNameQc = order.getSupplierId() != null
+                                ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
+                                : "—";
+                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_create_ready",
+                                order.getReceivingId(), order.getReceivingCode(),
+                                supNameQc + " — QC 100% PASS");
 
                         // Audit log: QC approved (100% pass)
                         auditLogService.logAction(
@@ -769,6 +797,14 @@ public class ReceivingOrderService {
 
                 order.setStatus("GRN_CREATED");
                 receivingOrderRepo.save(order);
+
+                // ── Realtime: notify MANAGER GRN đã tạo xong, chờ submit lên duyệt ─
+                String supGrn = order.getSupplierId() != null
+                        ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
+                        : "—";
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_create_ready",
+                        order.getReceivingId(), order.getReceivingCode(),
+                        supGrn + " — GRN đã tạo, cần gửi Manager");
 
                 // DTO mapping for response
                 List<org.example.sep26management.application.dto.response.GrnItemResponse> itemResponses = validGrnItems

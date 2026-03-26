@@ -340,7 +340,7 @@ public class OutboundService {
 
         // ── Realtime: notify MANAGER có lệnh xuất mới chờ duyệt ─────────────
         CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
-        notificationService.notifyRole("MANAGER", "outbound_pending_approval",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_pending_approval",
                 soId, so.getSoCode(),
                 custForNotif != null ? custForNotif.getCustomerName() : "—");
 
@@ -424,7 +424,7 @@ public class OutboundService {
 
         // ── Realtime: notify KEEPER lệnh xuất vừa được duyệt, cần phân bổ tồn kho ──
         CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
-        notificationService.notifyRole("KEEPER", "outbound_approved",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
                 soId, so.getSoCode(),
                 custForNotif != null ? custForNotif.getCustomerName() : "—");
 

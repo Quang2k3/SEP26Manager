@@ -199,7 +199,7 @@ public class OutboundQcService {
                 // ── Realtime: notify MANAGER có đơn lỗi QC cần xử lý ─────────
                 String customerName = customerRepository.findById(so.getCustomerId())
                         .map(c -> c.getCustomerName()).orElse("—");
-                notificationService.notifyRole("MANAGER", "incident_open",
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
                         soId, so.getSoCode(),
                         customerName + " — QC lỗi (" + fail + " fail, " + hold + " hold)");
             });
@@ -214,7 +214,7 @@ public class OutboundQcService {
                     // ── Realtime: notify KEEPER đơn QC đạt, sẵn sàng dispatch ─
                     String customerName = customerRepository.findById(so.getCustomerId())
                             .map(c -> c.getCustomerName()).orElse("—");
-                    notificationService.notifyRole("KEEPER", "qc_outbound_passed",
+                    notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "qc_outbound_passed",
                             soId, so.getSoCode(),
                             customerName + " — QC đạt, sẵn sàng xuất kho");
                 }
@@ -326,6 +326,9 @@ public class OutboundQcService {
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → APPROVED (re-allocate after DAMAGE RETURN_SCRAP)", so.getSoCode());
+                // ── Realtime: notify KEEPER cần phân bổ lại ─────────────────
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                        so.getSoId(), so.getSoCode(), "Hàng lỗi đã xử lý — cần phân bổ lại");
             }
             case "ACCEPT" -> {
                 // Xuất luôn hàng lỗi → QC_PASSED để cho phép dispatch
@@ -333,6 +336,9 @@ public class OutboundQcService {
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → QC_PASSED (DAMAGE ACCEPT)", so.getSoCode());
+                // ── Realtime: notify KEEPER QC đạt, sẵn sàng dispatch ────────
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "qc_outbound_passed",
+                        so.getSoId(), so.getSoCode(), "Chấp nhận hàng lỗi — sẵn sàng xuất kho");
             }
             default -> throw new BusinessException(
                     "Invalid action: " + action + ". Must be RETURN_SCRAP or ACCEPT.");
@@ -424,11 +430,6 @@ public class OutboundQcService {
     /**
      * Tìm khu hàng lỗi (defect bin) của warehouse.
      * Nếu chưa có → tự tạo location DEFECT-BIN với is_defect=true.
-     *
-     * FIX: zone có thể được đặt tên là "DEFEQ", "Z-DEFEQ", "DEFECT", "Z-DEFECT", v.v.
-     * Trước đây chỉ tìm chính xác "Z-DEFECT" → DEFEQ không được nhận dạng
-     * → bins trong DEFEQ không được đánh is_defect=true → allocation queries
-     *    (dù có AND loc.isDefect = false) vẫn include chúng.
      */
     private LocationEntity getOrCreateDefectBin(Long warehouseId) {
         // 1. Tim bin is_defect=true co zone (trong Z-DEFECT chinh thuc) truoc
@@ -452,7 +453,7 @@ public class OutboundQcService {
             Long zoneId = foundDefectZone.getZoneId();
             List<LocationEntity> binsInZone = locationRepository.findByZoneId(zoneId);
 
-            // 2a. Bin is_defect=true trong zone defect
+            // 2a. Bin is_defect=true trong Z-DEFECT
             Optional<LocationEntity> defectBinInZone = binsInZone.stream()
                     .filter(l -> Boolean.TRUE.equals(l.getIsDefect()) && Boolean.TRUE.equals(l.getActive()))
                     .findFirst();
@@ -555,12 +556,13 @@ public class OutboundQcService {
         String action = request.getAction().toUpperCase();
         switch (action) {
             case "WAIT_BACKORDER" -> {
-                // Chờ nhập hàng bù — SO giữ trạng thái WAITING_STOCK
-                // Khi hàng về, Keeper allocate lại → AllocateStockService cho phép từ WAITING_STOCK
                 so.setStatus("WAITING_STOCK");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
+                // ── Realtime: notify KEEPER đơn đang chờ nhập thêm hàng ──────
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                        so.getSoId(), so.getSoCode(), "Chờ nhập bù hàng — tạm giữ đơn");
             }
             case "CLOSE_SHORT" -> {
                 // [GAP 3 FIX] Cắt giảm orderedQty về available → SO → APPROVED → re-Allocate
@@ -569,6 +571,9 @@ public class OutboundQcService {
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → APPROVED (CLOSE_SHORT, re-Allocate ready)", so.getSoCode());
+                // ── Realtime: notify KEEPER cần phân bổ lại sau khi cắt số lượng ──
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                        so.getSoId(), so.getSoCode(), "Đã cắt số lượng thiếu — cần phân bổ lại");
             }
             default -> throw new BusinessException(
                     "Invalid action: " + action + ". Must be WAIT_BACKORDER or CLOSE_SHORT.");
@@ -662,6 +667,13 @@ public class OutboundQcService {
         so.setUpdatedAt(LocalDateTime.now());
         salesOrderRepository.save(so);
         log.info("SO {} → DISPATCHED", so.getSoCode());
+
+        // ── Realtime: notify MANAGER + KEEPER đơn đã xuất kho thành công ─────
+        String customerName = customerRepository.findById(so.getCustomerId())
+                .map(c -> c.getCustomerName()).orElse("—");
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                so.getSoId(), so.getSoCode(), customerName + " — Đã xuất kho");
+
         return ApiResponse.success("Order dispatched. Status: DISPATCHED", null);
     }
 
