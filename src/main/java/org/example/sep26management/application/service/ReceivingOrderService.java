@@ -54,6 +54,7 @@ public class ReceivingOrderService {
         @org.springframework.context.annotation.Lazy
         private final GrnService grnService;
         private final AuditLogService auditLogService;
+        private final NotificationService notificationService;
 
         // ─── List ──────────────────────────────────────────────────────────────────
 
@@ -673,6 +674,16 @@ public class ReceivingOrderService {
                                 null, null);
 
                 log.info("Receiving Order {} QC approved by userId={}", order.getReceivingCode(), qcUserId);
+
+                // ── Realtime: notify KEEPER rằng QC xong, cần tạo GRN ──────────────
+                String supplierName = order.getSupplierId() != null
+                        ? supplierRepo.findById(order.getSupplierId())
+                        .map(s -> s.getSupplierName()).orElse("—")
+                        : "—";
+                notificationService.notifyRole("KEEPER", "grn_create_ready",
+                        order.getReceivingId(), order.getReceivingCode(),
+                        supplierName + " — QC đã kiểm đếm xong");
+
                 return ApiResponse.success("QC approved successfully", getOrder(id).getData());
         }
 

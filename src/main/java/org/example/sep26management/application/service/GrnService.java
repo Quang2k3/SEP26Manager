@@ -37,6 +37,7 @@ public class GrnService {
     private final InventoryLotJpaRepository inventoryLotRepo;
     private final InventoryTransactionJpaRepository inventoryTransactionRepo;
     private final InventorySnapshotJpaRepository inventorySnapshotRepo;
+    private final NotificationService notificationService;
 
     public ApiResponse<PageResponse<GrnResponse>> listGrns(Long warehouseId, String status, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
@@ -86,6 +87,13 @@ public class GrnService {
             receivingOrderRepo.save(order);
         });
 
+        // ── Realtime: notify KEEPER rằng GRN vừa được Manager duyệt ─────────
+        String supplierName = grn.getSupplierId() != null
+                ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
+                : "—";
+        notificationService.notifyRole("KEEPER", "grn_approved",
+                grn.getGrnId(), grn.getGrnCode(), supplierName);
+
         return ApiResponse.success("GRN approved.", toSummaryResponse(grn));
     }
 
@@ -106,6 +114,13 @@ public class GrnService {
             order.setStatus("GRN_CREATED");
             receivingOrderRepo.save(order);
         });
+
+        // ── Realtime: notify KEEPER rằng GRN bị Manager từ chối ─────────────
+        String supplierName = grn.getSupplierId() != null
+                ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
+                : "—";
+        notificationService.notifyRole("KEEPER", "grn_rejected",
+                grn.getGrnId(), grn.getGrnCode(), supplierName + " — " + reason);
 
         return ApiResponse.success("GRN rejected", toSummaryResponse(grn));
     }
@@ -245,6 +260,11 @@ public class GrnService {
             receivingOrderRepo.save(order);
         });
 
+        // ── Realtime: notify KEEPER rằng có putaway task mới ────────────────
+        notificationService.notifyRole("KEEPER", "putaway_pending",
+                task.getPutawayTaskId(), "Task #" + task.getPutawayTaskId(),
+                "GRN " + grn.getGrnCode() + " — cần putaway");
+
         return ApiResponse.success("GRN posted, Putaway task created successfully.", toSummaryResponse(grn));
     }
 
@@ -264,6 +284,14 @@ public class GrnService {
             order.setStatus("PENDING_APPROVAL");
             receivingOrderRepo.save(order);
         });
+
+        // ── Realtime: notify MANAGER rằng có GRN mới chờ duyệt ──────────────
+        String supplierName = grn.getSupplierId() != null
+                ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
+                : "—";
+        notificationService.notifyRole("MANAGER", "grn_pending_approval",
+                grn.getGrnId(), grn.getGrnCode(), supplierName);
+
         return ApiResponse.success("GRN submitted to manager for approval", toSummaryResponse(grn));
     }
 

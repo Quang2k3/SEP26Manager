@@ -39,6 +39,7 @@ public class IncidentService {
     private final ReceivingItemJpaRepository receivingItemRepo;
     private final UserJpaRepository userRepo;
     private final SkuJpaRepository skuRepo;
+    private final NotificationService notificationService;
 
     // ─── Create Incident (Keeper báo sự cố Gate Check) ──────────────────────
 
@@ -79,6 +80,12 @@ public class IncidentService {
         }
 
         log.info("Incident created: {} type={} by userId={}", code, request.getIncidentType().name(), userId);
+
+        // ── Realtime: notify MANAGER + KEEPER có sự cố mới chưa xử lý ────────
+        String desc = request.getDescription() != null
+                ? request.getDescription() : request.getIncidentType().name();
+        notificationService.notifyRoles(new String[]{"MANAGER", "KEEPER"}, "incident_open",
+                saved.getIncidentId(), saved.getIncidentCode(), desc);
 
         return ApiResponse.success("Incident reported successfully", toResponse(saved));
     }

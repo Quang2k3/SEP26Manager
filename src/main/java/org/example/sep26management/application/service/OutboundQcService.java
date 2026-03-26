@@ -54,6 +54,7 @@ public class OutboundQcService {
     private final WarehouseJpaRepository warehouseRepository;
     private final CustomerJpaRepository customerRepository;
     private final DispatchPdfService dispatchPdfService;
+    private final NotificationService notificationService;
 
     // ─────────────────────────────────────────────────────────────────────────
     // 1) START QC SESSION
@@ -195,14 +196,27 @@ public class OutboundQcService {
                 so.setUpdatedAt(now);
                 salesOrderRepository.save(so);
                 log.info("SO {} → ON_HOLD (QC fail={}, hold={})", so.getSoCode(), fail, hold);
+                // ── Realtime: notify MANAGER có đơn lỗi QC cần xử lý ─────────
+                String customerName = customerRepository.findById(so.getCustomerId())
+                        .map(c -> c.getCustomerName()).orElse("—");
+                notificationService.notifyRole("MANAGER", "incident_open",
+                        soId, so.getSoCode(),
+                        customerName + " — QC lỗi (" + fail + " fail, " + hold + " hold)");
             });
         } else if (soId != null) {
-            // All PASS
+            // [BUG FIX] All PASS → set SO → QC_PASSED (sẵn sàng dispatch), KHÔNG giữ QC_SCAN
             salesOrderRepository.findById(soId).ifPresent(so -> {
-                if ("PICKING".equals(so.getStatus()) || "QC_SCAN".equals(so.getStatus())) {
-                    so.setStatus("QC_SCAN");
+                if ("QC_SCAN".equals(so.getStatus()) || "PICKING".equals(so.getStatus())) {
+                    so.setStatus("QC_PASSED");
                     so.setUpdatedAt(now);
                     salesOrderRepository.save(so);
+                    log.info("SO {} → QC_PASSED (all items pass)", so.getSoCode());
+                    // ── Realtime: notify KEEPER đơn QC đạt, sẵn sàng dispatch ─
+                    String customerName = customerRepository.findById(so.getCustomerId())
+                            .map(c -> c.getCustomerName()).orElse("—");
+                    notificationService.notifyRole("KEEPER", "qc_outbound_passed",
+                            soId, so.getSoCode(),
+                            customerName + " — QC đạt, sẵn sàng xuất kho");
                 }
             });
         }
@@ -314,11 +328,11 @@ public class OutboundQcService {
                 log.info("SO {} → APPROVED (re-allocate after DAMAGE RETURN_SCRAP)", so.getSoCode());
             }
             case "ACCEPT" -> {
-                // Xuất luôn hàng lỗi
-                so.setStatus("QC_SCAN");
+                // Xuất luôn hàng lỗi → QC_PASSED để cho phép dispatch
+                so.setStatus("QC_PASSED");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → QC_SCAN (DAMAGE ACCEPT)", so.getSoCode());
+                log.info("SO {} → QC_PASSED (DAMAGE ACCEPT)", so.getSoCode());
             }
             default -> throw new BusinessException(
                     "Invalid action: " + action + ". Must be RETURN_SCRAP or ACCEPT.");
@@ -627,8 +641,9 @@ public class OutboundQcService {
     @Transactional
     public ApiResponse<Void> confirmDispatch(Long soId, Long userId) {
         SalesOrderEntity so = findSalesOrder(soId);
-        if (!"QC_SCAN".equals(so.getStatus()))
-            throw new BusinessException("Dispatch requires QC_SCAN status. Current: " + so.getStatus());
+        // [BUG FIX] Chấp nhận cả QC_PASSED (all pass) lẫn QC_SCAN (ACCEPT damage)
+        if (!"QC_PASSED".equals(so.getStatus()) && !"QC_SCAN".equals(so.getStatus()))
+            throw new BusinessException("Dispatch requires QC_PASSED or QC_SCAN status. Current: " + so.getStatus());
         if (!pickingTaskItemRepository.allItemsScannedForSo(soId))
             throw new BusinessException("Dispatch blocked: items not QC-scanned (BR-DISPATCH-02)");
         long openIncidents = incidentRepository.countOpenIncidentsBySoId(soId);
