@@ -103,6 +103,13 @@ public class OutboundService {
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "SALES_ORDER", saved.getSoId(),
                 "Sales order " + code + " created DRAFT", ip, ua);
 
+        // ── Realtime: notify tất cả role có lệnh xuất mới được tạo ──────────
+        String customerName = customer != null ? customer.getCustomerName() : "—";
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
+                "outbound_approved",
+                saved.getSoId(), code,
+                customerName + " — Lệnh xuất mới");
+
         return buildSalesOrderResponse(saved, items, customer, warnings);
     }
 
@@ -142,6 +149,13 @@ public class OutboundService {
 
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "TRANSFER", saved.getTransferId(),
                 "Internal transfer " + code + " created DRAFT", ip, ua);
+
+        // ── Realtime: notify tất cả role có lệnh chuyển kho mới được tạo ────
+        String destName = destWarehouse != null ? destWarehouse.getWarehouseName() : "—";
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
+                "outbound_approved",
+                saved.getTransferId(), code,
+                "Chuyển kho → " + destName + " — Lệnh mới");
 
         return buildTransferResponse(saved, items, destWarehouse, warnings);
     }
