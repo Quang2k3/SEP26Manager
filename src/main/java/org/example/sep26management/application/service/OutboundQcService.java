@@ -127,15 +127,30 @@ public class OutboundQcService {
     public ApiResponse<QcSummaryResponse> getQcSummary(Long taskId) {
         findPickingTask(taskId);
         List<PickingTaskItemEntity> items = pickingTaskItemRepository.findByPickingTaskId(taskId);
-        int total   = items.size();
-        int pass    = (int) items.stream().filter(i -> "PASS".equals(i.getQcResult())).count();
-        int fail    = (int) items.stream().filter(i -> "FAIL".equals(i.getQcResult())).count();
-        int hold    = (int) items.stream().filter(i -> "HOLD".equals(i.getQcResult())).count();
-        int pending = (int) items.stream().filter(i -> i.getQcScannedAt() == null).count();
+        int total = items.size();
+        // Đếm số lượng unit thực tế theo qcPassQty/qcFailQty — không đếm số row
+        int pass = items.stream()
+                .mapToInt(i -> safeInt(i.getQcPassQty()))
+                .sum();
+        int fail = items.stream()
+                .mapToInt(i -> safeInt(i.getQcFailQty()))
+                .sum();
+        // pending = items chưa scan đủ (passQty + failQty < requiredQty)
+        int pending = (int) items.stream()
+                .filter(i -> safeBD(i.getQcPassQty()).add(safeBD(i.getQcFailQty()))
+                        .compareTo(i.getRequiredQty()) < 0)
+                .count();
         return ApiResponse.success("QC summary retrieved", QcSummaryResponse.builder()
                 .pickingTaskId(taskId).totalItems(total).passCount(pass)
-                .failCount(fail).holdCount(hold).pendingCount(pending)
+                .failCount(fail).holdCount(0).pendingCount(pending)
                 .allScanned(pending == 0 && total > 0).build());
+    }
+
+    private int safeInt(java.math.BigDecimal v) {
+        return v != null ? v.intValue() : 0;
+    }
+    private java.math.BigDecimal safeBD(java.math.BigDecimal v) {
+        return v != null ? v : java.math.BigDecimal.ZERO;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -170,21 +185,30 @@ public class OutboundQcService {
                     "Cannot finalize QC: task status is " + task.getStatus() + ". Expected QC_IN_PROGRESS.");
         }
 
-        // Auto-PASS all unscanned items
+        // Auto-PASS items chưa scan đủ: cộng phần còn thiếu vào qcPassQty
         LocalDateTime now = LocalDateTime.now();
-        for (PickingTaskItemEntity item : pickingTaskItemRepository.findUnscannedByTaskId(taskId)) {
-            item.setQcResult("PASS");
-            item.setQcScannedAt(now);
-            item.setQcNote("Auto-PASS by finalize-qc");
-            pickingTaskItemRepository.save(item);
+        for (PickingTaskItemEntity item : pickingTaskItemRepository.findByPickingTaskId(taskId)) {
+            java.math.BigDecimal scanned = safeBD(item.getQcPassQty()).add(safeBD(item.getQcFailQty()));
+            java.math.BigDecimal remaining = item.getRequiredQty().subtract(scanned);
+            if (remaining.compareTo(java.math.BigDecimal.ZERO) > 0) {
+                item.setQcPassQty(safeBD(item.getQcPassQty()).add(remaining));
+                item.setQcResult(safeBD(item.getQcFailQty()).compareTo(java.math.BigDecimal.ZERO) > 0 ? "FAIL" : "PASS");
+                item.setQcScannedAt(now);
+                item.setQcNote(item.getQcNote() != null ? item.getQcNote() : "Auto-PASS by finalize-qc");
+                pickingTaskItemRepository.save(item);
+            }
         }
 
         List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findByPickingTaskId(taskId);
-        int total   = allItems.size();
-        int pass    = (int) allItems.stream().filter(i -> "PASS".equals(i.getQcResult())).count();
-        int fail    = (int) allItems.stream().filter(i -> "FAIL".equals(i.getQcResult())).count();
-        int hold    = (int) allItems.stream().filter(i -> "HOLD".equals(i.getQcResult())).count();
-        int pending = (int) allItems.stream().filter(i -> i.getQcScannedAt() == null).count();
+        int total = allItems.size();
+        // Đếm theo số lượng unit thực tế — FIX BUG: 1 PASS + 1 FAIL không bị đếm thành 0 PASS + 1 FAIL
+        int pass = allItems.stream().mapToInt(i -> safeInt(i.getQcPassQty())).sum();
+        int fail = allItems.stream().mapToInt(i -> safeInt(i.getQcFailQty())).sum();
+        int hold = 0;
+        int pending = (int) allItems.stream()
+                .filter(i -> safeBD(i.getQcPassQty()).add(safeBD(i.getQcFailQty()))
+                        .compareTo(i.getRequiredQty()) < 0)
+                .count();
 
         Long soId = task.getSoId();
 
@@ -235,8 +259,9 @@ public class OutboundQcService {
         SalesOrderEntity so = salesOrderRepository.findById(soId).orElse(null);
         if (so == null) return;
 
+        // Filter: chỉ lấy items có qcFailQty > 0 (thay vì filter theo qcResult string)
         List<PickingTaskItemEntity> failItems = allItems.stream()
-                .filter(i -> "FAIL".equals(i.getQcResult()) || "HOLD".equals(i.getQcResult()))
+                .filter(i -> safeBD(i.getQcFailQty()).compareTo(BigDecimal.ZERO) > 0)
                 .collect(Collectors.toList());
         if (failItems.isEmpty()) return;
 
@@ -261,32 +286,36 @@ public class OutboundQcService {
         for (PickingTaskItemEntity item : failItems) {
             SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
             String skuCode = sku != null ? sku.getSkuCode() : "SKU#" + item.getSkuId();
-            desc.append(skuCode).append("[").append(item.getQcResult()).append("] ");
 
-            // Lay locationCode de hien thi trong PDF phieu hang loi
+            // FIX: dùng qcFailQty làm damagedQty, qcPassQty làm actualQty
+            BigDecimal failQty = safeBD(item.getQcFailQty());
+            BigDecimal passQty = safeBD(item.getQcPassQty());
+            desc.append(skuCode)
+                    .append("[FAIL x").append(failQty.intValue())
+                    .append("/PASS x").append(passQty.intValue()).append("] ");
+
             String fromLocCode = locationRepository.findById(item.getFromLocationId())
                     .map(l -> l.getLocationCode()).orElse("N/A");
-            String noteStr = item.getQcResult()
-                    + (item.getQcNote() != null ? ": " + item.getQcNote() : "")
+            String noteStr = "FAIL x" + failQty.intValue() + " / PASS x" + passQty.intValue()
+                    + (item.getQcNote() != null ? " | " + item.getQcNote() : "")
                     + " | from_bin: " + fromLocCode
                     + (item.getQcAttachmentUrl() != null ? " | photo: " + item.getQcAttachmentUrl() : "");
 
             incidentItemRepository.save(IncidentItemEntity.builder()
                     .incident(saved)
                     .skuId(item.getSkuId())
-                    .damagedQty(item.getRequiredQty())
+                    .damagedQty(failQty)          // FIX: số unit thực FAIL
                     .expectedQty(item.getRequiredQty())
-                    .actualQty(BigDecimal.ZERO)
+                    .actualQty(passQty)            // FIX: số unit PASS
                     .reasonCode("DAMAGE")
                     .note(noteStr)
-                    // [FIX QC] Lưu ảnh bằng chứng vào field riêng — không nhét vào note nữa
                     .attachmentUrl(item.getQcAttachmentUrl())
                     .build());
         }
 
         saved.setDescription(desc.toString().trim());
         incidentRepository.save(saved);
-        log.info("Created DAMAGE Incident {} for SO {} ({} items)", code, so.getSoCode(), failItems.size());
+        log.info("Created DAMAGE Incident {} for SO {} ({} fail items)", code, so.getSoCode(), failItems.size());
     }
 
     // ─────────────────────────────────────────────────────────────────────────

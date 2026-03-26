@@ -40,7 +40,26 @@ public class PickingTaskItemEntity {
     private BigDecimal pickedQty = BigDecimal.ZERO;
 
     // ── QC Scan columns ──────────────────────────────────────────
-    /** PASS | FAIL | HOLD | NULL (null = not yet scanned) */
+    /**
+     * Số lượng unit đã scan PASS.
+     * Track từng unit riêng để tránh ghi đè khi 1 SKU có nhiều unit (VD: 1 PASS + 1 FAIL).
+     */
+    @Column(name = "qc_pass_qty", precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal qcPassQty = BigDecimal.ZERO;
+
+    /**
+     * Số lượng unit đã scan FAIL.
+     */
+    @Column(name = "qc_fail_qty", precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal qcFailQty = BigDecimal.ZERO;
+
+    /**
+     * PASS | FAIL | NULL (null = not yet scanned).
+     * Worst-case: nếu qcFailQty > 0 → FAIL, ngược lại → PASS.
+     * Set tự động sau mỗi lần scan.
+     */
     @Column(name = "qc_result", length = 10)
     private String qcResult;
 
