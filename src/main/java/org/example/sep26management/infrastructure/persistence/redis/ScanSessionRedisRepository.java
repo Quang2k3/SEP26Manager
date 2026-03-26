@@ -17,7 +17,7 @@ public class ScanSessionRedisRepository {
 
     private static final String KEY_PREFIX = "scan:session:";
     private static final String ACTIVE_SESSION_PREFIX = "scan:active_session:";
-    private static final Duration TTL = Duration.ofMinutes(10);
+    private static final Duration TTL = Duration.ofHours(1);
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;

@@ -14,7 +14,7 @@ import java.util.List;
 @Builder
 public class ResolveIncidentRequest {
 
-    @Schema(description = "Ghi chú của Manager khi xử lý sự cố", example = "Đã kiểm tra, cho qua 2 chiếc, còn lại trả NCC")
+    @Schema(description = "Ghi chú của Manager khi xử lý sự cố", example = "Đã kiểm tra, cho qua 2 chiếc, còn lại hoàn hàng")
     private String note;
 
     @Schema(description = "Danh sách quyết định xử lý cho từng item bị lỗi")
