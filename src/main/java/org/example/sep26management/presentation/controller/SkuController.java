@@ -405,4 +405,29 @@ public class SkuController {
         }).collect(java.util.stream.Collectors.toList());
         return ResponseEntity.ok(org.example.sep26management.application.dto.response.ApiResponse.success("OK", result));
     }
+
+    /**
+     * PATCH /v1/skus/{skuId}/image
+     * Cập nhật ảnh đại diện cho SKU (Manager only).
+     * FE upload ảnh lên /v1/attachments/upload trước → nhận URL → gọi endpoint này.
+     */
+    @PatchMapping("/{skuId}/image")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Cập nhật ảnh SKU",
+            description = "Cập nhật `imageUrl` cho SKU. FE upload ảnh lên `/v1/attachments/upload` trước, lấy URL rồi gọi endpoint này.")
+    public ResponseEntity<ApiResponse<SkuResponse>> updateSkuImage(
+            @PathVariable Long skuId,
+            @RequestBody java.util.Map<String, String> body) {
+
+        String imageUrl = body.get("imageUrl");
+        org.example.sep26management.infrastructure.persistence.entity.SkuEntity sku =
+                skuJpaRepository.findById(skuId)
+                        .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.ResourceNotFoundException("SKU not found: " + skuId));
+
+        sku.setImageUrl(imageUrl);
+        skuJpaRepository.save(sku);
+
+        log.info("SKU {} imageUrl updated to {}", skuId, imageUrl);
+        return ResponseEntity.ok(skuService.getSkuDetail(skuId));
+    }
 }

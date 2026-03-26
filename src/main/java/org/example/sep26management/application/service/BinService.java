@@ -33,6 +33,7 @@ public class BinService {
         private final AuditLogService auditLogService;
         private final SkuJpaRepository skuRepository;
         private final PutawayAllocationJpaRepository putawayAllocationRepository;
+        private final org.example.sep26management.infrastructure.persistence.repository.InventoryLotJpaRepository lotRepository;
 
         // ─────────────────────────────────────────────────────────────
         // SCRUM-277: UC-LOC-06 View Bin Occupancy
@@ -189,14 +190,39 @@ public class BinService {
                 List<BinOccupancyResponse.BinInventoryItem> items = snapshotRepository
                         .findDetailByLocationId(locationId).stream()
                         .map(s -> {
-                                BigDecimal wKg = skuRepository.findById(s.getSkuId())
-                                        .map(sku -> sku.getWeightPerCartonKg()).orElse(null);
+                                var skuOpt = skuRepository.findById(s.getSkuId());
+                                BigDecimal wKg = skuOpt.map(sku -> sku.getWeightPerCartonKg()).orElse(null);
+                                String brand        = skuOpt.map(sku -> sku.getBrand()).orElse(null);
+                                String categoryName = skuOpt.flatMap(sku ->
+                                        sku.getCategory() != null
+                                                ? java.util.Optional.ofNullable(sku.getCategory().getCategoryName())
+                                                : java.util.Optional.empty()
+                                ).orElse(null);
+                                String barcode       = skuOpt.map(sku -> sku.getBarcode()).orElse(null);
+                                String unit          = skuOpt.map(sku -> sku.getUnit()).orElse(null);
+                                Integer upc          = skuOpt.map(sku -> sku.getUnitsPerCarton()).orElse(null);
+                                String imageUrl      = skuOpt.map(sku -> sku.getImageUrl()).orElse(null);
+
+                                // Manufacture date từ lot
+                                java.time.LocalDate mfgDate = null;
+                                if (s.getLotId() != null) {
+                                        mfgDate = lotRepository.findById(s.getLotId())
+                                                .map(l -> l.getManufactureDate()).orElse(null);
+                                }
+
                                 return BinOccupancyResponse.BinInventoryItem.builder()
                                         .skuId(s.getSkuId())
                                         .skuCode(s.getSkuCode())
                                         .skuName(s.getSkuName())
+                                        .brand(brand)
+                                        .categoryName(categoryName)
+                                        .barcode(barcode)
+                                        .unit(unit)
+                                        .unitsPerCarton(upc)
+                                        .imageUrl(imageUrl)
                                         .lotId(s.getLotId())
                                         .lotNumber(s.getLotNumber())
+                                        .manufactureDate(mfgDate)
                                         .expiryDate(s.getExpiryDate())
                                         .quantity(s.getQuantity())
                                         .reservedQty(s.getReservedQty())
