@@ -52,6 +52,7 @@ public class PickListService {
     private final InventorySnapshotJpaRepository snapshotRepository;
     private final InventoryTransactionJpaRepository txnRepository;
     private final ReservationJpaRepository reservationRepository;
+    private final NotificationService notificationService;
 
     @Transactional
     public ApiResponse<PickListResponse> generatePickList(
@@ -191,6 +192,9 @@ public class PickListService {
                 so.setStatus("PICKING");
                 soRepository.save(so);
                 log.info("SO {} → PICKING", so.getSoCode());
+                // ── Realtime: notify KEEPER có pick task mới cần thực hiện ──────
+                notificationService.notifyRole("KEEPER", "outbound_pick_pending",
+                        so.getSoId(), so.getSoCode(), documentCode + " — cần lấy hàng");
             });
         } else {
             transferRepository.findById(request.getDocumentId()).ifPresent(t -> {

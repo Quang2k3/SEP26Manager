@@ -36,6 +36,7 @@ public class OutboundService {
     private final SkuJpaRepository skuRepository;
     private final AuditLogService auditLogService;
     private final AllocateStockService allocateStockService;
+    private final NotificationService notificationService;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
@@ -337,6 +338,12 @@ public class OutboundService {
         auditLogService.logAction(userId, "OUTBOUND_SUBMITTED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " submitted for approval", ip, ua);
 
+        // ── Realtime: notify MANAGER có lệnh xuất mới chờ duyệt ─────────────
+        CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
+        notificationService.notifyRole("MANAGER", "outbound_pending_approval",
+                soId, so.getSoCode(),
+                custForNotif != null ? custForNotif.getCustomerName() : "—");
+
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_SUBMITTED_SUCCESS,
                 buildSalesOrderResponse(so, items, customer, null));
@@ -414,6 +421,12 @@ public class OutboundService {
 
         auditLogService.logAction(managerId, "OUTBOUND_APPROVED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " approved", ip, ua);
+
+        // ── Realtime: notify KEEPER lệnh xuất vừa được duyệt, cần phân bổ tồn kho ──
+        CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
+        notificationService.notifyRole("KEEPER", "outbound_approved",
+                soId, so.getSoCode(),
+                custForNotif != null ? custForNotif.getCustomerName() : "—");
 
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_APPROVED_SUCCESS,
