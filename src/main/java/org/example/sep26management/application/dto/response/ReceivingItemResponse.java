@@ -52,4 +52,7 @@ public class ReceivingItemResponse {
 
     @Schema(description = "Mã lý do lỗi (Nếu condition = FAIL)", example = "DENTED")
     private String reasonCode;
+
+    @Schema(description = "URL ảnh bằng chứng hàng hỏng (chụp khi scan FAIL)")
+    private String attachmentUrl;
 }

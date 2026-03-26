@@ -62,7 +62,7 @@ public class IncidentController {
                     + "```\n\n"
                     + "**incidentType values:**\n"
                     + "- `SEAL_BROKEN`, `SEAL_MISMATCH`, `PACKAGING_DAMAGE` → dùng cho GATE\n"
-                    + "- `DAMAGE`, `SHORTAGE`, `OVERAGE`, `OTHER` → dùng cho QUALITY")
+                    + "- `DAMAGE`, `SHORTAGE`, `OVERAGE`, `UNEXPECTED_ITEM`, `OTHER` → dùng cho QUALITY")
     public ApiResponse<IncidentResponse> create(
             @Valid @RequestBody CreateIncidentRequest request,
             Authentication auth) {
@@ -148,7 +148,7 @@ public class IncidentController {
     @PreAuthorize("hasRole('MANAGER')")
     @Operation(summary = "Xử lý sự cố chất lượng — hàng hỏng (Manager)",
             description = "**Dùng cho QC damage (hàng hỏng vật lý)** — KHÔNG phải thừa/thiếu.\n\n"
-                    + "Manager quyết định số lượng PASS (nhập kho), RETURN (trả NCC), SCRAP (huỷ bỏ) cho từng item hỏng.\n\n"
+                    + "Manager quyết định số lượng PASS (nhập kho), RETURN (hoàn hàng), SCRAP (huỷ bỏ) cho từng item hỏng.\n\n"
                     + "**Ví dụ request body:**\n"
                     + "```json\n"
                     + "{\n"
@@ -156,10 +156,10 @@ public class IncidentController {
                     + "    { \"incidentItemId\": 5, \"action\": \"PASS\", \"quantity\": 3 },\n"
                     + "    { \"incidentItemId\": 5, \"action\": \"RETURN\", \"quantity\": 2 }\n"
                     + "  ],\n"
-                    + "  \"note\": \"3 thùng còn tốt, 2 thùng bị móp trả NCC\"\n"
+                    + "  \"note\": \"3 thùng còn tốt, 2 thùng bị móp hoàn hàng\"\n"
                     + "}\n"
                     + "```\n\n"
-                    + "**Actions:** `PASS` (nhập kho), `RETURN` (trả NCC), `SCRAP` / `DOWNGRADE` (huỷ/hạ cấp)\n\n"
+                    + "**Actions:** `PASS` (nhập kho), `RETURN` (hoàn hàng), `SCRAP` / `DOWNGRADE` (huỷ/hạ cấp)\n\n"
                     + "→ Để xử lý **thừa/thiếu số lượng**, dùng `POST /v1/incidents/{id}/resolve-discrepancy` thay thế")
     public ApiResponse<IncidentResponse> resolve(
             @PathVariable Long id,
@@ -183,7 +183,9 @@ public class IncidentController {
                     + "| `SHORTAGE` | `CLOSE_SHORT` | Chốt thiếu, chấp nhận số lượng đã nhận |\n"
                     + "| `SHORTAGE` | `WAIT_BACKORDER` | Chờ NCC giao bù phần thiếu |\n"
                     + "| `OVERAGE` | `ACCEPT` | Nhận hàng thừa, nhập kho tất cả |\n"
-                    + "| `OVERAGE` | `RETURN` | Trả hàng thừa cho NCC |\n\n"
+                    + "| `OVERAGE` | `RETURN` | Hoàn hàng thừa |\n"
+                    + "| `UNEXPECTED_ITEM` | `ACCEPT` | Nhận hàng ngoài phiếu, nhập kho |\n"
+                    + "| `UNEXPECTED_ITEM` | `RETURN` | Hoàn hàng ngoài phiếu |\n\n"
                     + "## Ví dụ đầy đủ\n\n"
                     + "**Bước 1**: `GET /v1/incidents/9` trả ra:\n"
                     + "```json\n"

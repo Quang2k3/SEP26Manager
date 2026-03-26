@@ -52,15 +52,18 @@ public class ReceivingSessionService {
                         // Verify the session data actually still exists in Redis
                         Optional<ScanSessionData> sessionDataOpt = sessionRedis.findById(existingSessionId);
                         if (sessionDataOpt.isPresent()) {
-                                log.info("Reusing existing scan session: {} for userId={}, warehouseId={}",
+                                log.info("Reusing existing scan session: {} for userId={}, warehouseId={} — clearing old lines",
                                                 existingSessionId, userId, warehouseId);
                                 ScanSessionData data = sessionDataOpt.get();
+                                // Reset lines to avoid stale data from previous receiving order
+                                data.setLines(new ArrayList<>());
+                                sessionRedis.save(existingSessionId, data);
                                 ScanSessionResponse response = ScanSessionResponse.builder()
                                                 .sessionId(data.getSessionId())
                                                 .warehouseId(data.getWarehouseId())
-                                                .lines(data.getLines() != null ? data.getLines() : new ArrayList<>())
+                                                .lines(new ArrayList<>())
                                                 .build();
-                                return ApiResponse.success("Reused existing session", response);
+                                return ApiResponse.success("Reused existing session (lines cleared)", response);
                         } else {
                                 // Active session key exists but data is gone (expired/deleted), clean up the
                                 // stale key

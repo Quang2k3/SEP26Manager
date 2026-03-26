@@ -60,6 +60,10 @@ public class ReceivingItemEntity {
     @Column(name = "qc_required", nullable = false)
     private Boolean qcRequired;
 
+    /** URL ảnh bằng chứng hàng hỏng khi condition = FAIL. Upload từ mobile scanner. */
+    @Column(name = "attachment_url", columnDefinition = "TEXT")
+    private String attachmentUrl;
+
     @PrePersist
     protected void onCreate() {
         if (qcRequired == null)
