@@ -130,9 +130,7 @@ public class CategoryController {
      */
     @PatchMapping("/{categoryId}/deactivate")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    @Operation(summary = "Vô hiệu hóa category", description = "Vô hiệu hóa category. SKU thuộc category này sẽ không được gợi ý putaway nữa.\n\n"
-            + "**Data yêu cầu:**\n"
-            + "- `@PathVariable categoryId`: Mã Category ID. LẤY TỪ: attribute `id` của API danh sách Category.")
+    @Operation(summary = "Vô hiệu hóa category")
     public ResponseEntity<ApiResponse<CategoryResponse>> deactivateCategory(
             @PathVariable Long categoryId,
             HttpServletRequest httpRequest) {
@@ -142,6 +140,26 @@ public class CategoryController {
 
         ApiResponse<CategoryResponse> response = categoryService.deactivateCategory(
                 categoryId, deactivatedBy, ipAddress, userAgent);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * PATCH /v1/categories/{categoryId}/activate — Kích hoạt lại category
+     */
+    @PatchMapping("/{categoryId}/activate")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @Operation(summary = "Kích hoạt lại category", description = "Kích hoạt lại category đã bị vô hiệu hóa.")
+    public ResponseEntity<ApiResponse<CategoryResponse>> activateCategory(
+            @PathVariable Long categoryId,
+            HttpServletRequest httpRequest) {
+        Long updatedBy = getCurrentUserId();
+
+        UpdateCategoryRequest req = new UpdateCategoryRequest();
+        req.setActive(true);
+        ApiResponse<CategoryResponse> response = categoryService.updateCategory(
+                categoryId, req, updatedBy,
+                getClientIpAddress(httpRequest),
+                httpRequest.getHeader("User-Agent"));
         return ResponseEntity.ok(response);
     }
 
