@@ -109,9 +109,6 @@ public class ScanEventService {
                                     if (request.getReasonCode() != null && !request.getReasonCode().isBlank()) {
                                         item.setReasonCode(request.getReasonCode());
                                     }
-                                    if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
-                                        item.setAttachmentUrl(request.getAttachmentUrl());
-                                    }
                                 }
                                 receivingItemRepo.save(item);
                                 log.info("Updated ReceivingItem for order {}: SKU={}", receivingId, sku.getSkuCode());
@@ -139,9 +136,6 @@ public class ScanEventService {
             if (request.getReasonCode() != null) {
                 line.setReasonCode(request.getReasonCode());
             }
-            if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
-                line.setAttachmentUrl(request.getAttachmentUrl());
-            }
         } else {
             newQty = request.getQty();
             lines.add(ScanLineItem.builder()
@@ -152,7 +146,6 @@ public class ScanEventService {
                     .qty(newQty)
                     .condition(condition)
                     .reasonCode(request.getReasonCode())
-                    .attachmentUrl(request.getAttachmentUrl())
                     .build());
         }
 
@@ -250,7 +243,8 @@ public class ScanEventService {
     }
     /**
      * Xử lý scan event cho outbound QC.
-     * Điện thoại scan barcode SKU → tìm picking task item → gọi qcScanItem.
+     * Điện thoại scan barcode SKU → tìm picking task item → cộng dồn qcPassQty/qcFailQty.
+     * Không ghi đè qcResult — tránh mất kết quả khi 1 SKU có nhiều unit (VD: 1 PASS + 1 FAIL).
      */
     private ApiResponse<Map<String, Object>> processOutboundQcScan(ScanEventRequest request, String sessionId) {
         Long taskId = request.getTaskId();
@@ -267,11 +261,18 @@ public class ScanEventService {
         }
         SkuEntity sku = skuOpt.get();
 
-        // Tìm picking task item thuộc task này và đúng SKU, chưa scan
+        // Tìm picking task item thuộc task này và đúng SKU
+        // Ưu tiên item chưa scan hết (qcPassQty + qcFailQty < requiredQty)
         var items = pickingTaskItemRepository.findByPickingTaskId(taskId);
         var taskItem = items.stream()
-                .filter(i -> i.getSkuId().equals(sku.getSkuId()) && i.getQcScannedAt() == null)
+                .filter(i -> i.getSkuId().equals(sku.getSkuId()))
+                .filter(i -> {
+                    // Còn chỗ để scan thêm unit
+                    java.math.BigDecimal scanned = safeQty(i.getQcPassQty()).add(safeQty(i.getQcFailQty()));
+                    return scanned.compareTo(i.getRequiredQty()) < 0;
+                })
                 .findFirst()
+                // Fallback: lấy item đầu tiên có cùng SKU dù đã scan hết
                 .orElse(items.stream()
                         .filter(i -> i.getSkuId().equals(sku.getSkuId()))
                         .findFirst()
@@ -281,59 +282,96 @@ public class ScanEventService {
             return ApiResponse.error("Không tìm thấy mặt hàng " + sku.getSkuCode() + " trong Pick List #" + taskId);
         }
 
-        // Gọi qcScanItem
-        try {
-            QcScanRequest qcReq = new QcScanRequest();
-            qcReq.setPickingTaskId(taskId);
-            qcReq.setPickingTaskItemId(taskItem.getPickingTaskItemId());
-            qcReq.setResult(condition);
-            qcReq.setReason("FAIL".equals(condition) ? (reasonCode != null ? reasonCode : "Lỗi phát hiện khi scan") : null);
-            // [FIX QC] Truyen attachmentUrl vao QcScanRequest de luu anh hang hong
+        // ── Cộng dồn qty thay vì ghi đè — FIX BUG: 1 PASS + 1 FAIL = đúng ──
+        java.math.BigDecimal one = java.math.BigDecimal.ONE;
+        if ("FAIL".equals(condition)) {
+            taskItem.setQcFailQty(safeQty(taskItem.getQcFailQty()).add(one));
+            // Lưu ảnh bằng chứng nếu có
             if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
-                qcReq.setAttachmentUrl(request.getAttachmentUrl());
+                taskItem.setQcAttachmentUrl(request.getAttachmentUrl());
             }
-            outboundQcService.scanItem(qcReq, null);
-
-            log.info("Outbound QC scan OK: taskId={}, SKU={}, result={}", taskId, sku.getSkuCode(), condition);
-
-            // Push SSE update nếu có session
-            if (sessionId != null) {
-                try {
-                    var sessionOpt = sessionRedis.findById(sessionId);
-                    if (sessionOpt.isPresent()) {
-                        // Check if all items are now scanned
-                        var allItems = pickingTaskItemRepository.findByPickingTaskId(taskId);
-                        long pendingCount = allItems.stream().filter(i -> i.getQcScannedAt() == null).count();
-                        boolean allScanned = pendingCount == 0 && !allItems.isEmpty();
-                        long passCount = allItems.stream().filter(i -> "PASS".equals(i.getQcResult())).count();
-                        long failCount = allItems.stream().filter(i -> "FAIL".equals(i.getQcResult())).count();
-                        long holdCount = allItems.stream().filter(i -> "HOLD".equals(i.getQcResult())).count();
-                        sseRegistry.send(sessionId, Map.of(
-                                "type", "qc_scan",
-                                "skuCode", sku.getSkuCode(),
-                                "skuName", sku.getSkuName() != null ? sku.getSkuName() : "",
-                                "result", condition,
-                                "taskItemId", taskItem.getPickingTaskItemId(),
-                                "allScanned", allScanned,
-                                "passCount", passCount,
-                                "failCount", failCount,
-                                "holdCount", holdCount,
-                                "pendingCount", pendingCount
-                        ));
-                    }
-                } catch (Exception ignored) {}
+            if (reasonCode != null && !reasonCode.isBlank()) {
+                taskItem.setQcNote(reasonCode);
+            } else if (taskItem.getQcNote() == null) {
+                taskItem.setQcNote("Lỗi phát hiện khi scan");
             }
-
-            return ApiResponse.success("QC " + condition + " — " + sku.getSkuCode(), Map.of(
-                    "skuCode", sku.getSkuCode(),
-                    "skuName", sku.getSkuName() != null ? sku.getSkuName() : "",
-                    "result", condition,
-                    "taskItemId", taskItem.getPickingTaskItemId(),
-                    "newQty", taskItem.getRequiredQty()
-            ));
-        } catch (Exception e) {
-            log.error("Outbound QC scan error: {}", e.getMessage(), e);
-            return ApiResponse.error("Lỗi ghi nhận QC: " + e.getMessage());
+        } else {
+            taskItem.setQcPassQty(safeQty(taskItem.getQcPassQty()).add(one));
         }
+
+        // Worst-case qcResult: FAIL nếu có bất kỳ unit FAIL nào
+        String newResult = safeQty(taskItem.getQcFailQty()).compareTo(java.math.BigDecimal.ZERO) > 0
+                ? "FAIL" : "PASS";
+        taskItem.setQcResult(newResult);
+
+        // Set qcScannedAt khi lần scan đầu tiên
+        if (taskItem.getQcScannedAt() == null) {
+            taskItem.setQcScannedAt(java.time.LocalDateTime.now());
+        }
+
+        // Cập nhật timestamp khi scan cuối
+        java.math.BigDecimal totalScanned = safeQty(taskItem.getQcPassQty()).add(safeQty(taskItem.getQcFailQty()));
+        if (totalScanned.compareTo(taskItem.getRequiredQty()) >= 0) {
+            taskItem.setQcScannedAt(java.time.LocalDateTime.now());
+        }
+
+        pickingTaskItemRepository.save(taskItem);
+
+        log.info("Outbound QC scan OK: taskId={}, SKU={}, condition={}, passQty={}, failQty={}/{}",
+                taskId, sku.getSkuCode(), condition,
+                taskItem.getQcPassQty(), taskItem.getQcFailQty(), taskItem.getRequiredQty());
+
+        // Push SSE update nếu có session
+        if (sessionId != null) {
+            try {
+                var sessionOpt = sessionRedis.findById(sessionId);
+                if (sessionOpt.isPresent()) {
+                    var allItems = pickingTaskItemRepository.findByPickingTaskId(taskId);
+                    // Đã scan đủ = tổng (passQty + failQty) >= requiredQty
+                    long pendingCount = allItems.stream()
+                            .filter(i -> safeQty(i.getQcPassQty()).add(safeQty(i.getQcFailQty()))
+                                    .compareTo(i.getRequiredQty()) < 0)
+                            .count();
+                    boolean allScanned = pendingCount == 0 && !allItems.isEmpty();
+                    // passCount = số row có failQty = 0 và passQty > 0
+                    // failCount = số row có failQty > 0
+                    long passCount = allItems.stream()
+                            .filter(i -> safeQty(i.getQcFailQty()).compareTo(java.math.BigDecimal.ZERO) == 0
+                                    && safeQty(i.getQcPassQty()).compareTo(java.math.BigDecimal.ZERO) > 0)
+                            .count();
+                    long failCount = allItems.stream()
+                            .filter(i -> safeQty(i.getQcFailQty()).compareTo(java.math.BigDecimal.ZERO) > 0)
+                            .count();
+                    java.util.Map<String, Object> ssePayload = new java.util.HashMap<>();
+                    ssePayload.put("type", "qc_scan");
+                    ssePayload.put("skuCode", sku.getSkuCode());
+                    ssePayload.put("skuName", sku.getSkuName() != null ? sku.getSkuName() : "");
+                    ssePayload.put("result", condition);
+                    ssePayload.put("taskItemId", taskItem.getPickingTaskItemId());
+                    ssePayload.put("passQty", safeQty(taskItem.getQcPassQty()));
+                    ssePayload.put("failQty", safeQty(taskItem.getQcFailQty()));
+                    ssePayload.put("allScanned", allScanned);
+                    ssePayload.put("passCount", passCount);
+                    ssePayload.put("failCount", failCount);
+                    ssePayload.put("pendingCount", pendingCount);
+                    sseRegistry.send(sessionId, ssePayload);
+                }
+            } catch (Exception ignored) {}
+        }
+
+        java.util.Map<String, Object> returnData = new java.util.HashMap<>();
+        returnData.put("skuCode", sku.getSkuCode());
+        returnData.put("skuName", sku.getSkuName() != null ? sku.getSkuName() : "");
+        returnData.put("result", condition);
+        returnData.put("taskItemId", taskItem.getPickingTaskItemId());
+        returnData.put("passQty", safeQty(taskItem.getQcPassQty()));
+        returnData.put("failQty", safeQty(taskItem.getQcFailQty()));
+        returnData.put("requiredQty", taskItem.getRequiredQty());
+        return ApiResponse.success("QC " + condition + " — " + sku.getSkuCode(), returnData);
+    }
+
+    /** Null-safe BigDecimal helper */
+    private java.math.BigDecimal safeQty(java.math.BigDecimal v) {
+        return v != null ? v : java.math.BigDecimal.ZERO;
     }
 }
