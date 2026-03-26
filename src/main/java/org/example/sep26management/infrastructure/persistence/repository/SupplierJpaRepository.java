@@ -20,7 +20,7 @@ public interface SupplierJpaRepository extends JpaRepository<SupplierEntity, Lon
     boolean existsBySupplierCode(String supplierCode);
 
     @Query("SELECT s FROM SupplierEntity s WHERE " +
-            "(:keyword IS NULL OR LOWER(s.supplierName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "(COALESCE(:keyword, '') = '' OR LOWER(s.supplierName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
             "   OR LOWER(s.supplierCode) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
             "AND (:activeOnly IS NULL OR s.active = :activeOnly)")
     Page<SupplierEntity> searchSuppliers(
