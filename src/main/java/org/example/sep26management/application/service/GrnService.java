@@ -91,7 +91,7 @@ public class GrnService {
         String supplierName = grn.getSupplierId() != null
                 ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRole("KEEPER", "grn_approved",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_approved",
                 grn.getGrnId(), grn.getGrnCode(), supplierName);
 
         return ApiResponse.success("GRN approved.", toSummaryResponse(grn));
@@ -119,7 +119,7 @@ public class GrnService {
         String supplierName = grn.getSupplierId() != null
                 ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRole("KEEPER", "grn_rejected",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_rejected",
                 grn.getGrnId(), grn.getGrnCode(), supplierName + " — " + reason);
 
         return ApiResponse.success("GRN rejected", toSummaryResponse(grn));
@@ -261,7 +261,7 @@ public class GrnService {
         });
 
         // ── Realtime: notify KEEPER rằng có putaway task mới ────────────────
-        notificationService.notifyRole("KEEPER", "putaway_pending",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "putaway_pending",
                 task.getPutawayTaskId(), "Task #" + task.getPutawayTaskId(),
                 "GRN " + grn.getGrnCode() + " — cần putaway");
 
@@ -289,7 +289,7 @@ public class GrnService {
         String supplierName = grn.getSupplierId() != null
                 ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRole("MANAGER", "grn_pending_approval",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_pending_approval",
                 grn.getGrnId(), grn.getGrnCode(), supplierName);
 
         return ApiResponse.success("GRN submitted to manager for approval", toSummaryResponse(grn));

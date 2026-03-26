@@ -84,7 +84,7 @@ public class IncidentService {
         // ── Realtime: notify MANAGER + KEEPER có sự cố mới chưa xử lý ────────
         String desc = request.getDescription() != null
                 ? request.getDescription() : request.getIncidentType().name();
-        notificationService.notifyRoles(new String[]{"MANAGER", "KEEPER"}, "incident_open",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
                 saved.getIncidentId(), saved.getIncidentCode(), desc);
 
         return ApiResponse.success("Incident reported successfully", toResponse(saved));
@@ -164,6 +164,11 @@ public class IncidentService {
 
         log.info("Incident {} approved by managerId={}", incident.getIncidentCode(), managerId);
 
+        // ── Realtime: notify KEEPER incident được duyệt, có thể tiếp tục dỡ hàng
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                incident.getIncidentId(), incident.getIncidentCode(),
+                "Incident đã duyệt — tiếp tục nhận hàng");
+
         return ApiResponse.success("Incident approved. Keeper can start unloading.", toResponse(incident));
     }
 
@@ -186,6 +191,11 @@ public class IncidentService {
         incidentRepo.save(incident);
 
         log.info("Incident {} rejected by managerId={}, reason: {}", incident.getIncidentCode(), managerId, reason);
+
+        // ── Realtime: notify KEEPER incident bị từ chối ───────────────────────
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                incident.getIncidentId(), incident.getIncidentCode(),
+                "Incident bị từ chối — " + (reason != null ? reason : ""));
 
         return ApiResponse.success("Incident rejected. Truck will not be unloaded.", toResponse(incident));
     }
@@ -243,6 +253,10 @@ public class IncidentService {
 
         log.info("Incident {} resolved by managerId={}", incident.getIncidentCode(), managerId);
 
+        // ── Realtime: notify KEEPER incident đã xử lý xong ───────────────────
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                incident.getIncidentId(), incident.getIncidentCode(), "Incident đã được xử lý xong");
+
         return ApiResponse.success("Incident resolved successfully.", toResponse(incident));
     }
 
@@ -262,19 +276,15 @@ public class IncidentService {
 
         if (!org.example.sep26management.application.enums.IncidentType.SHORTAGE.equals(incident.getIncidentType())
                 && !org.example.sep26management.application.enums.IncidentType.OVERAGE
-                .equals(incident.getIncidentType())
-                && !org.example.sep26management.application.enums.IncidentType.UNEXPECTED_ITEM
-                .equals(incident.getIncidentType())
-                && !org.example.sep26management.application.enums.IncidentType.DISCREPANCY
-                .equals(incident.getIncidentType())
-                && !org.example.sep26management.application.enums.IncidentType.DAMAGE
                 .equals(incident.getIncidentType())) {
             throw new RuntimeException(
-                    "This API is only for resolving quantity discrepancy or damage incidents (SHORTAGE/OVERAGE/UNEXPECTED_ITEM/DISCREPANCY/DAMAGE).");
+                    "This API is only for resolving quantity discrepancy incidents (SHORTAGE/OVERAGE).");
         }
 
         ReceivingOrderEntity order = receivingOrderRepo.findById(incident.getReceivingId())
                 .orElseThrow(() -> new RuntimeException("Receiving order not found: " + incident.getReceivingId()));
+
+        boolean hasWaitBackorder = false;
 
         for (org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest.ItemResolution res : request
                 .getItems()) {
@@ -287,139 +297,64 @@ public class IncidentService {
                         + " does not belong to incident " + id);
             }
 
-            // Find corresponding receiving item — prefer matching by condition (FAIL items)
-            java.util.List<org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity> rcItems = receivingItemRepo
+            // Find corresponding receiving item
+            org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity rcItem = receivingItemRepo
                     .findByReceivingOrderReceivingId(order.getReceivingId()).stream()
                     .filter(itm -> itm.getSkuId().equals(incItem.getSkuId()))
-                    .collect(java.util.stream.Collectors.toList());
-
-            // Ưu tiên FAIL item (QC đánh FAIL → trả hàng FAIL), fallback sang item bất kỳ
-            org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity rcItem = rcItems.stream()
-                    .filter(itm -> "FAIL".equalsIgnoreCase(itm.getCondition()))
-                    .findFirst()
-                    .orElse(rcItems.stream().findFirst().orElse(null));
+                    .findFirst().orElse(null);
 
             String action = res.getAction().toUpperCase();
 
             switch (action) {
                 case "CLOSE_SHORT":
-                    // Chốt thiếu: giữ nguyên expectedQty (PO gốc), receivedQty không đổi
+                    // Chốt thiếu: expectedQty = receivedQty (accept what was received)
+                    if (rcItem != null) {
+                        rcItem.setExpectedQty(rcItem.getReceivedQty());
+                        receivingItemRepo.save(rcItem);
+                    }
                     incItem.setNote(appendNote(incItem.getNote(),
                             "[Manager]: CLOSE_SHORT — Chốt thiếu, chấp nhận số lượng nhận được"));
                     break;
 
                 case "WAIT_BACKORDER":
-                    // Nhập số đã có, đánh dấu thiếu LOT để lần sau giao bù
-                    if (rcItem != null) {
-                        java.math.BigDecimal shortageQty = rcItem.getExpectedQty()
-                                .subtract(rcItem.getReceivedQty() != null ? rcItem.getReceivedQty() : java.math.BigDecimal.ZERO);
-                        String lotInfo = rcItem.getLotNumber() != null ? rcItem.getLotNumber() : "N/A";
-                        String skuCode = skuRepo.findById(rcItem.getSkuId())
-                                .map(SkuEntity::getSkuCode).orElse("SKU-" + rcItem.getSkuId());
-
-                        // Giữ nguyên expectedQty (PO gốc), receivedQty không đổi
-                        receivingItemRepo.save(rcItem);
-
-                        incItem.setNote(appendNote(incItem.getNote(),
-                                "[Manager]: WAIT_BACKORDER — Nhập " + rcItem.getReceivedQty()
-                                        + " đã có. Thiếu " + shortageQty + " ("
-                                        + skuCode + ", LOT: " + lotInfo
-                                        + ") — chờ NCC giao bù lần sau"));
-                    } else {
-                        incItem.setNote(appendNote(incItem.getNote(),
-                                "[Manager]: WAIT_BACKORDER — Chờ giao bù cho phần thiếu"));
-                    }
+                    // Chờ giao bù: giữ nguyên expectedQty, đánh dấu chờ
+                    hasWaitBackorder = true;
+                    incItem.setNote(appendNote(incItem.getNote(),
+                            "[Manager]: WAIT_BACKORDER — Chờ giao bù cho phần thiếu"));
                     break;
 
                 case "ACCEPT":
-                    // Nhận hàng thừa/ngoài phiếu: chấp nhận — giữ nguyên expectedQty, receivedQty không đổi
-                    incItem.setActionPassQty(incItem.getDamagedQty());
+                    // Nhận hàng thừa: expectedQty = receivedQty (accept all received)
+                    if (rcItem != null) {
+                        rcItem.setExpectedQty(rcItem.getReceivedQty());
+                        receivingItemRepo.save(rcItem);
+                    }
+                    incItem.setActionPassQty(incItem.getDamagedQty()); // pass the overage qty
                     incItem.setNote(appendNote(incItem.getNote(),
-                            "UNEXPECTED_ITEM".equals(incItem.getReasonCode())
-                                    ? "[Manager]: ACCEPT — Nhận hàng ngoài phiếu, nhập kho"
-                                    : "[Manager]: ACCEPT — Nhận hàng thừa, nhập kho tất cả"));
+                            "[Manager]: ACCEPT — Nhận hàng thừa, nhập kho tất cả"));
                     break;
 
                 case "RETURN":
-                    // Hoàn hàng: giảm receivedQty, giữ nguyên expectedQty (PO gốc)
+                    // Trả hàng thừa: receivedQty = expectedQty (return overage to supplier)
                     if (rcItem != null) {
-                        java.math.BigDecimal returnQty = incItem.getDamagedQty() != null
-                                ? incItem.getDamagedQty() : java.math.BigDecimal.ZERO;
-                        incItem.setActionReturnQty(returnQty);
-                        java.math.BigDecimal curReceived = rcItem.getReceivedQty() != null
-                                ? rcItem.getReceivedQty() : java.math.BigDecimal.ZERO;
-                        java.math.BigDecimal afterReturn = curReceived.subtract(returnQty);
-                        if (afterReturn.compareTo(java.math.BigDecimal.ZERO) < 0)
-                            afterReturn = java.math.BigDecimal.ZERO;
-                        rcItem.setReceivedQty(afterReturn);
+                        incItem.setActionReturnQty(incItem.getDamagedQty()); // return the overage qty
+                        rcItem.setReceivedQty(rcItem.getExpectedQty());
                         receivingItemRepo.save(rcItem);
                     }
                     incItem.setNote(appendNote(incItem.getNote(),
-                            "[Manager]: RETURN — Hoàn hàng"));
-                    break;
-
-                case "SCRAP":
-                    // Huỷ bỏ hàng hỏng
-                    if (rcItem != null) {
-                        incItem.setActionScrapQty(incItem.getDamagedQty());
-                        // Giảm receivedQty bớt phần huỷ
-                        java.math.BigDecimal newReceived = rcItem.getReceivedQty()
-                                .subtract(incItem.getDamagedQty() != null ? incItem.getDamagedQty() : java.math.BigDecimal.ZERO);
-                        if (newReceived.compareTo(java.math.BigDecimal.ZERO) < 0) newReceived = java.math.BigDecimal.ZERO;
-                        rcItem.setReceivedQty(newReceived);
-                        receivingItemRepo.save(rcItem);
-                    }
-                    incItem.setNote(appendNote(incItem.getNote(),
-                            "[Manager]: SCRAP — Huỷ bỏ hàng hỏng"));
+                            "[Manager]: RETURN — Trả hàng thừa cho nhà cung cấp"));
                     break;
 
                 default:
                     throw new IllegalArgumentException(
                             "Invalid action: " + action
-                                    + ". Must be CLOSE_SHORT, WAIT_BACKORDER, ACCEPT, RETURN, or SCRAP");
-            }
-
-            // ── Process damageAction if present (item có cả thừa/thiếu VÀ hàng hỏng) ──
-            // damageAction chỉ GHI NHẬN hàng hỏng (để trả NCC), KHÔNG giảm receivedQty.
-            // Vì main action (ACCEPT/RETURN) đã xử lý phần số lượng rồi.
-            // VD: Nhập thừa (+1) + Hoàn hỏng (-1) = cộng trừ = 0 → receivedQty giữ nguyên.
-            String damageAction = res.getDamageAction();
-            if (damageAction != null && !damageAction.isBlank()
-                    && incItem.getDamagedQty() != null
-                    && incItem.getDamagedQty().compareTo(java.math.BigDecimal.ZERO) > 0) {
-                java.math.BigDecimal dmgQty = incItem.getDamagedQty();
-                switch (damageAction.toUpperCase()) {
-                    case "RETURN":
-                        incItem.setActionReturnQty(
-                                (incItem.getActionReturnQty() != null ? incItem.getActionReturnQty() : java.math.BigDecimal.ZERO)
-                                        .add(dmgQty));
-                        incItem.setNote(appendNote(incItem.getNote(),
-                                "[Manager]: DAMAGE→RETURN — Hoàn " + dmgQty + " hàng hỏng cho NCC"));
-                        break;
-                    case "SCRAP":
-                        incItem.setActionScrapQty(
-                                (incItem.getActionScrapQty() != null ? incItem.getActionScrapQty() : java.math.BigDecimal.ZERO)
-                                        .add(dmgQty));
-                        incItem.setNote(appendNote(incItem.getNote(),
-                                "[Manager]: DAMAGE→SCRAP — Huỷ " + dmgQty + " hàng hỏng"));
-                        break;
-                    case "ACCEPT":
-                        incItem.setActionPassQty(
-                                (incItem.getActionPassQty() != null ? incItem.getActionPassQty() : java.math.BigDecimal.ZERO)
-                                        .add(dmgQty));
-                        incItem.setNote(appendNote(incItem.getNote(),
-                                "[Manager]: DAMAGE→ACCEPT — Chấp nhận " + dmgQty + " hàng hỏng, nhập kho"));
-                        break;
-                    default:
-                        log.warn("Unknown damageAction '{}' for incidentItem {}, skipping",
-                                damageAction, incItem.getIncidentItemId());
-                }
+                                    + ". Must be CLOSE_SHORT, WAIT_BACKORDER, ACCEPT, or RETURN");
             }
 
             incidentItemRepo.save(incItem);
         }
 
-        // Resolve incident and move order to SUBMITTED → QC tiếp tục
+        // Resolve incident and move order — BE-C3 FIX: chỉ chuyển SUBMITTED nếu KHÔNG có WAIT_BACKORDER
         incident.setStatus("RESOLVED");
         if (request.getNote() != null && !request.getNote().isBlank()) {
             incident.setDescription(
@@ -427,15 +362,35 @@ public class IncidentService {
         }
         incidentRepo.save(incident);
 
-        // QC đã scan xong + Manager đã xử lý incident → chuyển QC_APPROVED để tạo GRN
-        order.setStatus("QC_APPROVED");
-        order.setUpdatedAt(LocalDateTime.now());
-        log.info("Discrepancy Incident {} resolved — order moved to QC_APPROVED (receivingId={})",
-                incident.getIncidentCode(), order.getReceivingId());
+        if (hasWaitBackorder) {
+            // BE-C3 FIX: Còn item đang chờ giao bù → giữ PENDING_INCIDENT, không QC approve vội
+            // Order sẽ chuyển SUBMITTED khi supplier giao bù và Keeper scan lại
+            order.setStatus("PENDING_INCIDENT");
+            log.info("Discrepancy Incident {} resolved with WAIT_BACKORDER — order stays PENDING_INCIDENT (receivingId={})",
+                    incident.getIncidentCode(), order.getReceivingId());
+        } else {
+            // Tất cả item đã xử lý dứt điểm (CLOSE_SHORT / ACCEPT / RETURN) → cho QC tiếp tục
+            order.setStatus("SUBMITTED");
+            log.info("Discrepancy Incident {} fully resolved — order moved to SUBMITTED (receivingId={})",
+                    incident.getIncidentCode(), order.getReceivingId());
+        }
         receivingOrderRepo.save(order);
 
-        log.info("Discrepancy Incident {} resolved by managerId={}",
-                incident.getIncidentCode(), managerId);
+        // ── Realtime: notify theo trạng thái kết quả ─────────────────────────
+        if (hasWaitBackorder) {
+            // Vẫn còn chờ → notify MANAGER + KEEPER để biết
+            notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                    incident.getIncidentId(), incident.getIncidentCode(),
+                    order.getReceivingCode() + " — Chờ giao bù hàng thiếu");
+        } else {
+            // Xử lý xong → QC tiếp tục kiểm đếm
+            notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_pending_qc",
+                    order.getReceivingId(), order.getReceivingCode(),
+                    "Discrepancy đã xử lý — tiếp tục QC");
+        }
+
+        log.info("Discrepancy Incident {} resolved by managerId={}, hasWaitBackorder={}",
+                incident.getIncidentCode(), managerId, hasWaitBackorder);
         return ApiResponse.success("Discrepancy incident resolved successfully.", toResponse(incident));
     }
 
