@@ -136,9 +136,9 @@ public class ScanEventService {
             if (request.getReasonCode() != null) {
                 line.setReasonCode(request.getReasonCode());
             }
-            // [FIX] Lưu attachmentUrl — ảnh hàng hỏng khi FAIL (last photo wins)
+            // [FIX] Merge attachmentUrl — mỗi thùng FAIL có ảnh riêng, cộng dồn tất cả
             if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
-                line.setAttachmentUrl(request.getAttachmentUrl());
+                line.setAttachmentUrl(mergePhotoUrls(line.getAttachmentUrl(), request.getAttachmentUrl()));
             }
         } else {
             newQty = request.getQty();

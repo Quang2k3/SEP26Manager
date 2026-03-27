@@ -555,13 +555,14 @@ public class ReceivingOrderService {
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                 hasFailItems = true;
 
-                                // [FIX] Lấy attachmentUrl từ session line FAIL của SKU này
+                                // [FIX] Gộp TẤT CẢ attachmentUrl từ mọi line FAIL của SKU này
+                                // (mỗi thùng FAIL gửi 1 URL riêng → cần merge tất cả lại)
                                 String attachmentUrl = lines.stream()
                                         .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId)
                                                 && "FAIL".equals(l.getCondition()))
                                         .map(ScanLineItem::getAttachmentUrl)
-                                        .filter(Objects::nonNull)
-                                        .findFirst()
+                                        .filter(u -> u != null && !u.isBlank())
+                                        .findFirst() // ScanEventService đã merge vào 1 line → lấy trực tiếp
                                         .orElse(null);
 
                                 // [FIX] expectedQty = số lượng theo phiếu gốc (không phải totalScanned)
