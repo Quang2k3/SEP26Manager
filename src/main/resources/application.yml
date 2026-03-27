@@ -95,10 +95,6 @@ cloudinary:
   api-key: ${CLOUDINARY_API_KEY:884999193494315}
   api-secret: ${CLOUDINARY_API_SECRET:KEAA_2UJKOub32k398lvWdOspQU}
 
-ai:
-  provider: gemini
-  gemini:
-    api-key: ${GEMINI_API_KEY:AIzaSyABYG2ACpJwEOP8ReAcT7wUwKilM1QgTIg}    
 
 server:
   # 8082 to locally test with Postman, 8080 for deployment
