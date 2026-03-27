@@ -588,10 +588,16 @@ public class ReceivingOrderService {
 
                 if (hasFailItems) {
                         // Tạo Quality Incident
+                        // [FIX] incidentCode là nullable=false — phải set, không thì PSQLException → 500
+                        String incCode = "INC-QC-RCV-" + id + "-" + (System.currentTimeMillis() % 100_000);
+
                         IncidentEntity incident = IncidentEntity.builder()
                                 .warehouseId(order.getWarehouseId())
+                                .incidentCode(incCode)
                                 .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
                                 .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
+                                .severity("HIGH")
+                                .occurredAt(java.time.LocalDateTime.now())
                                 .description("Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)")
                                 .receivingId(id)
                                 .status("OPEN")
