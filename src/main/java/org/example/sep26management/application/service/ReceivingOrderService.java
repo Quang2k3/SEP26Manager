@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -553,6 +554,16 @@ public class ReceivingOrderService {
 
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                 hasFailItems = true;
+
+                                // [FIX] Lấy attachmentUrl từ session line FAIL của SKU này
+                                String attachmentUrl = lines.stream()
+                                        .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId)
+                                                && "FAIL".equals(l.getCondition()))
+                                        .map(ScanLineItem::getAttachmentUrl)
+                                        .filter(Objects::nonNull)
+                                        .findFirst()
+                                        .orElse(null);
+
                                 IncidentItemEntity incidentItem = IncidentItemEntity.builder()
                                         // incident reference will be set later
                                         .skuId(skuId)
@@ -560,6 +571,7 @@ public class ReceivingOrderService {
                                         .expectedQty(totalScanned) // Tổng QC quét
                                         .actualQty(passQty) // Số lượng đạt
                                         .note("Báo cáo từ QC Scanner")
+                                        .attachmentUrl(attachmentUrl) // [FIX] Ảnh bằng chứng hàng hỏng
                                         .actionPassQty(BigDecimal.ZERO)
                                         .actionReturnQty(BigDecimal.ZERO)
                                         .actionScrapQty(BigDecimal.ZERO)
