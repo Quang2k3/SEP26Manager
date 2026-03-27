@@ -136,6 +136,10 @@ public class ScanEventService {
             if (request.getReasonCode() != null) {
                 line.setReasonCode(request.getReasonCode());
             }
+            // [FIX] Lưu attachmentUrl — ảnh hàng hỏng khi FAIL (last photo wins)
+            if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
+                line.setAttachmentUrl(request.getAttachmentUrl());
+            }
         } else {
             newQty = request.getQty();
             lines.add(ScanLineItem.builder()
@@ -146,6 +150,8 @@ public class ScanEventService {
                     .qty(newQty)
                     .condition(condition)
                     .reasonCode(request.getReasonCode())
+                    // [FIX] Lưu attachmentUrl vào session line — thiếu dòng này là mất ảnh
+                    .attachmentUrl(request.getAttachmentUrl())
                     .build());
         }
 
@@ -286,9 +292,9 @@ public class ScanEventService {
         java.math.BigDecimal one = java.math.BigDecimal.ONE;
         if ("FAIL".equals(condition)) {
             taskItem.setQcFailQty(safeQty(taskItem.getQcFailQty()).add(one));
-            // Lưu ảnh bằng chứng nếu có
+            // [MULTI-PHOTO] Merge JSON array ảnh — không ghi đè, cộng dồn
             if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
-                taskItem.setQcAttachmentUrl(request.getAttachmentUrl());
+                taskItem.setQcAttachmentUrl(mergePhotoUrls(taskItem.getQcAttachmentUrl(), request.getAttachmentUrl()));
             }
             if (reasonCode != null && !reasonCode.isBlank()) {
                 taskItem.setQcNote(reasonCode);
@@ -373,5 +379,31 @@ public class ScanEventService {
     /** Null-safe BigDecimal helper */
     private java.math.BigDecimal safeQty(java.math.BigDecimal v) {
         return v != null ? v : java.math.BigDecimal.ZERO;
+    }
+
+    /**
+     * [MULTI-PHOTO] Merge ảnh: existing + incoming → JSON array string (tối đa 5, không trùng).
+     * Tương thích ngược: existing là URL đơn (row cũ) → wrap thành ["url"].
+     */
+    private String mergePhotoUrls(String existing, String incoming) {
+        java.util.List<String> urls = new java.util.ArrayList<>();
+        for (String src : new String[]{existing, incoming}) {
+            if (src == null || src.isBlank()) continue;
+            if (src.trim().startsWith("[")) {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                    java.util.List<String> parsed = om.readValue(src, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>(){});
+                    urls.addAll(parsed);
+                } catch (Exception e) { urls.add(src); }
+            } else {
+                urls.add(src);
+            }
+        }
+        java.util.List<String> deduped = urls.stream().distinct().limit(5).collect(java.util.stream.Collectors.toList());
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(deduped);
+        } catch (Exception e) {
+            return deduped.isEmpty() ? null : deduped.get(0);
+        }
     }
 }

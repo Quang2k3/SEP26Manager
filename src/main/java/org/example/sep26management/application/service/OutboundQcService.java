@@ -109,9 +109,9 @@ public class OutboundQcService {
         item.setQcScannedAt(LocalDateTime.now());
         if ("FAIL".equals(request.getResult())) {
             item.setQcNote(request.getReason());
-            // [V20] Lưu ảnh hàng hỏng nếu có
+            // [MULTI-PHOTO] Merge JSON array — không ghi đè, cộng dồn ảnh
             if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
-                item.setQcAttachmentUrl(request.getAttachmentUrl());
+                item.setQcAttachmentUrl(mergePhotoUrls(item.getQcAttachmentUrl(), request.getAttachmentUrl()));
             }
         } else {
             item.setQcNote(null);
@@ -151,6 +151,46 @@ public class OutboundQcService {
     }
     private java.math.BigDecimal safeBD(java.math.BigDecimal v) {
         return v != null ? v : java.math.BigDecimal.ZERO;
+    }
+
+    /**
+     * [MULTI-PHOTO] Merge danh sách ảnh: existing (JSON array hoặc URL đơn) + incoming (JSON array hoặc URL đơn).
+     * Kết quả luôn là JSON array string: ["url1","url2",...] (tối đa 5 ảnh).
+     * Tương thích ngược: nếu existing là URL đơn (row cũ) thì wrap thành ["url"].
+     */
+    private String mergePhotoUrls(String existing, String incoming) {
+        java.util.List<String> urls = new java.util.ArrayList<>();
+        // Parse existing
+        if (existing != null && !existing.isBlank()) {
+            if (existing.trim().startsWith("[")) {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                    java.util.List<String> parsed = om.readValue(existing, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>(){});
+                    urls.addAll(parsed);
+                } catch (Exception e) { urls.add(existing); } // fallback: treat as plain URL
+            } else {
+                urls.add(existing);
+            }
+        }
+        // Parse incoming
+        if (incoming != null && !incoming.isBlank()) {
+            if (incoming.trim().startsWith("[")) {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                    java.util.List<String> parsed = om.readValue(incoming, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>(){});
+                    urls.addAll(parsed);
+                } catch (Exception e) { urls.add(incoming); }
+            } else {
+                urls.add(incoming);
+            }
+        }
+        // Giới hạn 5 ảnh, loại trùng
+        java.util.List<String> deduped = urls.stream().distinct().limit(5).collect(java.util.stream.Collectors.toList());
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(deduped);
+        } catch (Exception e) {
+            return deduped.isEmpty() ? null : deduped.get(0);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
