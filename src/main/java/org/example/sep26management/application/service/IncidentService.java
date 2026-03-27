@@ -96,7 +96,19 @@ public class IncidentService {
     public ApiResponse<PageResponse<IncidentResponse>> listIncidents(String status,
                                                                      org.example.sep26management.application.enums.IncidentCategory category,
                                                                      Long soId,
+                                                                     Long receivingId,
                                                                      int page, int size) {
+        // [FIX] receivingId filter — inbound QC incidents
+        if (receivingId != null) {
+            List<IncidentResponse> list = incidentRepo
+                    .findByReceivingIdOrderByCreatedAtDesc(receivingId)
+                    .stream().map(this::toResponse).collect(Collectors.toList());
+            PageResponse<IncidentResponse> p = PageResponse.<IncidentResponse>builder()
+                    .content(list).page(0).size(list.size())
+                    .totalElements(list.size()).totalPages(1).last(true).build();
+            return ApiResponse.success("OK", p);
+        }
+
         // [BUG-FIX] Khi soId != null: chỉ trả incidents của SO đó.
         // Trước đây soId không được xử lý → GET /incidents?soId=X trả về tất cả
         // → banner ON_HOLD hiển thị incidents của đơn khác, không đúng đơn.
