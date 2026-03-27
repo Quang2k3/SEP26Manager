@@ -263,26 +263,62 @@ public class IncidentService {
         }
         incidentRepo.save(incident);
 
-        // [FIX] Update receiving order status → SUBMITTED (để QC tiếp tục)
-        // Chỉ áp dụng khi incident có receivingId (inbound flow)
+        // [FIX] Update receiving order status theo action của Manager
+        // Chỉ áp dụng khi incident có receivingId (inbound DAMAGE từ QC scanner)
         if (incident.getReceivingId() != null) {
+            // Xác định action chủ đạo từ resolutions (lấy action đầu tiên)
+            String dominantAction = request.getResolutions() != null && !request.getResolutions().isEmpty()
+                    ? request.getResolutions().get(0).getAction().toUpperCase()
+                    : "ACCEPT";
+
+            // Mapping: action → trạng thái đơn
+            // RETURN  → REJECTED  (hoàn hàng về NCC, đơn kết thúc)
+            // SCRAP   → SUBMITTED (huỷ hàng hỏng, tiếp tục QC phần còn lại)
+            // ACCEPT/PASS → SUBMITTED (chấp nhận, tiếp tục luồng QC bình thường)
+            String newOrderStatus;
+            String wsMessage;
+            switch (dominantAction) {
+                case "RETURN":
+                    newOrderStatus = "REJECTED";
+                    wsMessage = "Hàng hỏng hoàn về NCC — đơn bị từ chối";
+                    break;
+                case "SCRAP":
+                    newOrderStatus = "SUBMITTED";
+                    wsMessage = "Hàng hỏng đã huỷ — đơn tiếp tục QC";
+                    break;
+                default: // ACCEPT, PASS
+                    newOrderStatus = "SUBMITTED";
+                    wsMessage = "Hàng hỏng được chấp nhận — đơn tiếp tục QC";
+                    break;
+            }
+
+            final String finalStatus = newOrderStatus;
+            final String finalMsg    = wsMessage;
             receivingOrderRepo.findById(incident.getReceivingId()).ifPresent(order -> {
                 if ("PENDING_INCIDENT".equals(order.getStatus())) {
-                    order.setStatus("SUBMITTED");
+                    order.setStatus(finalStatus);
                     order.setUpdatedAt(java.time.LocalDateTime.now());
+                    if ("REJECTED".equals(finalStatus)) {
+                        order.setRejectedBy(managerId);
+                        order.setRejectedAt(java.time.LocalDateTime.now());
+                        order.setRejectReason("Hàng hỏng QC — Manager quyết định hoàn hàng. Incident: "
+                                + incident.getIncidentCode());
+                    }
                     receivingOrderRepo.save(order);
-                    log.info("Receiving order {} → SUBMITTED after incident {} resolved",
-                            order.getReceivingCode(), incident.getIncidentCode());
+                    log.info("Receiving order {} → {} after incident {} resolved (action={})",
+                            order.getReceivingCode(), finalStatus, incident.getIncidentCode(), dominantAction);
                 }
+                // [FIX] Notify với event type "receiving_updated" để tất cả role refresh
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_updated",
+                        incident.getIncidentId(), incident.getIncidentCode(), finalMsg);
             });
+        } else {
+            // Không có receivingId (gate check incident) — chỉ notify
+            notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_updated",
+                    incident.getIncidentId(), incident.getIncidentCode(), "Incident đã xử lý xong");
         }
 
         log.info("Incident {} resolved by managerId={}", incident.getIncidentCode(), managerId);
-
-        // [FIX] Notify với event type "receiving_updated" để GateCheck + inbound pages refresh
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_updated",
-                incident.getIncidentId(), incident.getIncidentCode(),
-                "Incident đã xử lý — đơn nhận hàng tiếp tục QC");
 
         return ApiResponse.success("Incident resolved successfully.", toResponse(incident));
     }
