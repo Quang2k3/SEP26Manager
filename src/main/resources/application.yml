@@ -69,7 +69,7 @@ spring:
 app:
   default-password: Warehouse@123
 
-# JWT Configuration  
+# JWT Configuration
 jwt:
   secret: 9xUc3TNqLOYTH91rKxxXsjkNGaLwwGDXmm6BJiC+9iuNFuAHrWB4XLRcxTADA4mBwdm1Gv+YlQs4dXCOeY1H2w==
   expiration-ms: 28800000              # 8 hours (default session, no rememberMe)
@@ -95,6 +95,10 @@ cloudinary:
   api-key: ${CLOUDINARY_API_KEY:884999193494315}
   api-secret: ${CLOUDINARY_API_SECRET:KEAA_2UJKOub32k398lvWdOspQU}
 
+ai:
+  provider: gemini
+  gemini:
+    api-key: ${GEMINI_API_KEY:AIzaSyABYG2ACpJwEOP8ReAcT7wUwKilM1QgTIg}    
 
 server:
   # 8082 to locally test with Postman, 8080 for deployment
