@@ -263,11 +263,26 @@ public class IncidentService {
         }
         incidentRepo.save(incident);
 
+        // [FIX] Update receiving order status → SUBMITTED (để QC tiếp tục)
+        // Chỉ áp dụng khi incident có receivingId (inbound flow)
+        if (incident.getReceivingId() != null) {
+            receivingOrderRepo.findById(incident.getReceivingId()).ifPresent(order -> {
+                if ("PENDING_INCIDENT".equals(order.getStatus())) {
+                    order.setStatus("SUBMITTED");
+                    order.setUpdatedAt(java.time.LocalDateTime.now());
+                    receivingOrderRepo.save(order);
+                    log.info("Receiving order {} → SUBMITTED after incident {} resolved",
+                            order.getReceivingCode(), incident.getIncidentCode());
+                }
+            });
+        }
+
         log.info("Incident {} resolved by managerId={}", incident.getIncidentCode(), managerId);
 
-        // ── Realtime: notify KEEPER incident đã xử lý xong ───────────────────
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
-                incident.getIncidentId(), incident.getIncidentCode(), "Incident đã được xử lý xong");
+        // [FIX] Notify với event type "receiving_updated" để GateCheck + inbound pages refresh
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_updated",
+                incident.getIncidentId(), incident.getIncidentCode(),
+                "Incident đã xử lý — đơn nhận hàng tiếp tục QC");
 
         return ApiResponse.success("Incident resolved successfully.", toResponse(incident));
     }
