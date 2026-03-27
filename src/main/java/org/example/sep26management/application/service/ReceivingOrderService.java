@@ -570,6 +570,7 @@ public class ReceivingOrderService {
                                         .damagedQty(failQty) // Hàng lỗi QC
                                         .expectedQty(totalScanned) // Tổng QC quét
                                         .actualQty(passQty) // Số lượng đạt
+                                        .reasonCode("DAMAGE") // [FIX] set reasonCode để FE render dropdown
                                         .note("Báo cáo từ QC Scanner")
                                         .attachmentUrl(attachmentUrl) // [FIX] Ảnh bằng chứng hàng hỏng
                                         .actionPassQty(BigDecimal.ZERO)
