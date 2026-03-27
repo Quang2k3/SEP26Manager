@@ -564,15 +564,18 @@ public class ReceivingOrderService {
                                         .findFirst()
                                         .orElse(null);
 
+                                // [FIX] expectedQty = số lượng theo phiếu gốc (không phải totalScanned)
+                                // → FE mới tính được THỪA/THIẾU đúng
+                                BigDecimal originalExpectedQty = dbItem.getExpectedQty();
+
                                 IncidentItemEntity incidentItem = IncidentItemEntity.builder()
-                                        // incident reference will be set later
                                         .skuId(skuId)
-                                        .damagedQty(failQty) // Hàng lỗi QC
-                                        .expectedQty(totalScanned) // Tổng QC quét
-                                        .actualQty(passQty) // Số lượng đạt
-                                        .reasonCode("DAMAGE") // [FIX] set reasonCode để FE render dropdown
+                                        .damagedQty(failQty)          // Hàng hỏng
+                                        .expectedQty(originalExpectedQty) // SL giấy tờ gốc
+                                        .actualQty(totalScanned)          // SL QC thực tế quét (pass + fail)
+                                        .reasonCode("DAMAGE")
                                         .note("Báo cáo từ QC Scanner")
-                                        .attachmentUrl(attachmentUrl) // [FIX] Ảnh bằng chứng hàng hỏng
+                                        .attachmentUrl(attachmentUrl)
                                         .actionPassQty(BigDecimal.ZERO)
                                         .actionReturnQty(BigDecimal.ZERO)
                                         .actionScrapQty(BigDecimal.ZERO)
