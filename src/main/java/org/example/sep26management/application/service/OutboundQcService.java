@@ -108,12 +108,14 @@ public class OutboundQcService {
         item.setQcResult(request.getResult());
         item.setQcScannedAt(LocalDateTime.now());
         if ("FAIL".equals(request.getResult())) {
+            item.setQcFailQty(safeBD(item.getQcFailQty()).add(BigDecimal.ONE));
             item.setQcNote(request.getReason());
             // [MULTI-PHOTO] Merge JSON array — không ghi đè, cộng dồn ảnh
             if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
                 item.setQcAttachmentUrl(mergePhotoUrls(item.getQcAttachmentUrl(), request.getAttachmentUrl()));
             }
         } else {
+            item.setQcPassQty(safeBD(item.getQcPassQty()).add(BigDecimal.ONE));
             item.setQcNote(null);
         }
         pickingTaskItemRepository.save(item);
