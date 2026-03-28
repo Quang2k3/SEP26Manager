@@ -810,6 +810,7 @@ public class ReceivingOrderService {
 
                         hasIssues = true;
 
+                        // 1. Tạo Incident Item cho lỗi Hàng ngoài phiếu
                         IncidentItemEntity extraItem = IncidentItemEntity.builder()
                                 .skuId(skuId)
                                 .damagedQty(failQty)          // Hàng hỏng (nếu có)
@@ -823,7 +824,19 @@ public class ReceivingOrderService {
                                 .build();
                         incidentItems.add(extraItem);
 
-                        log.info("Extra SKU detected in QC scan: skuId={}, qty={}", skuId, totalExtra);
+                        // 2. Tạo Receiving Item để hiển thị trên web (SL dự kiến = 0, SL thực nhận = tổng quét)
+                        ReceivingItemEntity newRcItem = ReceivingItemEntity.builder()
+                                .receivingOrder(order)
+                                .skuId(skuId)
+                                .expectedQty(BigDecimal.ZERO)
+                                .receivedQty(totalExtra)
+                                .qcRequired(true)
+                                .condition(failQty.compareTo(BigDecimal.ZERO) > 0 ? "FAIL" : "PASS")
+                                .reasonCode(failQty.compareTo(BigDecimal.ZERO) > 0 ? "DAMAGE" : null)
+                                .build();
+                        receivingItemRepo.save(newRcItem);
+
+                        log.info("Extra SKU detected in QC scan and added to receiving items: skuId={}, qty={}", skuId, totalExtra);
                 }
 
                 if (hasIssues) {
