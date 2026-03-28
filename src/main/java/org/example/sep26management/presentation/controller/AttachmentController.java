@@ -76,6 +76,68 @@ public class AttachmentController {
     }
 
     /**
+     * UPLOAD ẢNH TỪ ĐIỆN THOẠI LÊN CLOUDINARY (TRẢ VỀ CHO SESSION)
+     * POST /v1/attachments/session/{uuid}/upload
+     * Body: multipart/form-data, field name = "photo"
+     */
+    @PostMapping("/session/{uuid}/upload")
+    public ResponseEntity<ApiResponse<Void>> uploadSessionPhoto(
+            @PathVariable String uuid,
+            @RequestParam("photo") MultipartFile photo) {
+            
+        // 1. Verify session exists
+        String currentUrl = uploadSessionService.getSessionUrl(uuid);
+        if (currentUrl == null) {
+            throw new BusinessException("Mã QR không hợp lệ hoặc đã hết phiên.");
+        }
+
+        // 2. Upload to Cloudinary
+        if (photo == null || photo.isEmpty())
+            throw new BusinessException("Vui lòng chọn ảnh.");
+        if (photo.getSize() > MAX_SIZE)
+            throw new BusinessException("Ảnh quá lớn. Tối đa 15MB.");
+
+        String filename = photo.getOriginalFilename() != null
+                ? photo.getOriginalFilename().toLowerCase() : "";
+        String ext = filename.contains(".")
+                ? filename.substring(filename.lastIndexOf('.') + 1) : "";
+        if (!ALLOWED.contains(ext))
+            throw new BusinessException("Chỉ chấp nhận JPG, PNG, WEBP, HEIC.");
+
+        try {
+            String publicId = "damage_photos/session_" + uuid + "_" + System.currentTimeMillis();
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> result = cloudinary.uploader().upload(
+                    photo.getBytes(),
+                    ObjectUtils.asMap(
+                            "public_id",     publicId,
+                            "resource_type", "image",
+                            "overwrite",     false,
+                            "quality",       "auto:good",
+                            "fetch_format",  "auto"
+                    )
+            );
+
+            String url = (String) result.get("secure_url");
+            if (url == null) throw new BusinessException("Upload thất bại — Cloudinary không trả URL.");
+
+            log.info("Session {} uploaded photo: {}", uuid, url);
+
+            // 3. Complete session directly
+            uploadSessionService.completeSession(uuid, url);
+
+            return ResponseEntity.ok(ApiResponse.success("Upload và đồng bộ thành công.", null));
+
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Session {} upload failed: {}", uuid, e.getMessage(), e);
+            throw new BusinessException("Không thể upload ảnh: " + e.getMessage());
+        }
+    }
+
+    /**
      * POST /v1/attachments/upload
      * Body: multipart/form-data, field name = "photo"
      * Response: { success: true, data: { url: "https://..." } }
