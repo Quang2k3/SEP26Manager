@@ -348,7 +348,7 @@ public class OutboundQcService {
                     .skuId(item.getSkuId())
                     .damagedQty(failQty)          // FIX: số unit thực FAIL
                     .expectedQty(item.getRequiredQty())
-                    .actualQty(passQty)            // FIX: số unit PASS
+                    .actualQty(passQty.add(failQty))            // FIX: số unit PASS + FAIL (tất cả hàng đã quét)
                     .reasonCode("DAMAGE")
                     .note(noteStr)
                     .attachmentUrl(item.getQcAttachmentUrl())
