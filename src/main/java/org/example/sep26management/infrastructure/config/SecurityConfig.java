@@ -86,7 +86,8 @@ public class SecurityConfig {
                                 "/v1/health/**",
                                 "/v1/outbound/sales-orders/*/signed-note",      // QR upload outbound — no auth needed
                                 "/v1/outbound/sales-orders/*/pick-signed-note",  // QR upload pick note — no auth needed
-                                "/v1/putaway-tasks/*/signed-note"                // QR upload putaway — no auth needed
+                                "/v1/putaway-tasks/*/signed-note",               // QR upload putaway — no auth needed
+                                "/v1/attachments/session/**"                     // QR mobile upload — no auth needed
                         )
                         .permitAll()
                         // Scan events — requires KEEPER or QC role (iPhone scanner)
