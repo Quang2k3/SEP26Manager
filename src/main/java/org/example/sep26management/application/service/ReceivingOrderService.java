@@ -741,8 +741,13 @@ public class ReceivingOrderService {
                 }
 
                 // ── STEP 1: QC khớp Keeper → kiểm tra FAIL items ──
-                boolean hasFailItems = false;
+                boolean hasIssues = false;
                 List<IncidentItemEntity> incidentItems = new ArrayList<>();
+
+                // Collect skuIds đã có trên phiếu để phát hiện hàng ngoài phiếu
+                java.util.Set<Long> orderSkuIds = dbItems.stream()
+                        .map(ReceivingItemEntity::getSkuId)
+                        .collect(Collectors.toSet());
 
                 for (ReceivingItemEntity dbItem : dbItems) {
                         Long skuId = dbItem.getSkuId();
@@ -756,27 +761,24 @@ public class ReceivingOrderService {
                         dbItem.setReceivedQty(totalScanned);
 
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
-                                hasFailItems = true;
+                                hasIssues = true;
 
-                                // [FIX] Gộp TẤT CẢ attachmentUrl từ mọi line FAIL của SKU này
-                                // (mỗi thùng FAIL gửi 1 URL riêng → cần merge tất cả lại)
+                                // Gộp attachmentUrl từ mọi line FAIL của SKU này
                                 String attachmentUrl = lines.stream()
                                         .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId)
                                                 && "FAIL".equals(l.getCondition()))
                                         .map(ScanLineItem::getAttachmentUrl)
                                         .filter(u -> u != null && !u.isBlank())
-                                        .findFirst() // ScanEventService đã merge vào 1 line → lấy trực tiếp
+                                        .findFirst()
                                         .orElse(null);
 
-                                // [FIX] expectedQty = số lượng theo phiếu gốc (không phải totalScanned)
-                                // → FE mới tính được THỪA/THIẾU đúng
                                 BigDecimal originalExpectedQty = dbItem.getExpectedQty();
 
                                 IncidentItemEntity incidentItem = IncidentItemEntity.builder()
                                         .skuId(skuId)
-                                        .damagedQty(failQty)          // Hàng hỏng
-                                        .expectedQty(originalExpectedQty) // SL giấy tờ gốc
-                                        .actualQty(totalScanned)          // SL QC thực tế quét (pass + fail)
+                                        .damagedQty(failQty)              // Hàng hỏng
+                                        .expectedQty(originalExpectedQty)  // SL giấy tờ gốc
+                                        .actualQty(totalScanned)           // SL QC thực tế (pass + fail)
                                         .reasonCode("DAMAGE")
                                         .note("Báo cáo từ QC Scanner")
                                         .attachmentUrl(attachmentUrl)
@@ -794,10 +796,46 @@ public class ReceivingOrderService {
                         receivingItemRepo.save(dbItem);
                 }
 
-                if (hasFailItems) {
+                // ── STEP 2: Phát hiện hàng ngoài phiếu (QC quét SKU không có trên đơn) ──
+                for (Map.Entry<Long, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
+                        Long skuId = entry.getKey();
+                        if (orderSkuIds.contains(skuId)) continue; // SKU đã trên phiếu → skip
+
+                        Map<String, BigDecimal> skuScanData = entry.getValue();
+                        BigDecimal passQty = skuScanData.getOrDefault("PASS", BigDecimal.ZERO);
+                        BigDecimal failQty = skuScanData.getOrDefault("FAIL", BigDecimal.ZERO);
+                        BigDecimal totalExtra = passQty.add(failQty);
+
+                        if (totalExtra.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+                        hasIssues = true;
+
+                        IncidentItemEntity extraItem = IncidentItemEntity.builder()
+                                .skuId(skuId)
+                                .damagedQty(failQty)          // Hàng hỏng (nếu có)
+                                .expectedQty(BigDecimal.ZERO)  // Không có trên phiếu
+                                .actualQty(totalExtra)         // Tổng QC quét
+                                .reasonCode("UNEXPECTED_ITEM")
+                                .note("Hàng ngoài phiếu — QC quét được " + totalExtra + " (pass=" + passQty + ", fail=" + failQty + ")")
+                                .actionPassQty(BigDecimal.ZERO)
+                                .actionReturnQty(BigDecimal.ZERO)
+                                .actionScrapQty(BigDecimal.ZERO)
+                                .build();
+                        incidentItems.add(extraItem);
+
+                        log.info("Extra SKU detected in QC scan: skuId={}, qty={}", skuId, totalExtra);
+                }
+
+                if (hasIssues) {
                         // Tạo Quality Incident
                         // [FIX] incidentCode là nullable=false — phải set, không thì PSQLException → 500
                         String incCode = "INC-QC-RCV-" + id + "-" + (System.currentTimeMillis() % 100_000);
+
+                        long damageCount = incidentItems.stream().filter(i -> "DAMAGE".equals(i.getReasonCode())).count();
+                        long extraCount  = incidentItems.stream().filter(i -> "UNEXPECTED_ITEM".equals(i.getReasonCode())).count();
+                        String incDesc = "Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)"
+                                + (damageCount > 0 ? " — " + damageCount + " SKU hỏng" : "")
+                                + (extraCount > 0 ? " — " + extraCount + " SKU ngoài phiếu" : "");
 
                         IncidentEntity incident = IncidentEntity.builder()
                                 .warehouseId(order.getWarehouseId())
@@ -806,7 +844,7 @@ public class ReceivingOrderService {
                                 .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
                                 .severity("HIGH")
                                 .occurredAt(java.time.LocalDateTime.now())
-                                .description("Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)")
+                                .description(incDesc)
                                 .receivingId(id)
                                 .status("OPEN")
                                 .reportedBy(qcUserId)
@@ -882,7 +920,7 @@ public class ReceivingOrderService {
                 return ApiResponse.success("QC scan session submitted successfully", Map.of(
                         "receivingId", order.getReceivingId(),
                         "status", order.getStatus(),
-                        "hasFailItems", hasFailItems));
+                        "hasIssues", hasIssues));
         }
 
         // ─── Approve (deprecated — đã chuyển sang GRN flow) ──────────────────────────

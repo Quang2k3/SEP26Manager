@@ -272,9 +272,9 @@ public class IncidentService {
                     : "ACCEPT";
 
             // Mapping: action → trạng thái đơn
-            // RETURN  → REJECTED  (hoàn hàng về NCC, đơn kết thúc)
-            // SCRAP   → SUBMITTED (huỷ hàng hỏng, tiếp tục QC phần còn lại)
-            // ACCEPT/PASS → SUBMITTED (chấp nhận, tiếp tục luồng QC bình thường)
+            // RETURN  → REJECTED     (hoàn hàng về NCC, đơn kết thúc)
+            // SCRAP   → QC_APPROVED  (huỷ hàng hỏng, tiếp tục tạo GRN)
+            // ACCEPT  → QC_APPROVED  (chấp nhận, tiếp tục tạo GRN)
             String newOrderStatus;
             String wsMessage;
             switch (dominantAction) {
@@ -283,12 +283,12 @@ public class IncidentService {
                     wsMessage = "Hàng hỏng hoàn về NCC — đơn bị từ chối";
                     break;
                 case "SCRAP":
-                    newOrderStatus = "SUBMITTED";
-                    wsMessage = "Hàng hỏng đã huỷ — đơn tiếp tục QC";
+                    newOrderStatus = "QC_APPROVED";
+                    wsMessage = "Hàng hỏng đã huỷ — đơn chuyển tạo GRN";
                     break;
                 default: // ACCEPT, PASS
-                    newOrderStatus = "SUBMITTED";
-                    wsMessage = "Hàng hỏng được chấp nhận — đơn tiếp tục QC";
+                    newOrderStatus = "QC_APPROVED";
+                    wsMessage = "Hàng hỏng được chấp nhận — đơn chuyển tạo GRN";
                     break;
             }
 
