@@ -10,6 +10,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 import java.util.Map;
 import java.util.Set;
@@ -24,6 +27,7 @@ import java.util.Set;
 @RequestMapping("/v1/attachments")
 @RequiredArgsConstructor
 @Slf4j
+@Tag(name = "Attachment & Photo API", description = "Các API dùng để tải ảnh bằng chứng lên Cloudinary và đồng bộ ảnh qua QR code")
 public class AttachmentController {
 
     private final Cloudinary cloudinary;
@@ -36,6 +40,7 @@ public class AttachmentController {
      * TẠO SESSION UPLOAD ẢNH QUA QR CODE
      * GET /v1/attachments/session
      */
+    @Operation(summary = "Tạo phiên QR Code", description = "Sinh ra một UUID tạm thời (sống 15 phút) dùng để quét mã QR bằng điện thoại.")
     @GetMapping("/session")
     public ResponseEntity<ApiResponse<Map<String, String>>> createSession() {
         String uuid = uploadSessionService.createSession();
@@ -46,9 +51,10 @@ public class AttachmentController {
      * HOÀN TẤT UPLOAD ẢNH TỪ ĐIỆN THOẠI
      * POST /v1/attachments/session/{uuid}
      */
+    @Operation(summary = "Hoàn tất ghép nối phiên QR", description = "Cập nhật URL ảnh đã upload trên điện thoại vào UUID tương ứng để PC tải về.")
     @PostMapping("/session/{uuid}")
     public ResponseEntity<ApiResponse<Void>> completeSession(
-            @PathVariable String uuid,
+            @Parameter(description = "UUID của mã QR") @PathVariable String uuid,
             @RequestBody Map<String, String> body) {
         String url = body.get("url");
         if (url == null || url.isEmpty()) {
@@ -62,9 +68,10 @@ public class AttachmentController {
      * PC POLLING LẤY ẢNH TỪ ĐIỆN THOẠI
      * GET /v1/attachments/session/{uuid}
      */
+    @Operation(summary = "Lấy URL ảnh báo cáo", description = "PC gọi (pollling) liên tục mỗi 3s để kiểm tra xem tải ảnh bằng điện thoại qua UUID này đã thành công chưa.")
     @GetMapping("/session/{uuid}")
     public ResponseEntity<ApiResponse<Map<String, String>>> getSessionPhoto(
-            @PathVariable String uuid) {
+            @Parameter(description = "UUID của mã QR") @PathVariable String uuid) {
         String url = uploadSessionService.getSessionUrl(uuid);
         if (url == null) {
             throw new BusinessException("Session upload không tồn tại hoặc đã hết hạn.");
@@ -80,10 +87,11 @@ public class AttachmentController {
      * POST /v1/attachments/session/{uuid}/upload
      * Body: multipart/form-data, field name = "photo"
      */
+    @Operation(summary = "Upload ảnh ẩn danh bằng điện thoại", description = "Tải ảnh từ Camera điện thoại siêu mượt bằng File Part nén vào public UUID (không yêu cầu JWT đăng nhập).")
     @PostMapping("/session/{uuid}/upload")
     public ResponseEntity<ApiResponse<Void>> uploadSessionPhoto(
-            @PathVariable String uuid,
-            @RequestParam("photo") MultipartFile photo) {
+            @Parameter(description = "UUID của mã QR đang quét") @PathVariable String uuid,
+            @Parameter(description = "File ảnh bằng chứng (multipart/form-data)") @RequestParam("photo") MultipartFile photo) {
             
         // 1. Verify session exists
         String currentUrl = uploadSessionService.getSessionUrl(uuid);
@@ -142,9 +150,10 @@ public class AttachmentController {
      * Body: multipart/form-data, field name = "photo"
      * Response: { success: true, data: { url: "https://..." } }
      */
+    @Operation(summary = "Upload ảnh bằng chứng", description = "Tải ảnh từ PC/Server trực tiếp lên Cloudinary (bắt buộc JWT auth là QL kho hoặc Bảo vệ).")
     @PostMapping("/upload")
     public ResponseEntity<ApiResponse<Map<String, String>>> upload(
-            @RequestParam("photo") MultipartFile photo,
+            @Parameter(description = "File ảnh bằng chứng (multipart/form-data)") @RequestParam("photo") MultipartFile photo,
             Authentication auth) {
 
         if (photo == null || photo.isEmpty())
