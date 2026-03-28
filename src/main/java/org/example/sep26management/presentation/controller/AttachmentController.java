@@ -27,9 +27,53 @@ import java.util.Set;
 public class AttachmentController {
 
     private final Cloudinary cloudinary;
+    private final org.example.sep26management.application.service.UploadSessionService uploadSessionService;
 
     private static final long   MAX_SIZE = 15L * 1024 * 1024; // 15 MB
     private static final Set<String> ALLOWED = Set.of("jpg", "jpeg", "png", "webp", "heic", "heif");
+
+    /**
+     * TẠO SESSION UPLOAD ẢNH QUA QR CODE
+     * GET /v1/attachments/session
+     */
+    @GetMapping("/session")
+    public ResponseEntity<ApiResponse<Map<String, String>>> createSession() {
+        String uuid = uploadSessionService.createSession();
+        return ResponseEntity.ok(ApiResponse.success("Session created", Map.of("uuid", uuid)));
+    }
+
+    /**
+     * HOÀN TẤT UPLOAD ẢNH TỪ ĐIỆN THOẠI
+     * POST /v1/attachments/session/{uuid}
+     */
+    @PostMapping("/session/{uuid}")
+    public ResponseEntity<ApiResponse<Void>> completeSession(
+            @PathVariable String uuid,
+            @RequestBody Map<String, String> body) {
+        String url = body.get("url");
+        if (url == null || url.isEmpty()) {
+            throw new BusinessException("Vui lòng cung cấp URL ảnh.");
+        }
+        uploadSessionService.completeSession(uuid, url);
+        return ResponseEntity.ok(ApiResponse.success("Đã đồng bộ ảnh thành công", null));
+    }
+
+    /**
+     * PC POLLING LẤY ẢNH TỪ ĐIỆN THOẠI
+     * GET /v1/attachments/session/{uuid}
+     */
+    @GetMapping("/session/{uuid}")
+    public ResponseEntity<ApiResponse<Map<String, String>>> getSessionPhoto(
+            @PathVariable String uuid) {
+        String url = uploadSessionService.getSessionUrl(uuid);
+        if (url == null) {
+            throw new BusinessException("Session upload không tồn tại hoặc đã hết hạn.");
+        }
+        if (url.isEmpty()) {
+            return ResponseEntity.ok(ApiResponse.success("Đang chờ ảnh từ điện thoại...", Map.of()));
+        }
+        return ResponseEntity.ok(ApiResponse.success("Đã có ảnh", Map.of("url", url)));
+    }
 
     /**
      * POST /v1/attachments/upload
