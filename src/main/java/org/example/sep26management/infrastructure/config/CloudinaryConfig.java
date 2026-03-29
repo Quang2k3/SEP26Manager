@@ -22,21 +22,23 @@ public class CloudinaryConfig {
 
     @Bean
     public Cloudinary cloudinary() {
-        // Guard: nếu env var được inject là empty string (không phải null),
-        // Spring KHÔNG trigger fallback trong @Value → dùng hardcoded fallback
-        String resolvedCloudName   = (cloudName   == null || cloudName.isBlank())   ? "dzti1zycp"               : cloudName;
-        String resolvedApiKey      = (apiKey      == null || apiKey.isBlank())      ? "796479776192876"          : apiKey;
-        String resolvedApiSecret   = (apiSecret   == null || apiSecret.isBlank())   ? "ab7zzKgk4UcD7gYwPyzoZMK5vsM" : apiSecret;
+        // Không dùng Cloudinary nếu chưa cấu hình env vars
+        if (cloudName == null || cloudName.isBlank()
+                || apiKey == null || apiKey.isBlank()
+                || apiSecret == null || apiSecret.isBlank()) {
+            log.warn("Cloudinary is NOT configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET. Avatar upload will not work.");
+            return null;
+        }
 
         log.info("Cloudinary init: cloud_name='{}', api_key='{}***', api_secret_set={}",
-                resolvedCloudName,
-                resolvedApiKey.length() > 6 ? resolvedApiKey.substring(0, 6) : resolvedApiKey,
-                !resolvedApiSecret.isBlank());
+                cloudName,
+                apiKey.length() > 6 ? apiKey.substring(0, 6) : apiKey,
+                !apiSecret.isBlank());
 
         return new Cloudinary(ObjectUtils.asMap(
-                "cloud_name", resolvedCloudName,
-                "api_key",    resolvedApiKey,
-                "api_secret", resolvedApiSecret,
+                "cloud_name", cloudName,
+                "api_key",    apiKey,
+                "api_secret", apiSecret,
                 "secure",     true
         ));
     }

@@ -6,9 +6,9 @@ spring:
     active: dev
 
   datasource:
-    url: jdbc:postgresql://100.85.5.67:5432/SEP26WMS
-    username: postgres
-    password: 123
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/SEP26WMS}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
     
     driver-class-name: org.postgresql.Driver
     hikari:
@@ -51,8 +51,8 @@ spring:
   mail:
     host: smtp.gmail.com
     port: 587
-    username: ${GMAIL_USERNAME:nguyen.quang6633@gmail.com}
-    password: ${GMAIL_APP_PASSWORD:dxmjykzobzwfidsz}
+    username: ${GMAIL_USERNAME:}
+    password: ${GMAIL_APP_PASSWORD:}
     default-encoding: UTF-8
     properties:
       mail:
@@ -67,11 +67,11 @@ spring:
 
 # Application Configuration
 app:
-  default-password: Warehouse@123
+  default-password: ${APP_DEFAULT_PASSWORD:Warehouse@123}
 
 # JWT Configuration
 jwt:
-  secret: 9xUc3TNqLOYTH91rKxxXsjkNGaLwwGDXmm6BJiC+9iuNFuAHrWB4XLRcxTADA4mBwdm1Gv+YlQs4dXCOeY1H2w==
+  secret: ${JWT_SECRET}
   expiration-ms: 28800000              # 8 hours (default session, no rememberMe)
   remember-me-expiration-ms: 604800000  # 7 days (rememberMe=true)
 
@@ -91,9 +91,9 @@ file:
 
 # Cloudinary Configuration for avatar storage
 cloudinary:
-  cloud-name: ${CLOUDINARY_CLOUD_NAME:dxrptj3gj}
-  api-key: ${CLOUDINARY_API_KEY:884999193494315}
-  api-secret: ${CLOUDINARY_API_SECRET:KEAA_2UJKOub32k398lvWdOspQU}
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+  api-key: ${CLOUDINARY_API_KEY:}
+  api-secret: ${CLOUDINARY_API_SECRET:}
 
 
 server:
