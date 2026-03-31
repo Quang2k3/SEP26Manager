@@ -477,6 +477,39 @@ public class IncidentService {
                             "[Manager]: ACCEPT — Nhận hàng thừa, nhập kho tất cả"));
                     break;
 
+                case "RETURN_DAMAGE":
+                    // Hoàn hỏng: chỉ trừ phần hàng hỏng (damagedQty) khỏi receivedQty, nhập kho phần còn lại
+                    if (rcItem != null) {
+                        java.math.BigDecimal failQty = incItem.getDamagedQty() != null 
+                            ? incItem.getDamagedQty() : java.math.BigDecimal.ZERO;
+                        
+                        incItem.setActionReturnQty(failQty);
+
+                        java.math.BigDecimal newReceivedQty = rcItem.getReceivedQty() != null
+                                ? rcItem.getReceivedQty().subtract(failQty)
+                                : java.math.BigDecimal.ZERO;
+                        if (newReceivedQty.compareTo(java.math.BigDecimal.ZERO) < 0)
+                            newReceivedQty = java.math.BigDecimal.ZERO;
+                        
+                        // Hợp thức hóa số lượng nhập kho (phần nguyên vẹn)
+                        rcItem.setExpectedQty(newReceivedQty);
+                        rcItem.setReceivedQty(newReceivedQty);
+                        
+                        if (newReceivedQty.compareTo(java.math.BigDecimal.ZERO) == 0) {
+                            rcItem.setCondition("RETURNED");
+                        } else {
+                            // Phần sót lại là hoàn toàn lành lặn (PASS) do đã vứt phần hỏng
+                            rcItem.setCondition("PASS");
+                            rcItem.setReasonCode(null);
+                        }
+                        receivingItemRepo.save(rcItem);
+                        log.info("UNEXPECTED_ITEM RETURN_DAMAGE: SKU {} returnFailQty={} remainingReceivedQty={} on order {}",
+                                incItem.getSkuId(), failQty, newReceivedQty, order.getReceivingCode());
+                    }
+                    incItem.setNote(appendNote(incItem.getNote(),
+                            "[Manager]: RETURN_DAMAGE — Hoàn trả phần lỗi, nhập kho phần nguyên vẹn"));
+                    break;
+
                 case "RETURN":
                     // Trả hàng thừa/UNEXPECTED: trừ phần thừa khỏi receivedQty → chỉ nhận đúng expectedQty
                     if (rcItem != null) {
