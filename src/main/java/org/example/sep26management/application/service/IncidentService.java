@@ -422,6 +422,7 @@ public class IncidentService {
                 .orElseThrow(() -> new RuntimeException("Receiving order not found: " + incident.getReceivingId()));
 
         boolean hasWaitBackorder = false;
+        java.util.Map<Long, java.math.BigDecimal> backorderSkus = new java.util.HashMap<>();
 
         for (org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest.ItemResolution res : request
                 .getItems()) {
@@ -454,10 +455,24 @@ public class IncidentService {
                     break;
 
                 case "WAIT_BACKORDER":
-                    // Chờ giao bù: giữ nguyên expectedQty, đánh dấu chờ
+                    // Chờ giao bù: tính toán lượng thiếu để tạo phiếu mới (Sub-PO)
+                    if (rcItem != null) {
+                        java.math.BigDecimal missingQty = incItem.getExpectedQty() != null && incItem.getActualQty() != null
+                            ? incItem.getExpectedQty().subtract(incItem.getActualQty())
+                            : java.math.BigDecimal.ZERO;
+                            
+                        if (missingQty.compareTo(java.math.BigDecimal.ZERO) > 0) {
+                            backorderSkus.put(incItem.getSkuId(), missingQty);
+                            
+                            // [FIX] Cắt đuôi: Điều chỉnh expectedQty phiếu hiện tại về bằng đúng receivedQty 
+                            // để chốt số liệu cho kiện hàng lần này
+                            rcItem.setExpectedQty(rcItem.getReceivedQty());
+                            receivingItemRepo.save(rcItem);
+                        }
+                    }
                     hasWaitBackorder = true;
                     incItem.setNote(appendNote(incItem.getNote(),
-                            "[Manager]: WAIT_BACKORDER — Chờ giao bù cho phần thiếu"));
+                            "[Manager]: WAIT_BACKORDER — Tách phần thiếu ra khỏi phiếu để tạo phiếu đọng (Giao bù)"));
                     break;
 
                 case "ACCEPT":
@@ -553,7 +568,7 @@ public class IncidentService {
             incidentItemRepo.save(incItem);
         }
 
-        // Resolve incident and move order — BE-C3 FIX: chỉ chuyển SUBMITTED nếu KHÔNG có WAIT_BACKORDER
+        // Resolve incident and move order to QC_APPROVED to unblock GRN generation
         incident.setStatus("RESOLVED");
         if (request.getNote() != null && !request.getNote().isBlank()) {
             incident.setDescription(
@@ -561,31 +576,57 @@ public class IncidentService {
         }
         incidentRepo.save(incident);
 
-        if (hasWaitBackorder) {
-            // BE-C3 FIX: Còn item đang chờ giao bù → giữ PENDING_INCIDENT, không QC approve vội
-            // Order sẽ chuyển SUBMITTED khi supplier giao bù và Keeper scan lại
-            order.setStatus("PENDING_INCIDENT");
-            log.info("Discrepancy Incident {} resolved with WAIT_BACKORDER — order stays PENDING_INCIDENT (receivingId={})",
-                    incident.getIncidentCode(), order.getReceivingId());
-        } else {
-            // Tất cả item đã xử lý dứt điểm (CLOSE_SHORT / ACCEPT / RETURN) → cho QC tiếp tục
-            order.setStatus("SUBMITTED");
-            log.info("Discrepancy Incident {} fully resolved — order moved to SUBMITTED (receivingId={})",
-                    incident.getIncidentCode(), order.getReceivingId());
+        // ─── TẠO TỰ ĐỘNG PHIẾU GIAO BÙ (SUB-PO) ───
+        if (!backorderSkus.isEmpty()) {
+            org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity backorderPO = 
+                org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity.builder()
+                    .warehouseId(order.getWarehouseId())
+                    .receivingCode(order.getReceivingCode() + "-B" + (System.currentTimeMillis() % 10000))
+                    .sourceType(order.getSourceType())
+                    .supplierId(order.getSupplierId())
+                    .sourceReferenceCode(order.getSourceReferenceCode() != null ? order.getSourceReferenceCode() + " (Bù)" : "Giao bù")
+                    .status("INITIAL") // [FIX] Trạng thái INITIAL để thủ kho có thể bắt đầu phiên nhận hàng mới
+                    .createdAt(java.time.LocalDateTime.now())
+                    .createdBy(managerId)
+                    .note("Phiếu tự động sinh do Manager chốt chờ nhận bù cho Incident " + incident.getIncidentCode())
+                    .build();
+            receivingOrderRepo.save(backorderPO);
+
+            for (java.util.Map.Entry<Long, java.math.BigDecimal> entry : backorderSkus.entrySet()) {
+                org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity newItem = 
+                    org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity.builder()
+                        .receivingOrder(backorderPO)
+                        .skuId(entry.getKey())
+                        .expectedQty(entry.getValue())
+                        .receivedQty(java.math.BigDecimal.ZERO)
+                        .qcRequired(false) 
+                        .createdAt(java.time.LocalDateTime.now())
+                        .build();
+                receivingItemRepo.save(newItem);
+            }
+            log.info("Auto-generated Backorder Sub-PO {} for missing SKUs", backorderPO.getReceivingCode());
         }
+
+        // BE-C3 FIX: Bất kể là nợ giao bù hay chốt thiếu, số lượng HÀNG ĐÃ NHẬN (vd: 1990/2000)
+        // PHẢI được release vào kho rảnh rỗi. Việc giữ PENDING_INCIDENT sẽ làm ngâm vốn/kệ hàng.
+        // Hàng bù (10) sẽ được Supplier chở tới trong lô sau (mã PO mới hoặc Sub-PO).
+        order.setStatus("QC_APPROVED");
         receivingOrderRepo.save(order);
+        
+        log.info("Discrepancy Incident {} fully resolved (hasWaitBackorder={}) — order {} unblocked for GRN",
+                incident.getIncidentCode(), hasWaitBackorder, order.getReceivingCode());
 
         // ── Realtime: notify theo trạng thái kết quả ─────────────────────────
         if (hasWaitBackorder) {
-            // Vẫn còn chờ → notify MANAGER + KEEPER để biết
+            // Vẫn còn nợ → notify MANAGER + KEEPER để đội Mua Hàng theo dõi
             notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
                     incident.getIncidentId(), incident.getIncidentCode(),
-                    order.getReceivingCode() + " — Chờ giao bù hàng thiếu");
+                    order.getReceivingCode() + " — Chốt nhập phần thực tế, phần thiếu sẽ tạo phiếu chờ bù");
         } else {
-            // Xử lý xong → QC tiếp tục kiểm đếm
+            // Xử lý dứt điểm → QC xong
             notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_pending_qc",
                     order.getReceivingId(), order.getReceivingCode(),
-                    "Discrepancy đã xử lý — tiếp tục QC");
+                    "Discrepancy đã xử lý — đơn chờ tạo GRN nhập kho");
         }
 
         log.info("Discrepancy Incident {} resolved by managerId={}, hasWaitBackorder={}",
