@@ -734,10 +734,12 @@ public class ReceivingOrderService {
                         sessionRedis.save(sessionId, session);
                         sessionRedis.deleteActiveSession(session.getWarehouseId(), session.getCreatedBy());
 
-                        // CHỈ reset receivedQty cho SKU lệch — giữ nguyên SKU khớp
+                        // [FIX] CHỈ xóa extra items (expectedQty=0) CỦA SKU BỊ MISMATCH
+                        // Trước đây xóa TẤT CẢ extra items → Keeper rescan thấy lệch dù QC đã khớp
                         List<ReceivingItemEntity> extraItems = dbItems.stream()
-                                .filter(i -> i.getExpectedQty() == null
+                                .filter(i -> (i.getExpectedQty() == null
                                         || i.getExpectedQty().compareTo(BigDecimal.ZERO) == 0)
+                                        && mismatchedSkuIds.contains(i.getSkuId()))
                                 .collect(Collectors.toList());
                         if (!extraItems.isEmpty()) {
                                 receivingItemRepo.deleteAll(extraItems);
@@ -1112,10 +1114,19 @@ public class ReceivingOrderService {
                 GrnEntity savedGrn = grnRepo.save(grn);
 
                 for (ReceivingItemEntity item : items) {
+                        // [FIX] Bỏ qua item đã bị hoàn NCC (RETURNED) hoặc item receivedQty = 0
+                        if ("RETURNED".equals(item.getCondition())) {
+                                log.info("generateGrn: skipping RETURNED item skuId={}", item.getSkuId());
+                                continue;
+                        }
                         Long skuId = item.getSkuId();
                         // receivedQty already reflects Manager's decision from resolveDiscrepancy()
                         BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
                                 : BigDecimal.ZERO;
+                        if (receivedQty.compareTo(BigDecimal.ZERO) <= 0) {
+                                log.info("generateGrn: skipping zero-qty item skuId={}", skuId);
+                                continue;
+                        }
                         // Only subtract actual QC damage, not discrepancy amounts
                         BigDecimal damagedQty = skuDamagedMap.getOrDefault(skuId, BigDecimal.ZERO);
                         BigDecimal managerPassQty = skuManagerPassMap.getOrDefault(skuId, BigDecimal.ZERO);
