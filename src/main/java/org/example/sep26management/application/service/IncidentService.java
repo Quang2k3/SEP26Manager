@@ -293,24 +293,39 @@ public class IncidentService {
             String newOrderStatus;
             String wsMessage;
             if (hasReturn && !hasAcceptOrPass) {
-                // Toàn bộ incident items đều RETURN — kiểm tra có hàng HỢP LỆ ngoài incident không
-                java.util.Set<Long> incidentSkuIds = incident.getItems().stream()
-                        .map(IncidentItemEntity::getSkuId)
-                        .collect(java.util.stream.Collectors.toSet());
+                // Toàn bộ incident items đều RETURN —
+                // Tính tổng qty còn lại trên TẤT CẢ receiving items sau khi trừ returnQty
+                // (bao gồm cả SKU của incident, vì có thể chỉ RETURN 1 phần, phần còn lại vẫn pass)
 
-                long validItemsOutsideIncident = receivingItemRepo
+                // Build map: skuId → tổng actionReturnQty từ incident này
+                java.util.Map<Long, java.math.BigDecimal> returnQtyBySkuId = incident.getItems().stream()
+                        .filter(ii -> ii.getActionReturnQty() != null
+                                && ii.getActionReturnQty().compareTo(java.math.BigDecimal.ZERO) > 0)
+                        .collect(java.util.stream.Collectors.toMap(
+                                IncidentItemEntity::getSkuId,
+                                IncidentItemEntity::getActionReturnQty,
+                                java.math.BigDecimal::add));
+
+                // Tính tổng qty còn lại sau khi trừ return — trên toàn bộ receiving items
+                java.math.BigDecimal totalRemainingQty = receivingItemRepo
                         .findByReceivingOrderReceivingId(incident.getReceivingId()).stream()
-                        .filter(ri -> !incidentSkuIds.contains(ri.getSkuId()))
-                        .filter(ri -> ri.getReceivedQty() != null
-                                && ri.getReceivedQty().compareTo(java.math.BigDecimal.ZERO) > 0)
-                        .count();
+                        .map(ri -> {
+                            java.math.BigDecimal rQty = ri.getReceivedQty() != null
+                                    ? ri.getReceivedQty() : java.math.BigDecimal.ZERO;
+                            java.math.BigDecimal returnedQty = returnQtyBySkuId.getOrDefault(
+                                    ri.getSkuId(), java.math.BigDecimal.ZERO);
+                            java.math.BigDecimal remaining = rQty.subtract(returnedQty);
+                            return remaining.compareTo(java.math.BigDecimal.ZERO) > 0
+                                    ? remaining : java.math.BigDecimal.ZERO;
+                        })
+                        .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
 
-                if (validItemsOutsideIncident > 0) {
-                    // Còn hàng hợp lệ ngoài incident → QC_APPROVED, chỉ loại bỏ item RETURN
+                if (totalRemainingQty.compareTo(java.math.BigDecimal.ZERO) > 0) {
+                    // Còn hàng hợp lệ sau khi trừ return → QC_APPROVED, chỉ loại bỏ phần RETURN
                     newOrderStatus = "QC_APPROVED";
                     wsMessage = "Hàng hỏng hoàn NCC, hàng hợp lệ tiếp tục tạo GRN";
                 } else {
-                    // Không còn hàng hợp lệ → REJECTED
+                    // Không còn hàng hợp lệ nào → REJECTED
                     newOrderStatus = "REJECTED";
                     wsMessage = "Toàn bộ hàng hoàn về NCC — đơn bị từ chối";
                 }
@@ -350,11 +365,15 @@ public class IncidentService {
                                         if (newQty.compareTo(java.math.BigDecimal.ZERO) < 0)
                                             newQty = java.math.BigDecimal.ZERO;
                                         ri.setReceivedQty(newQty);
-                                        ri.setCondition("RETURNED");
+                                        // [FIX] Chỉ đánh dấu RETURNED nếu hết hàng hoàn toàn
+                                        // Nếu còn qty (partial return) → giữ condition cũ để GRN vẫn nhận phần pass
+                                        if (newQty.compareTo(java.math.BigDecimal.ZERO) == 0) {
+                                            ri.setCondition("RETURNED");
+                                        }
                                         receivingItemRepo.save(ri);
-                                        log.info("Returned item: SKU {} qty={} on order {}",
+                                        log.info("Returned item: SKU {} returnQty={} remainingQty={} on order {}",
                                                 iItem.getSkuId(), iItem.getActionReturnQty(),
-                                                order.getReceivingCode());
+                                                newQty, order.getReceivingCode());
                                     });
                             }
                         }
