@@ -59,4 +59,13 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
         @Query(value = "SELECT uw.warehouse_id FROM user_warehouses uw " +
                 "WHERE uw.user_id = :userId AND uw.active = TRUE", nativeQuery = true)
         List<Long> findActiveWarehouseIdsByUserId(@Param("userId") Long userId);
+
+        @org.springframework.data.jpa.repository.Modifying
+        @org.springframework.transaction.annotation.Transactional
+        @Query(value = "INSERT INTO user_warehouses (user_id, warehouse_id, active) " +
+                "VALUES (:userId, :warehouseId, true) " +
+                "ON CONFLICT (user_id, warehouse_id) DO UPDATE SET active = true",
+                nativeQuery = true)
+        void assignWarehouseToUser(@Param("userId") Long userId,
+                @Param("warehouseId") Long warehouseId);
 }

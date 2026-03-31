@@ -51,9 +51,11 @@ public class UserManagementController {
             + "User mới có status PENDING_VERIFY cho đến khi verify email.")
     public ResponseEntity<ApiResponse<UserResponse>> createUser(
             @Valid @RequestBody CreateUserRequest request,
-            HttpServletRequest httpRequest) {
+            HttpServletRequest httpRequest,
+            org.springframework.security.core.Authentication authentication) {
         try {
             Long createdBy = getCurrentUserId();
+            Long creatorWarehouseId = extractWarehouseId(authentication); // Kho của Manager đang tạo user
             String ipAddress = getClientIpAddress(httpRequest);
             String userAgent = httpRequest.getHeader("User-Agent");
 
@@ -62,6 +64,7 @@ public class UserManagementController {
             ApiResponse<UserResponse> response = userManagementService.createUser(
                     request,
                     createdBy,
+                    creatorWarehouseId,
                     ipAddress,
                     userAgent);
 
@@ -193,6 +196,30 @@ public class UserManagementController {
     // ============================================
     // HELPER METHODS
     // ============================================
+
+    /**
+     * Extract warehouseId from JWT token claims.
+     * Returns null if not present (non-blocking — warehouse auto-assign is best-effort).
+     */
+    private Long extractWarehouseId(org.springframework.security.core.Authentication authentication) {
+        if (authentication == null) return null;
+        Object details = authentication.getDetails();
+        if (details instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) details;
+            Object raw = map.get("warehouseIds");
+            if (raw instanceof java.util.List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Long l) return l;
+                if (first instanceof Integer i) return i.longValue();
+                if (first instanceof Number n) return n.longValue();
+                if (first != null) {
+                    try { return Long.parseLong(first.toString()); } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        return null;
+    }
 
     /**
      * Get current user ID from security context

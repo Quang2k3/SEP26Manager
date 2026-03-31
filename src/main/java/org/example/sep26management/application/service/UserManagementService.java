@@ -59,8 +59,8 @@ public class UserManagementService {
          * @param userAgent User agent of the request
          * @return ApiResponse containing created user details
          */
-        public ApiResponse<UserResponse> createUser(CreateUserRequest request, Long createdBy, String ipAddress,
-                        String userAgent) {
+        public ApiResponse<UserResponse> createUser(CreateUserRequest request, Long createdBy,
+                        Long creatorWarehouseId, String ipAddress, String userAgent) {
                 log.info(LogMessages.USER_CREATING, request.getEmail());
 
                 // Validate email uniqueness
@@ -110,6 +110,18 @@ public class UserManagementService {
                 // Save user to database
                 UserEntity savedUser = userRepository.save(userEntity);
 
+                // [AUTO-ASSIGN] Tự động gán user mới vào kho của Manager tạo tài khoản
+                if (creatorWarehouseId != null) {
+                        try {
+                                userRepository.assignWarehouseToUser(savedUser.getUserId(), creatorWarehouseId);
+                                log.info("Auto-assigned user {} to warehouse {}", savedUser.getUserId(), creatorWarehouseId);
+                        } catch (Exception ex) {
+                                // Không block quá trình tạo user nếu việc gán warehouse thất bại
+                                log.warn("Failed to auto-assign warehouse {} to user {}: {}",
+                                        creatorWarehouseId, savedUser.getUserId(), ex.getMessage());
+                        }
+                }
+
                 log.info(LogMessages.USER_CREATED, savedUser.getUserId());
 
                 // Send welcome email with temporary password
@@ -124,7 +136,8 @@ public class UserManagementService {
                                 "USER_CREATED",
                                 "USER",
                                 savedUser.getUserId(),
-                                "New user created: " + savedUser.getEmail(),
+                                "New user created: " + savedUser.getEmail()
+                                        + (creatorWarehouseId != null ? " | auto-assigned to warehouse " + creatorWarehouseId : ""),
                                 ipAddress,
                                 userAgent);
 
