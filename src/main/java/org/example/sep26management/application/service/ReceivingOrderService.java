@@ -685,15 +685,11 @@ public class ReceivingOrderService {
                 List<ReceivingItemEntity> dbItems = receivingItemRepo.findByReceivingOrderReceivingId(id);
 
                 // ── STEP 0: So sánh QC total vs Keeper receivedQty ──────────────────
-                // Chỉ so sánh items CÓ trên phiếu (expectedQty > 0)
+                // So sánh TẤT CẢ items Keeper đã scan (bao gồm hàng trong và ngoài phiếu)
                 List<String> mismatchDetails = new ArrayList<>();
                 java.util.Set<Long> mismatchedSkuIds = new java.util.HashSet<>();
                 List<String> mismatchedSkuCodes = new ArrayList<>();
                 for (ReceivingItemEntity dbItem : dbItems) {
-                        BigDecimal expectedQty = dbItem.getExpectedQty() != null
-                                ? dbItem.getExpectedQty() : BigDecimal.ZERO;
-                        if (expectedQty.compareTo(BigDecimal.ZERO) == 0) continue;
-
                         Long skuId = dbItem.getSkuId();
                         Map<String, BigDecimal> skuScanData = scannedData.getOrDefault(skuId, Map.of());
                         BigDecimal qcTotal = skuScanData.values().stream()
@@ -754,6 +750,8 @@ public class ReceivingOrderService {
                                 receivingItemRepo.deleteAll(extraItems);
                         }
                         for (ReceivingItemEntity dbItem : dbItems) {
+                                if (extraItems.contains(dbItem)) continue;
+
                                 if (mismatchedSkuIds.contains(dbItem.getSkuId())) {
                                         dbItem.setReceivedQty(BigDecimal.ZERO);
                                         dbItem.setCondition(null);
