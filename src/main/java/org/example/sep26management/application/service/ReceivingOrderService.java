@@ -796,8 +796,10 @@ public class ReceivingOrderService {
                 boolean hasIssues = false;
                 List<IncidentItemEntity> incidentItems = new ArrayList<>();
 
-                // Collect skuIds đã có trên phiếu để phát hiện hàng ngoài phiếu
+                // Collect skuIds THỰC SỰ trên phiếu (expectedQty > 0) — placeholder (expectedQty=0) KHÔNG tính
                 java.util.Set<Long> orderSkuIds = dbItems.stream()
+                        .filter(i -> i.getExpectedQty() != null
+                                && i.getExpectedQty().compareTo(BigDecimal.ZERO) > 0)
                         .map(ReceivingItemEntity::getSkuId)
                         .collect(Collectors.toSet());
 
@@ -876,17 +878,30 @@ public class ReceivingOrderService {
                                 .build();
                         incidentItems.add(extraItem);
 
-                        // 2. Tạo Receiving Item để hiển thị trên web (SL dự kiến = 0, SL thực nhận = tổng quét)
-                        ReceivingItemEntity newRcItem = ReceivingItemEntity.builder()
-                                .receivingOrder(order)
-                                .skuId(skuId)
-                                .expectedQty(BigDecimal.ZERO)
-                                .receivedQty(totalExtra)
-                                .qcRequired(true)
-                                .condition(failQty.compareTo(BigDecimal.ZERO) > 0 ? "FAIL" : "PASS")
-                                .reasonCode(failQty.compareTo(BigDecimal.ZERO) > 0 ? "DAMAGE" : null)
-                                .build();
-                        receivingItemRepo.save(newRcItem);
+                        // 2. Cập nhật hoặc tạo Receiving Item để hiển thị trên web
+                        java.util.Optional<ReceivingItemEntity> existingItem =
+                                receivingItemRepo.findByReceivingOrderReceivingIdAndSkuId(id, skuId);
+                        if (existingItem.isPresent()) {
+                                // Placeholder đã tồn tại (từ KEEPER_RESCAN) → update
+                                ReceivingItemEntity rcItem = existingItem.get();
+                                rcItem.setReceivedQty(totalExtra);
+                                rcItem.setQcRequired(true);
+                                rcItem.setCondition(failQty.compareTo(BigDecimal.ZERO) > 0 ? "FAIL" : "PASS");
+                                rcItem.setReasonCode(failQty.compareTo(BigDecimal.ZERO) > 0 ? "DAMAGE" : null);
+                                receivingItemRepo.save(rcItem);
+                        } else {
+                                // Tạo mới
+                                ReceivingItemEntity newRcItem = ReceivingItemEntity.builder()
+                                        .receivingOrder(order)
+                                        .skuId(skuId)
+                                        .expectedQty(BigDecimal.ZERO)
+                                        .receivedQty(totalExtra)
+                                        .qcRequired(true)
+                                        .condition(failQty.compareTo(BigDecimal.ZERO) > 0 ? "FAIL" : "PASS")
+                                        .reasonCode(failQty.compareTo(BigDecimal.ZERO) > 0 ? "DAMAGE" : null)
+                                        .build();
+                                receivingItemRepo.save(newRcItem);
+                        }
 
                         log.info("Extra SKU detected in QC scan and added to receiving items: skuId={}, qty={}", skuId, totalExtra);
                 }
