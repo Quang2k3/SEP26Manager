@@ -331,6 +331,7 @@ public class IncidentService {
 
             final String finalStatus = newOrderStatus;
             final String finalMsg    = wsMessage;
+            final boolean finalHasReturn = hasReturn;
             receivingOrderRepo.findById(incident.getReceivingId()).ifPresent(order -> {
                 if ("PENDING_INCIDENT".equals(order.getStatus())) {
                     order.setStatus(finalStatus);
@@ -343,7 +344,7 @@ public class IncidentService {
                     }
 
                     // Trừ receivedQty cho item RETURN → loại khỏi GRN
-                    if (hasReturn && !"REJECTED".equals(finalStatus)) {
+                    if (finalHasReturn && !"REJECTED".equals(finalStatus)) {
                         for (IncidentItemEntity iItem : incident.getItems()) {
                             if (iItem.getActionReturnQty() != null
                                     && iItem.getActionReturnQty().compareTo(java.math.BigDecimal.ZERO) > 0) {
