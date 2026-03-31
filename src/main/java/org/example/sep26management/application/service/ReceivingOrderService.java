@@ -433,16 +433,25 @@ public class ReceivingOrderService {
                                         }
 
                                         for (Map.Entry<Long, BigDecimal> entry : skuTotalQty.entrySet()) {
-                                                receivingItemRepo
-                                                        .findByReceivingOrderReceivingIdAndSkuId(id,
-                                                                entry.getKey())
-                                                        .ifPresent(ri -> {
-                                                                ri.setReceivedQty(entry.getValue());
-                                                                receivingItemRepo.save(ri);
-                                                                log.info("Session sync: SKU {} → receivedQty={}",
-                                                                        entry.getKey(),
-                                                                        entry.getValue());
-                                                        });
+                                                Long skuId = entry.getKey();
+                                                BigDecimal qty = entry.getValue();
+                                                java.util.Optional<ReceivingItemEntity> opt = receivingItemRepo
+                                                        .findByReceivingOrderReceivingIdAndSkuId(id, skuId);
+                                                if (opt.isPresent()) {
+                                                        ReceivingItemEntity ri = opt.get();
+                                                        ri.setReceivedQty(qty);
+                                                        receivingItemRepo.save(ri);
+                                                        log.info("Session sync: SKU {} → receivedQty={}", skuId, qty);
+                                                } else {
+                                                        ReceivingItemEntity newRi = ReceivingItemEntity.builder()
+                                                                .receivingOrder(order)
+                                                                .skuId(skuId)
+                                                                .expectedQty(BigDecimal.ZERO)
+                                                                .receivedQty(qty)
+                                                                .build();
+                                                        receivingItemRepo.save(newRi);
+                                                        log.info("Session sync (extra item): SKU {} → receivedQty={}", skuId, qty);
+                                                }
                                         }
                                 }
                         });
