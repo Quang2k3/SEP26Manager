@@ -472,11 +472,28 @@ public class IncidentService {
                     break;
 
                 case "RETURN":
-                    // Trả hàng thừa: receivedQty = expectedQty (return overage to supplier)
+                    // Trả hàng thừa: trừ phần thừa khỏi receivedQty → chỉ nhận đúng expectedQty
                     if (rcItem != null) {
-                        incItem.setActionReturnQty(incItem.getDamagedQty()); // return the overage qty
-                        rcItem.setReceivedQty(rcItem.getExpectedQty());
+                        // damagedQty = overageQty (số lượng thừa cần hoàn)
+                        java.math.BigDecimal overageQty = incItem.getDamagedQty() != null
+                                ? incItem.getDamagedQty() : java.math.BigDecimal.ZERO;
+                        incItem.setActionReturnQty(overageQty);
+
+                        // receivedQty sau hoàn = receivedQty hiện tại - overageQty
+                        java.math.BigDecimal newReceivedQty = rcItem.getReceivedQty() != null
+                                ? rcItem.getReceivedQty().subtract(overageQty)
+                                : java.math.BigDecimal.ZERO;
+                        if (newReceivedQty.compareTo(java.math.BigDecimal.ZERO) < 0)
+                            newReceivedQty = java.math.BigDecimal.ZERO;
+                        rcItem.setReceivedQty(newReceivedQty);
+
+                        // Nếu receivedQty = 0 (UNEXPECTED_ITEM hoàn toàn) → đánh dấu RETURNED
+                        if (newReceivedQty.compareTo(java.math.BigDecimal.ZERO) == 0) {
+                            rcItem.setCondition("RETURNED");
+                        }
                         receivingItemRepo.save(rcItem);
+                        log.info("OVERAGE RETURN: SKU {} overageQty={} remainingReceivedQty={} on order {}",
+                                incItem.getSkuId(), overageQty, newReceivedQty, order.getReceivingCode());
                     }
                     incItem.setNote(appendNote(incItem.getNote(),
                             "[Manager]: RETURN — Trả hàng thừa cho nhà cung cấp"));
