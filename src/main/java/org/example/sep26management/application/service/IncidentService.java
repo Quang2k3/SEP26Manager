@@ -412,10 +412,10 @@ public class IncidentService {
         }
 
         if (!org.example.sep26management.application.enums.IncidentType.SHORTAGE.equals(incident.getIncidentType())
-                && !org.example.sep26management.application.enums.IncidentType.OVERAGE
-                .equals(incident.getIncidentType())) {
+                && !org.example.sep26management.application.enums.IncidentType.OVERAGE.equals(incident.getIncidentType())
+                && !org.example.sep26management.application.enums.IncidentType.DISCREPANCY.equals(incident.getIncidentType())) {
             throw new RuntimeException(
-                    "This API is only for resolving quantity discrepancy incidents (SHORTAGE/OVERAGE).");
+                    "This API is only for resolving quantity discrepancy incidents (SHORTAGE/OVERAGE/DISCREPANCY).");
         }
 
         ReceivingOrderEntity order = receivingOrderRepo.findById(incident.getReceivingId())
@@ -466,17 +466,29 @@ public class IncidentService {
                         rcItem.setExpectedQty(rcItem.getReceivedQty());
                         receivingItemRepo.save(rcItem);
                     }
-                    incItem.setActionPassQty(incItem.getDamagedQty()); // pass the overage qty
+                    java.math.BigDecimal acceptActual = incItem.getActualQty() != null ? incItem.getActualQty() : java.math.BigDecimal.ZERO;
+                    java.math.BigDecimal acceptExpected = incItem.getExpectedQty() != null ? incItem.getExpectedQty() : java.math.BigDecimal.ZERO;
+                    java.math.BigDecimal passQty = acceptActual.subtract(acceptExpected);
+                    if (passQty.compareTo(java.math.BigDecimal.ZERO) < 0) {
+                        passQty = java.math.BigDecimal.ZERO;
+                    }
+                    incItem.setActionPassQty(passQty); // pass the overage qty
                     incItem.setNote(appendNote(incItem.getNote(),
                             "[Manager]: ACCEPT — Nhận hàng thừa, nhập kho tất cả"));
                     break;
 
                 case "RETURN":
-                    // Trả hàng thừa: trừ phần thừa khỏi receivedQty → chỉ nhận đúng expectedQty
+                    // Trả hàng thừa/UNEXPECTED: trừ phần thừa khỏi receivedQty → chỉ nhận đúng expectedQty
                     if (rcItem != null) {
-                        // damagedQty = overageQty (số lượng thừa cần hoàn)
-                        java.math.BigDecimal overageQty = incItem.getDamagedQty() != null
-                                ? incItem.getDamagedQty() : java.math.BigDecimal.ZERO;
+                        java.math.BigDecimal actual = incItem.getActualQty() != null ? incItem.getActualQty() : java.math.BigDecimal.ZERO;
+                        java.math.BigDecimal expected = incItem.getExpectedQty() != null ? incItem.getExpectedQty() : java.math.BigDecimal.ZERO;
+                        
+                        // Lấy độ lệch (số lượng thừa)
+                        java.math.BigDecimal overageQty = actual.subtract(expected);
+                        if (overageQty.compareTo(java.math.BigDecimal.ZERO) < 0) {
+                            overageQty = java.math.BigDecimal.ZERO;
+                        }
+
                         incItem.setActionReturnQty(overageQty);
 
                         // receivedQty sau hoàn = receivedQty hiện tại - overageQty

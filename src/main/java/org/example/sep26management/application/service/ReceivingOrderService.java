@@ -870,9 +870,9 @@ public class ReceivingOrderService {
 
                                         IncidentItemEntity overageItem = IncidentItemEntity.builder()
                                                 .skuId(skuId)
-                                                .damagedQty(overageQty)   // Lưu SL thừa vào đây để xử lý
+                                                .damagedQty(BigDecimal.ZERO)   // [FIX] KHÔNG mượn trường damagedQty, tránh UI hiển thị nhầm vào cột Hàng hỏng
                                                 .expectedQty(expectedQty)
-                                                .actualQty(totalScanned)
+                                                .actualQty(totalScanned)       // UI tính thừa thiếu qua actualQty - expectedQty
                                                 .reasonCode("OVERAGE")
                                                 .note("Hàng thừa so với phiếu — QC quét " + totalScanned
                                                         + " nhưng phiếu chỉ có " + expectedQty
@@ -892,9 +892,9 @@ public class ReceivingOrderService {
 
                                         IncidentItemEntity shortageItem = IncidentItemEntity.builder()
                                                 .skuId(skuId)
-                                                .damagedQty(shortageQty)   // Lưu SL thiếu vào đây để xử lý
+                                                .damagedQty(BigDecimal.ZERO)   // [FIX] KHÔNG mượn trường damagedQty
                                                 .expectedQty(expectedQty)
-                                                .actualQty(totalScanned)
+                                                .actualQty(totalScanned)       // UI tính thừa thiếu qua actualQty - expectedQty
                                                 .reasonCode("SHORTAGE")
                                                 .note("Hàng thiếu so với phiếu — dự kiến " + expectedQty
                                                         + " nhưng QC chỉ quét " + totalScanned
@@ -967,64 +967,102 @@ public class ReceivingOrderService {
                 }
 
                 if (hasIssues) {
-                        // Tạo Quality Incident
-                        // [FIX] incidentCode là nullable=false — phải set, không thì PSQLException → 500
-                        String incCode = "INC-QC-RCV-" + id + "-" + (System.currentTimeMillis() % 100_000);
+                        List<IncidentItemEntity> damageItems = incidentItems.stream()
+                                .filter(i -> "DAMAGE".equals(i.getReasonCode())).collect(Collectors.toList());
+                        List<IncidentItemEntity> discrepancyItems = incidentItems.stream()
+                                .filter(i -> !"DAMAGE".equals(i.getReasonCode())).collect(Collectors.toList());
 
-                        long damageCount  = incidentItems.stream().filter(i -> "DAMAGE".equals(i.getReasonCode())).count();
-                        long extraCount   = incidentItems.stream().filter(i -> "UNEXPECTED_ITEM".equals(i.getReasonCode())).count();
-                        long overageCount = incidentItems.stream().filter(i -> "OVERAGE".equals(i.getReasonCode())).count();
-                        String incDesc = "Phát hiện bất thường qua bước kiểm định QC (Scanner)"
-                                + (damageCount  > 0 ? " — " + damageCount  + " SKU hỏng" : "")
-                                + (overageCount > 0 ? " — " + overageCount + " SKU thừa số lượng" : "")
-                                + (extraCount   > 0 ? " — " + extraCount   + " SKU ngoài phiếu" : "");
+                        List<IncidentEntity> createdIncidents = new ArrayList<>();
 
-                        IncidentEntity incident = IncidentEntity.builder()
-                                .warehouseId(order.getWarehouseId())
-                                .incidentCode(incCode)
-                                .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
-                                .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
-                                .severity("HIGH")
-                                .occurredAt(java.time.LocalDateTime.now())
-                                .description(incDesc)
-                                .receivingId(id)
-                                .status("OPEN")
-                                .reportedBy(qcUserId)
-                                .build();
-
-                        IncidentEntity savedIncident = incidentRepo.save(incident);
-
-                        for (IncidentItemEntity incItem : incidentItems) {
-                                incItem.setIncident(savedIncident);
-                                incidentItemRepo.save(incItem);
+                        // 1. Tạo Incident Hư Hỏng (DAMAGE)
+                        if (!damageItems.isEmpty()) {
+                                String damageCode = "INC-QC-RCV-" + id + "-" + (System.currentTimeMillis() % 100_000);
+                                IncidentEntity damageInc = IncidentEntity.builder()
+                                        .warehouseId(order.getWarehouseId())
+                                        .incidentCode(damageCode)
+                                        .incidentType(org.example.sep26management.application.enums.IncidentType.DAMAGE)
+                                        .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
+                                        .severity("HIGH")
+                                        .occurredAt(java.time.LocalDateTime.now())
+                                        .description("Phát hiện bất thường qua bước kiểm định QC (Scanner) — " + damageItems.size() + " SKU hỏng")
+                                        .receivingId(id)
+                                        .status("OPEN")
+                                        .reportedBy(qcUserId)
+                                        .build();
+                                IncidentEntity savedDamageInc = incidentRepo.save(damageInc);
+                                createdIncidents.add(savedDamageInc);
+                                for (IncidentItemEntity incItem : damageItems) {
+                                        incItem.setIncident(savedDamageInc);
+                                        incidentItemRepo.save(incItem);
+                                }
                         }
 
+                        // 2. Tạo Incident Thừa/Thiếu (DISCREPANCY)
+                        if (!discrepancyItems.isEmpty()) {
+                                String discCode = "INC-QC-RCV-" + id + "-" + ((System.currentTimeMillis() + 10) % 100_000);
+                                long overageCount = discrepancyItems.stream().filter(i -> "OVERAGE".equals(i.getReasonCode())).count();
+                                long shortageCount = discrepancyItems.stream().filter(i -> "SHORTAGE".equals(i.getReasonCode())).count();
+                                long extraCount = discrepancyItems.stream().filter(i -> "UNEXPECTED_ITEM".equals(i.getReasonCode())).count();
+                                String discDesc = "Phát hiện thừa/thiếu qua bước kiểm định QC (Scanner)"
+                                        + (overageCount > 0 ? " — " + overageCount + " SKU thừa" : "")
+                                        + (shortageCount > 0 ? " — " + shortageCount + " SKU thiếu" : "")
+                                        + (extraCount > 0 ? " — " + extraCount + " SKU ngoài phiếu" : "");
+
+                                IncidentEntity discInc = IncidentEntity.builder()
+                                        .warehouseId(order.getWarehouseId())
+                                        .incidentCode(discCode)
+                                        .incidentType(org.example.sep26management.application.enums.IncidentType.DISCREPANCY)
+                                        .category(org.example.sep26management.application.enums.IncidentCategory.QUANTITY)
+                                        .severity("MEDIUM")
+                                        .occurredAt(java.time.LocalDateTime.now())
+                                        .description(discDesc)
+                                        .receivingId(id)
+                                        .status("OPEN")
+                                        .reportedBy(qcUserId)
+                                        .build();
+                                IncidentEntity savedDiscInc = incidentRepo.save(discInc);
+                                createdIncidents.add(savedDiscInc);
+                                for (IncidentItemEntity incItem : discrepancyItems) {
+                                        incItem.setIncident(savedDiscInc);
+                                        incidentItemRepo.save(incItem);
+                                }
+                        }
+
+                        // Cập nhật trạng thái phiếu
                         order.setStatus("PENDING_INCIDENT");
                         order.setRejectedBy(qcUserId);
                         order.setRejectedAt(LocalDateTime.now());
-                        order.setRejectReason("Hàng lỗi phát hiện qua QC Scanner. Incident ID: "
-                                + savedIncident.getIncidentId());
+                        
+                        String rejectReason = createdIncidents.stream()
+                                .map(inc -> inc.getIncidentType() + " (" + inc.getIncidentId() + ")")
+                                .collect(Collectors.joining(", "));
+                        order.setRejectReason("Hàng lỗi/thừa/thiếu phát hiện qua QC Scanner. Incidents: " + rejectReason);
                         order.setUpdatedAt(LocalDateTime.now());
                         receivingOrderRepo.save(order);
 
-                        // ── Realtime: notify MANAGER + KEEPER có sự cố inbound ────────
-                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
-                                savedIncident.getIncidentId(), savedIncident.getIncidentCode(),
-                                order.getReceivingCode() + " — QC phát hiện hàng lỗi");
+                        // ── Realtime: notify MANAGER + KEEPER
+                        for (IncidentEntity inc : createdIncidents) {
+                                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                                        inc.getIncidentId(), inc.getIncidentCode(),
+                                        order.getReceivingCode() + " — QC phát hiện " + (inc.getIncidentType().name().equals("DAMAGE") ? "hàng lỗi" : "thừa/thiếu"));
+                        }
 
                         // Audit log: QC rejected (fail items found)
+                        String incidentRefs = createdIncidents.stream()
+                                .map(inc -> inc.getIncidentId().toString())
+                                .collect(Collectors.joining(","));
                         auditLogService.logAction(
                                 qcUserId,
                                 "RECEIVING_QC_REJECTED",
                                 "RECEIVING_ORDER",
                                 order.getReceivingId(),
                                 "Receiving Order " + order.getReceivingCode()
-                                        + " QC rejected — fail items detected. Incident ID: "
-                                        + savedIncident.getIncidentId(),
+                                        + " QC rejected — issues detected. Incident IDs: "
+                                        + incidentRefs,
                                 null, null);
 
-                        log.info("QC scan completed with errors for GRN {}. Created Incident {}.",
-                                order.getReceivingCode(), savedIncident.getIncidentId());
+                        log.info("QC scan completed with errors for GRN {}. Created Incidents {}.",
+                                order.getReceivingCode(), incidentRefs);
                 } else {
                         // Toàn bộ PASS
                         order.setStatus("QC_APPROVED");
