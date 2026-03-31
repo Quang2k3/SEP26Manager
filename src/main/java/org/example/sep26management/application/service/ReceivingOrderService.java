@@ -826,6 +826,7 @@ public class ReceivingOrderService {
                         BigDecimal expectedQty = dbItem.getExpectedQty() != null
                                 ? dbItem.getExpectedQty() : BigDecimal.ZERO;
 
+                        // 1. Kiểm tra hàng hỏng (DAMAGE)
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                 hasIssues = true;
 
@@ -842,7 +843,7 @@ public class ReceivingOrderService {
                                         .skuId(skuId)
                                         .damagedQty(failQty)              // Hàng hỏng
                                         .expectedQty(expectedQty)          // SL giấy tờ gốc
-                                        .actualQty(totalScanned)           // SL QC thực tế (pass + fail)
+                                        .actualQty(totalScanned)           // SL QC thực tế
                                         .reasonCode("DAMAGE")
                                         .note("Báo cáo từ QC Scanner")
                                         .attachmentUrl(attachmentUrl)
@@ -854,35 +855,57 @@ public class ReceivingOrderService {
 
                                 dbItem.setCondition("FAIL");
                                 dbItem.setQcRequired(true);
-                        } else if (totalScanned.compareTo(expectedQty) > 0
-                                && expectedQty.compareTo(BigDecimal.ZERO) > 0) {
-                                // [FIX] OVERAGE: QC quét nhiều hơn số lượng trên phiếu (toàn bộ PASS)
-                                // → cần Manager quyết định: nhập hết hay hoàn hàng thừa
-                                hasIssues = true;
-
-                                BigDecimal overageQty = totalScanned.subtract(expectedQty);
-                                log.info("OVERAGE detected for SKU {} on order {}: expected={}, scanned={}, overage={}",
-                                        skuId, order.getReceivingCode(), expectedQty, totalScanned, overageQty);
-
-                                IncidentItemEntity overageItem = IncidentItemEntity.builder()
-                                        .skuId(skuId)
-                                        .damagedQty(BigDecimal.ZERO)   // Không hỏng
-                                        .expectedQty(expectedQty)       // SL giấy tờ gốc
-                                        .actualQty(totalScanned)        // SL QC thực tế (thừa)
-                                        .reasonCode("OVERAGE")
-                                        .note("Hàng thừa so với phiếu — QC quét " + totalScanned
-                                                + " nhưng phiếu chỉ có " + expectedQty
-                                                + " (thừa " + overageQty + " thùng)")
-                                        .actionPassQty(BigDecimal.ZERO)
-                                        .actionReturnQty(BigDecimal.ZERO)
-                                        .actionScrapQty(BigDecimal.ZERO)
-                                        .build();
-                                incidentItems.add(overageItem);
-
-                                dbItem.setCondition("PASS"); // Hàng tốt, chỉ bị thừa
-                                dbItem.setQcRequired(true);  // Đánh dấu cần xử lý
                         } else {
                                 dbItem.setCondition("PASS");
+                        }
+
+                        // 2. Kiểm tra hàng thừa/thiếu (OVERAGE / SHORTAGE) - Độc lập với DAMAGE
+                        if (expectedQty.compareTo(BigDecimal.ZERO) > 0) {
+                                if (totalScanned.compareTo(expectedQty) > 0) {
+                                        // OVERAGE
+                                        hasIssues = true;
+                                        BigDecimal overageQty = totalScanned.subtract(expectedQty);
+                                        log.info("OVERAGE detected for SKU {} on order {}: expected={}, scanned={}, overage={}",
+                                                skuId, order.getReceivingCode(), expectedQty, totalScanned, overageQty);
+
+                                        IncidentItemEntity overageItem = IncidentItemEntity.builder()
+                                                .skuId(skuId)
+                                                .damagedQty(overageQty)   // Lưu SL thừa vào đây để xử lý
+                                                .expectedQty(expectedQty)
+                                                .actualQty(totalScanned)
+                                                .reasonCode("OVERAGE")
+                                                .note("Hàng thừa so với phiếu — QC quét " + totalScanned
+                                                        + " nhưng phiếu chỉ có " + expectedQty
+                                                        + " (thừa " + overageQty + " thùng)")
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                        incidentItems.add(overageItem);
+                                        dbItem.setQcRequired(true);
+                                } else if (totalScanned.compareTo(expectedQty) < 0) {
+                                        // SHORTAGE
+                                        hasIssues = true;
+                                        BigDecimal shortageQty = expectedQty.subtract(totalScanned);
+                                        log.info("SHORTAGE detected for SKU {} on order {}: expected={}, scanned={}, shortage={}",
+                                                skuId, order.getReceivingCode(), expectedQty, totalScanned, shortageQty);
+
+                                        IncidentItemEntity shortageItem = IncidentItemEntity.builder()
+                                                .skuId(skuId)
+                                                .damagedQty(shortageQty)   // Lưu SL thiếu vào đây để xử lý
+                                                .expectedQty(expectedQty)
+                                                .actualQty(totalScanned)
+                                                .reasonCode("SHORTAGE")
+                                                .note("Hàng thiếu so với phiếu — dự kiến " + expectedQty
+                                                        + " nhưng QC chỉ quét " + totalScanned
+                                                        + " (thiếu " + shortageQty + " thùng)")
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                        incidentItems.add(shortageItem);
+                                        dbItem.setQcRequired(true);
+                                }
                         }
                         receivingItemRepo.save(dbItem);
                 }
