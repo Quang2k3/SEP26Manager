@@ -1012,7 +1012,7 @@ public class ReceivingOrderService {
                                         .warehouseId(order.getWarehouseId())
                                         .incidentCode(discCode)
                                         .incidentType(org.example.sep26management.application.enums.IncidentType.DISCREPANCY)
-                                        .category(org.example.sep26management.application.enums.IncidentCategory.QUANTITY)
+                                        .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
                                         .severity("MEDIUM")
                                         .occurredAt(java.time.LocalDateTime.now())
                                         .description(discDesc)
@@ -1174,16 +1174,6 @@ public class ReceivingOrderService {
                                 qcDamageItems.addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
                         }
                 }
-
-                // Chỉ có 2 action: ACCEPT (vào GRN) và RETURN (hoàn NCC — đã set condition=RETURNED)
-                // Trừ thêm actionReturnQty từ incident DAMAGE (phòng trường hợp condition chưa được set)
-                Map<Long, BigDecimal> skuReturnMapFromIncident = qcDamageItems.stream()
-                        .collect(Collectors.groupingBy(IncidentItemEntity::getSkuId,
-                                Collectors.reducing(BigDecimal.ZERO,
-                                        i -> i.getActionReturnQty() != null
-                                                ? i.getActionReturnQty()
-                                                : BigDecimal.ZERO,
-                                        BigDecimal::add)));
 
                 List<GrnItemEntity> validGrnItems = new ArrayList<>();
 
