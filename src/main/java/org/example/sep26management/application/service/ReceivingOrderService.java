@@ -1161,19 +1161,17 @@ public class ReceivingOrderService {
                 // Tính toán số lượng GRN (Pass/Nhập kho) cho từng SKU
                 List<ReceivingItemEntity> items = receivingItemRepo.findByReceivingOrderReceivingId(id);
 
-                // Only collect damagedQty from QC QUALITY incidents (actual physical damage),
-                // NOT from SHORTAGE/OVERAGE discrepancy incidents (those are already resolved
+                // Only collect returnQty from QC QUALITY incidents (actual physical damage),
+                // NOT from SHORTAGE/OVERAGE/DISCREPANCY discrepancy incidents (those are already resolved
                 // by adjusting receivedQty in resolveDiscrepancy)
                 List<IncidentItemEntity> qcDamageItems = new ArrayList<>();
                 for (IncidentEntity inc : incidents) {
                         if ("RESOLVED".equals(inc.getStatus())
                                 && inc.getIncidentType() != null
-                                && !org.example.sep26management.application.enums.IncidentType.SHORTAGE
-                                .equals(inc.getIncidentType())
-                                && !org.example.sep26management.application.enums.IncidentType.OVERAGE
-                                .equals(inc.getIncidentType())) {
-                                qcDamageItems
-                                        .addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
+                                && !org.example.sep26management.application.enums.IncidentType.SHORTAGE.equals(inc.getIncidentType())
+                                && !org.example.sep26management.application.enums.IncidentType.OVERAGE.equals(inc.getIncidentType())
+                                && !org.example.sep26management.application.enums.IncidentType.DISCREPANCY.equals(inc.getIncidentType())) {
+                                qcDamageItems.addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
                         }
                 }
 
@@ -1219,14 +1217,12 @@ public class ReceivingOrderService {
                                 log.info("generateGrn: skipping zero-qty item skuId={}", skuId);
                                 continue;
                         }
-                        // ACCEPT → vào GRN đủ số, RETURN → đã bị lọc qua condition=RETURNED ở trên
-                        // Trừ thêm returnedFromIncidentQty phòng trường hợp condition chưa kịp set
-                        BigDecimal returnedFromIncidentQty = skuReturnMapFromIncident.getOrDefault(skuId, BigDecimal.ZERO);
-
-                        BigDecimal finalPassQty = receivedQty.subtract(returnedFromIncidentQty);
+                        // ACCEPT → vào GRN đủ số (receivedQty đã được cập nhật bởi resolveDiscrepancy/resolveIncident)
+                        // RETURN → phần hoàn trả đã trừ trực tiếp khỏi receivedQty.
+                        // GRN chỉ cần lấy số lượng receivedQty cuối cùng.
+                        BigDecimal finalPassQty = receivedQty;
                         if (finalPassQty.compareTo(BigDecimal.ZERO) < 0)
                                 finalPassQty = BigDecimal.ZERO;
-
 
                         if (finalPassQty.compareTo(BigDecimal.ZERO) > 0) {
                                 // Auto-calculate lot/date if missing
