@@ -266,30 +266,67 @@ public class IncidentService {
         // [FIX] Update receiving order status theo action của Manager
         // Chỉ áp dụng khi incident có receivingId (inbound DAMAGE từ QC scanner)
         if (incident.getReceivingId() != null) {
-            // Xác định action chủ đạo từ resolutions (lấy action đầu tiên)
-            String dominantAction = request.getResolutions() != null && !request.getResolutions().isEmpty()
-                    ? request.getResolutions().get(0).getAction().toUpperCase()
-                    : "ACCEPT";
+            // Phân tích TẤT CẢ resolutions (không chỉ action đầu tiên)
+            // Case: hàng ngoài phiếu RETURN + hàng trên phiếu PASS → đơn vẫn tiếp tục
+            boolean hasReturn = false;
+            boolean hasAcceptOrPass = false;
+            boolean hasScrap = false;
 
-            // Mapping: action → trạng thái đơn
-            // RETURN  → REJECTED     (hoàn hàng về NCC, đơn kết thúc)
-            // SCRAP   → QC_APPROVED  (huỷ hàng hỏng, tiếp tục tạo GRN)
-            // ACCEPT  → QC_APPROVED  (chấp nhận, tiếp tục tạo GRN)
+            if (request.getResolutions() != null) {
+                for (org.example.sep26management.application.dto.request.ResolveIncidentRequest.ResolutionItemDto res : request.getResolutions()) {
+                    String action = res.getAction().toUpperCase();
+                    switch (action) {
+                        case "RETURN":
+                            hasReturn = true;
+                            break;
+                        case "SCRAP":
+                        case "DOWNGRADE":
+                            hasScrap = true;
+                            break;
+                        default: // ACCEPT, PASS
+                            hasAcceptOrPass = true;
+                            break;
+                    }
+                }
+            }
+
+            // REJECTED chỉ khi toàn bộ item đều RETURN (không có PASS/ACCEPT/SCRAP)
+            // Nếu có item hợp lệ → đơn tiếp tục QC_APPROVED
             String newOrderStatus;
             String wsMessage;
-            switch (dominantAction) {
-                case "RETURN":
+            if (hasReturn && !hasAcceptOrPass && !hasScrap) {
+                // Tất cả incident items đều RETURN — nhưng kiểm tra có hàng HỢP LỆ ngoài incident không
+                // (VD: SKU001 trên phiếu vẫn OK, chỉ SKU002 ngoài phiếu bị RETURN)
+                java.util.Set<Long> incidentSkuIds = incident.getItems().stream()
+                        .map(IncidentItemEntity::getSkuId)
+                        .collect(java.util.stream.Collectors.toSet());
+
+                long validItemsOutsideIncident = receivingItemRepo
+                        .findByReceivingOrderReceivingId(incident.getReceivingId()).stream()
+                        .filter(ri -> !incidentSkuIds.contains(ri.getSkuId()))
+                        .filter(ri -> ri.getReceivedQty() != null
+                                && ri.getReceivedQty().compareTo(java.math.BigDecimal.ZERO) > 0)
+                        .count();
+
+                if (validItemsOutsideIncident > 0) {
+                    // Còn hàng hợp lệ → QC_APPROVED, chỉ loại bỏ item RETURN
+                    newOrderStatus = "QC_APPROVED";
+                    wsMessage = "Hàng thừa hoàn NCC, hàng hợp lệ tiếp tục tạo GRN";
+                } else {
+                    // Không còn hàng hợp lệ → REJECTED
                     newOrderStatus = "REJECTED";
-                    wsMessage = "Hàng hỏng hoàn về NCC — đơn bị từ chối";
-                    break;
-                case "SCRAP":
-                    newOrderStatus = "QC_APPROVED";
+                    wsMessage = "Toàn bộ hàng hoàn về NCC — đơn bị từ chối";
+                }
+            } else {
+                // Có item hợp lệ trong incident → QC_APPROVED
+                newOrderStatus = "QC_APPROVED";
+                if (hasReturn) {
+                    wsMessage = "Hàng thừa hoàn NCC, hàng hợp lệ tiếp tục tạo GRN";
+                } else if (hasScrap) {
                     wsMessage = "Hàng hỏng đã huỷ — đơn chuyển tạo GRN";
-                    break;
-                default: // ACCEPT, PASS
-                    newOrderStatus = "QC_APPROVED";
-                    wsMessage = "Hàng hỏng được chấp nhận — đơn chuyển tạo GRN";
-                    break;
+                } else {
+                    wsMessage = "Hàng được chấp nhận — đơn chuyển tạo GRN";
+                }
             }
 
             final String finalStatus = newOrderStatus;
@@ -301,14 +338,38 @@ public class IncidentService {
                     if ("REJECTED".equals(finalStatus)) {
                         order.setRejectedBy(managerId);
                         order.setRejectedAt(java.time.LocalDateTime.now());
-                        order.setRejectReason("Hàng hỏng QC — Manager quyết định hoàn hàng. Incident: "
+                        order.setRejectReason("Manager quyết định hoàn toàn bộ hàng. Incident: "
                                 + incident.getIncidentCode());
                     }
+
+                    // Trừ receivedQty cho item RETURN → loại khỏi GRN
+                    if (hasReturn && !"REJECTED".equals(finalStatus)) {
+                        for (IncidentItemEntity iItem : incident.getItems()) {
+                            if (iItem.getActionReturnQty() != null
+                                    && iItem.getActionReturnQty().compareTo(java.math.BigDecimal.ZERO) > 0) {
+                                receivingItemRepo
+                                    .findByReceivingOrderReceivingIdAndSkuId(order.getReceivingId(), iItem.getSkuId())
+                                    .ifPresent(ri -> {
+                                        java.math.BigDecimal newQty = ri.getReceivedQty() != null
+                                                ? ri.getReceivedQty().subtract(iItem.getActionReturnQty())
+                                                : java.math.BigDecimal.ZERO;
+                                        if (newQty.compareTo(java.math.BigDecimal.ZERO) < 0)
+                                            newQty = java.math.BigDecimal.ZERO;
+                                        ri.setReceivedQty(newQty);
+                                        ri.setCondition("RETURNED");
+                                        receivingItemRepo.save(ri);
+                                        log.info("Returned item: SKU {} qty={} on order {}",
+                                                iItem.getSkuId(), iItem.getActionReturnQty(),
+                                                order.getReceivingCode());
+                                    });
+                            }
+                        }
+                    }
+
                     receivingOrderRepo.save(order);
-                    log.info("Receiving order {} → {} after incident {} resolved (action={})",
-                            order.getReceivingCode(), finalStatus, incident.getIncidentCode(), dominantAction);
+                    log.info("Receiving order {} → {} after incident {} resolved",
+                            order.getReceivingCode(), finalStatus, incident.getIncidentCode());
                 }
-                // [FIX] Notify với event type "receiving_updated" để tất cả role refresh
                 notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_updated",
                         incident.getIncidentId(), incident.getIncidentCode(), finalMsg);
             });
