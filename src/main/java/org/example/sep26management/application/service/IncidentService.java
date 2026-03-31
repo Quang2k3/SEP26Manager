@@ -243,7 +243,8 @@ public class IncidentService {
                     }
                 }
 
-                if ("PASS".equalsIgnoreCase(res.getAction())) {
+                if ("PASS".equalsIgnoreCase(res.getAction()) || "ACCEPT".equalsIgnoreCase(res.getAction())) {
+                    // ACCEPT = Manager chấp nhận nhận hàng hỏng vào kho (ghi nhận như PASS)
                     if (item.getActionPassQty() == null)
                         item.setActionPassQty(java.math.BigDecimal.ZERO);
                     item.setActionPassQty(item.getActionPassQty().add(effectiveQty));
@@ -251,10 +252,6 @@ public class IncidentService {
                     if (item.getActionReturnQty() == null)
                         item.setActionReturnQty(java.math.BigDecimal.ZERO);
                     item.setActionReturnQty(item.getActionReturnQty().add(effectiveQty));
-                } else if ("SCRAP".equalsIgnoreCase(res.getAction()) || "DOWNGRADE".equalsIgnoreCase(res.getAction())) {
-                    if (item.getActionScrapQty() == null)
-                        item.setActionScrapQty(java.math.BigDecimal.ZERO);
-                    item.setActionScrapQty(item.getActionScrapQty().add(effectiveQty));
                 }
 
                 // Cập nhật lại note/reason cho item dựa trên phán quyết của manager
@@ -279,33 +276,24 @@ public class IncidentService {
             // Case: hàng ngoài phiếu RETURN + hàng trên phiếu PASS → đơn vẫn tiếp tục
             boolean hasReturn = false;
             boolean hasAcceptOrPass = false;
-            boolean hasScrap = false;
 
             if (request.getResolutions() != null) {
                 for (org.example.sep26management.application.dto.request.ResolveIncidentRequest.ResolutionItemDto res : request.getResolutions()) {
                     String action = res.getAction().toUpperCase();
-                    switch (action) {
-                        case "RETURN":
-                            hasReturn = true;
-                            break;
-                        case "SCRAP":
-                        case "DOWNGRADE":
-                            hasScrap = true;
-                            break;
-                        default: // ACCEPT, PASS
-                            hasAcceptOrPass = true;
-                            break;
+                    if ("RETURN".equals(action)) {
+                        hasReturn = true;
+                    } else { // ACCEPT, PASS
+                        hasAcceptOrPass = true;
                     }
                 }
             }
 
-            // REJECTED chỉ khi toàn bộ item đều RETURN (không có PASS/ACCEPT/SCRAP)
-            // Nếu có item hợp lệ → đơn tiếp tục QC_APPROVED
+            // REJECTED chỉ khi toàn bộ item đều RETURN (không có ACCEPT)
+            // Nếu có ít nhất 1 ACCEPT → đơn tiếp tục QC_APPROVED
             String newOrderStatus;
             String wsMessage;
-            if (hasReturn && !hasAcceptOrPass && !hasScrap) {
-                // Tất cả incident items đều RETURN — nhưng kiểm tra có hàng HỢP LỆ ngoài incident không
-                // (VD: SKU001 trên phiếu vẫn OK, chỉ SKU002 ngoài phiếu bị RETURN)
+            if (hasReturn && !hasAcceptOrPass) {
+                // Toàn bộ incident items đều RETURN — kiểm tra có hàng HỢP LỆ ngoài incident không
                 java.util.Set<Long> incidentSkuIds = incident.getItems().stream()
                         .map(IncidentItemEntity::getSkuId)
                         .collect(java.util.stream.Collectors.toSet());
@@ -318,24 +306,20 @@ public class IncidentService {
                         .count();
 
                 if (validItemsOutsideIncident > 0) {
-                    // Còn hàng hợp lệ → QC_APPROVED, chỉ loại bỏ item RETURN
+                    // Còn hàng hợp lệ ngoài incident → QC_APPROVED, chỉ loại bỏ item RETURN
                     newOrderStatus = "QC_APPROVED";
-                    wsMessage = "Hàng thừa hoàn NCC, hàng hợp lệ tiếp tục tạo GRN";
+                    wsMessage = "Hàng hỏng hoàn NCC, hàng hợp lệ tiếp tục tạo GRN";
                 } else {
                     // Không còn hàng hợp lệ → REJECTED
                     newOrderStatus = "REJECTED";
                     wsMessage = "Toàn bộ hàng hoàn về NCC — đơn bị từ chối";
                 }
             } else {
-                // Có item hợp lệ trong incident → QC_APPROVED
+                // Có ít nhất 1 ACCEPT → QC_APPROVED
                 newOrderStatus = "QC_APPROVED";
-                if (hasReturn) {
-                    wsMessage = "Hàng thừa hoàn NCC, hàng hợp lệ tiếp tục tạo GRN";
-                } else if (hasScrap) {
-                    wsMessage = "Hàng hỏng đã huỷ — đơn chuyển tạo GRN";
-                } else {
-                    wsMessage = "Hàng được chấp nhận — đơn chuyển tạo GRN";
-                }
+                wsMessage = hasReturn
+                        ? "Một phần hàng hoàn NCC, phần còn lại tiếp tục tạo GRN"
+                        : "Hàng được chấp nhận — đơn chuyển tạo GRN";
             }
 
             final String finalStatus = newOrderStatus;

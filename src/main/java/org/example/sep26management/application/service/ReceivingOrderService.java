@@ -1116,19 +1116,13 @@ public class ReceivingOrderService {
                         }
                 }
 
-                // Map skuId -> total actual damage from QC (not discrepancy)
-                Map<Long, BigDecimal> skuDamagedMap = qcDamageItems.stream()
+                // Chỉ có 2 action: ACCEPT (vào GRN) và RETURN (hoàn NCC — đã set condition=RETURNED)
+                // Trừ thêm actionReturnQty từ incident DAMAGE (phòng trường hợp condition chưa được set)
+                Map<Long, BigDecimal> skuReturnMapFromIncident = qcDamageItems.stream()
                         .collect(Collectors.groupingBy(IncidentItemEntity::getSkuId,
                                 Collectors.reducing(BigDecimal.ZERO,
-                                        i -> i.getDamagedQty() != null ? i.getDamagedQty()
-                                                : BigDecimal.ZERO,
-                                        BigDecimal::add)));
-
-                Map<Long, BigDecimal> skuManagerPassMap = qcDamageItems.stream()
-                        .collect(Collectors.groupingBy(IncidentItemEntity::getSkuId,
-                                Collectors.reducing(BigDecimal.ZERO,
-                                        i -> i.getActionPassQty() != null
-                                                ? i.getActionPassQty()
+                                        i -> i.getActionReturnQty() != null
+                                                ? i.getActionReturnQty()
                                                 : BigDecimal.ZERO,
                                         BigDecimal::add)));
 
@@ -1164,15 +1158,14 @@ public class ReceivingOrderService {
                                 log.info("generateGrn: skipping zero-qty item skuId={}", skuId);
                                 continue;
                         }
-                        // Only subtract actual QC damage, not discrepancy amounts
-                        BigDecimal damagedQty = skuDamagedMap.getOrDefault(skuId, BigDecimal.ZERO);
-                        BigDecimal managerPassQty = skuManagerPassMap.getOrDefault(skuId, BigDecimal.ZERO);
+                        // ACCEPT → vào GRN đủ số, RETURN → đã bị lọc qua condition=RETURNED ở trên
+                        // Trừ thêm returnedFromIncidentQty phòng trường hợp condition chưa kịp set
+                        BigDecimal returnedFromIncidentQty = skuReturnMapFromIncident.getOrDefault(skuId, BigDecimal.ZERO);
 
-                        BigDecimal goodQty = receivedQty.subtract(damagedQty);
-                        if (goodQty.compareTo(BigDecimal.ZERO) < 0)
-                                goodQty = BigDecimal.ZERO;
+                        BigDecimal finalPassQty = receivedQty.subtract(returnedFromIncidentQty);
+                        if (finalPassQty.compareTo(BigDecimal.ZERO) < 0)
+                                finalPassQty = BigDecimal.ZERO;
 
-                        BigDecimal finalPassQty = goodQty.add(managerPassQty);
 
                         if (finalPassQty.compareTo(BigDecimal.ZERO) > 0) {
                                 // Auto-calculate lot/date if missing
