@@ -234,25 +234,34 @@ public class IncidentService {
                     throw new RuntimeException("Incident item does not belong to this incident");
                 }
 
+                java.math.BigDecimal effectiveQty = res.getQuantity();
+                if (effectiveQty == null || effectiveQty.compareTo(java.math.BigDecimal.ZERO) <= 0) {
+                    if ("UNEXPECTED_ITEM".equals(item.getReasonCode())) {
+                        effectiveQty = item.getActualQty();
+                    } else {
+                        effectiveQty = item.getDamagedQty();
+                    }
+                }
+
                 if ("PASS".equalsIgnoreCase(res.getAction())) {
                     if (item.getActionPassQty() == null)
                         item.setActionPassQty(java.math.BigDecimal.ZERO);
-                    item.setActionPassQty(item.getActionPassQty().add(res.getQuantity()));
+                    item.setActionPassQty(item.getActionPassQty().add(effectiveQty));
                 } else if ("RETURN".equalsIgnoreCase(res.getAction())) {
                     if (item.getActionReturnQty() == null)
                         item.setActionReturnQty(java.math.BigDecimal.ZERO);
-                    item.setActionReturnQty(item.getActionReturnQty().add(res.getQuantity()));
+                    item.setActionReturnQty(item.getActionReturnQty().add(effectiveQty));
                 } else if ("SCRAP".equalsIgnoreCase(res.getAction()) || "DOWNGRADE".equalsIgnoreCase(res.getAction())) {
                     if (item.getActionScrapQty() == null)
                         item.setActionScrapQty(java.math.BigDecimal.ZERO);
-                    item.setActionScrapQty(item.getActionScrapQty().add(res.getQuantity()));
+                    item.setActionScrapQty(item.getActionScrapQty().add(effectiveQty));
                 }
 
                 // Cập nhật lại note/reason cho item dựa trên phán quyết của manager
                 item.setNote(item.getNote() != null
-                        ? item.getNote() + " | [Manager Decision]: " + res.getAction() + " (Qty: " + res.getQuantity()
+                        ? item.getNote() + " | [Manager Decision]: " + res.getAction() + " (Qty: " + effectiveQty
                         + ")"
-                        : "[Manager Decision]: " + res.getAction() + " (Qty: " + res.getQuantity() + ")");
+                        : "[Manager Decision]: " + res.getAction() + " (Qty: " + effectiveQty + ")");
                 incidentItemRepo.save(item);
             }
         }
