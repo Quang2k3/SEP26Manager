@@ -6,6 +6,8 @@ import org.example.sep26management.application.enums.IncidentType;
 import org.example.sep26management.application.enums.IncidentCategory;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "incidents")
@@ -80,6 +82,10 @@ public class IncidentEntity {
      */
     @Column(name = "picking_task_item_id")
     private Long pickingTaskItemId;
+
+    @OneToMany(mappedBy = "incident", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<IncidentItemEntity> items = new ArrayList<>();
 
     @PrePersist
     protected void onCreate() {
