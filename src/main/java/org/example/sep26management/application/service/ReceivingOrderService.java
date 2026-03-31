@@ -709,6 +709,25 @@ public class ReceivingOrderService {
                         }
                 }
 
+                // ── STEP 0b: QC quét SKU mà Keeper chưa quét (thùng lạc) ────────────
+                java.util.Set<Long> dbSkuIds = dbItems.stream()
+                        .map(ReceivingItemEntity::getSkuId)
+                        .collect(Collectors.toSet());
+                for (Map.Entry<Long, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
+                        Long skuId = entry.getKey();
+                        if (dbSkuIds.contains(skuId)) continue; // Đã check trong Step 0a
+
+                        BigDecimal qcTotal = entry.getValue().values().stream()
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        if (qcTotal.compareTo(BigDecimal.ZERO) > 0) {
+                                String skuCode = skuRepo.findById(skuId)
+                                        .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
+                                mismatchDetails.add(skuCode + " (Keeper=0, QC=" + qcTotal + ") [ngoài phiếu]");
+                                mismatchedSkuIds.add(skuId);
+                                mismatchedSkuCodes.add(skuCode);
+                        }
+                }
+
                 if (!mismatchDetails.isEmpty()) {
                         // Chênh lệch → lưu QC session → yêu cầu Keeper scan lại
                         order.setStatus("KEEPER_RESCAN");
@@ -738,6 +757,23 @@ public class ReceivingOrderService {
                                         receivingItemRepo.save(dbItem);
                                 }
                                 // SKU khớp: giữ nguyên receivedQty
+                        }
+
+                        // Tạo placeholder ReceivingItemEntity cho extra SKU (QC quét nhưng Keeper miss)
+                        for (Long mismatchSkuId : mismatchedSkuIds) {
+                                boolean existsInDb = dbItems.stream()
+                                        .anyMatch(i -> i.getSkuId().equals(mismatchSkuId));
+                                if (!existsInDb) {
+                                        ReceivingItemEntity placeholder = ReceivingItemEntity.builder()
+                                                .receivingOrder(order)
+                                                .skuId(mismatchSkuId)
+                                                .expectedQty(BigDecimal.ZERO)
+                                                .receivedQty(BigDecimal.ZERO)
+                                                .build();
+                                        receivingItemRepo.save(placeholder);
+                                        log.info("Created placeholder ReceivingItem for extra SKU {} on order {}",
+                                                mismatchSkuId, order.getReceivingCode());
+                                }
                         }
 
                         // ── Realtime: notify KEEPER cần quét lại SKU lệch ─────────
