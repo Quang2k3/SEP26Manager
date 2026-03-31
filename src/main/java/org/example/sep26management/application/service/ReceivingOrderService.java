@@ -823,6 +823,9 @@ public class ReceivingOrderService {
                         BigDecimal totalScanned = passQty.add(failQty);
                         dbItem.setReceivedQty(totalScanned);
 
+                        BigDecimal expectedQty = dbItem.getExpectedQty() != null
+                                ? dbItem.getExpectedQty() : BigDecimal.ZERO;
+
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                 hasIssues = true;
 
@@ -835,12 +838,10 @@ public class ReceivingOrderService {
                                         .findFirst()
                                         .orElse(null);
 
-                                BigDecimal originalExpectedQty = dbItem.getExpectedQty();
-
                                 IncidentItemEntity incidentItem = IncidentItemEntity.builder()
                                         .skuId(skuId)
                                         .damagedQty(failQty)              // Hàng hỏng
-                                        .expectedQty(originalExpectedQty)  // SL giấy tờ gốc
+                                        .expectedQty(expectedQty)          // SL giấy tờ gốc
                                         .actualQty(totalScanned)           // SL QC thực tế (pass + fail)
                                         .reasonCode("DAMAGE")
                                         .note("Báo cáo từ QC Scanner")
@@ -853,6 +854,33 @@ public class ReceivingOrderService {
 
                                 dbItem.setCondition("FAIL");
                                 dbItem.setQcRequired(true);
+                        } else if (totalScanned.compareTo(expectedQty) > 0
+                                && expectedQty.compareTo(BigDecimal.ZERO) > 0) {
+                                // [FIX] OVERAGE: QC quét nhiều hơn số lượng trên phiếu (toàn bộ PASS)
+                                // → cần Manager quyết định: nhập hết hay hoàn hàng thừa
+                                hasIssues = true;
+
+                                BigDecimal overageQty = totalScanned.subtract(expectedQty);
+                                log.info("OVERAGE detected for SKU {} on order {}: expected={}, scanned={}, overage={}",
+                                        skuId, order.getReceivingCode(), expectedQty, totalScanned, overageQty);
+
+                                IncidentItemEntity overageItem = IncidentItemEntity.builder()
+                                        .skuId(skuId)
+                                        .damagedQty(BigDecimal.ZERO)   // Không hỏng
+                                        .expectedQty(expectedQty)       // SL giấy tờ gốc
+                                        .actualQty(totalScanned)        // SL QC thực tế (thừa)
+                                        .reasonCode("OVERAGE")
+                                        .note("Hàng thừa so với phiếu — QC quét " + totalScanned
+                                                + " nhưng phiếu chỉ có " + expectedQty
+                                                + " (thừa " + overageQty + " thùng)")
+                                        .actionPassQty(BigDecimal.ZERO)
+                                        .actionReturnQty(BigDecimal.ZERO)
+                                        .actionScrapQty(BigDecimal.ZERO)
+                                        .build();
+                                incidentItems.add(overageItem);
+
+                                dbItem.setCondition("PASS"); // Hàng tốt, chỉ bị thừa
+                                dbItem.setQcRequired(true);  // Đánh dấu cần xử lý
                         } else {
                                 dbItem.setCondition("PASS");
                         }
@@ -920,11 +948,13 @@ public class ReceivingOrderService {
                         // [FIX] incidentCode là nullable=false — phải set, không thì PSQLException → 500
                         String incCode = "INC-QC-RCV-" + id + "-" + (System.currentTimeMillis() % 100_000);
 
-                        long damageCount = incidentItems.stream().filter(i -> "DAMAGE".equals(i.getReasonCode())).count();
-                        long extraCount  = incidentItems.stream().filter(i -> "UNEXPECTED_ITEM".equals(i.getReasonCode())).count();
-                        String incDesc = "Hàng lỗi phát hiện qua bước kiểm định QC (Scanner)"
-                                + (damageCount > 0 ? " — " + damageCount + " SKU hỏng" : "")
-                                + (extraCount > 0 ? " — " + extraCount + " SKU ngoài phiếu" : "");
+                        long damageCount  = incidentItems.stream().filter(i -> "DAMAGE".equals(i.getReasonCode())).count();
+                        long extraCount   = incidentItems.stream().filter(i -> "UNEXPECTED_ITEM".equals(i.getReasonCode())).count();
+                        long overageCount = incidentItems.stream().filter(i -> "OVERAGE".equals(i.getReasonCode())).count();
+                        String incDesc = "Phát hiện bất thường qua bước kiểm định QC (Scanner)"
+                                + (damageCount  > 0 ? " — " + damageCount  + " SKU hỏng" : "")
+                                + (overageCount > 0 ? " — " + overageCount + " SKU thừa số lượng" : "")
+                                + (extraCount   > 0 ? " — " + extraCount   + " SKU ngoài phiếu" : "");
 
                         IncidentEntity incident = IncidentEntity.builder()
                                 .warehouseId(order.getWarehouseId())
