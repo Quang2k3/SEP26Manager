@@ -495,16 +495,9 @@ public class ReceivingOrderService {
                                         it -> it.getReceivedQty() != null ? it.getReceivedQty() : BigDecimal.ZERO,
                                         BigDecimal::add));
 
-                        // Chỉ so sánh SKU có trên phiếu (expectedQty > 0)
-                        java.util.Set<Long> orderSkuIds = freshItems.stream()
-                                .filter(it -> it.getExpectedQty() != null
-                                        && it.getExpectedQty().compareTo(BigDecimal.ZERO) > 0)
-                                .map(ReceivingItemEntity::getSkuId)
-                                .collect(Collectors.toSet());
-
+                        // So sánh TẤT CẢ SKU giữa QC và Keeper (bao gồm cả hàng ngoài phiếu)
                         java.util.Set<Long> allSkuIds = new java.util.HashSet<>(qcTotals.keySet());
                         allSkuIds.addAll(keeperTotals.keySet());
-                        allSkuIds.retainAll(orderSkuIds);
 
                         boolean keeperMatchesQc = true;
                         List<String> rescanMismatches = new ArrayList<>();
