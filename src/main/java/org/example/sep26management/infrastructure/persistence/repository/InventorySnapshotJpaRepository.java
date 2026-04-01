@@ -152,6 +152,9 @@ public interface InventorySnapshotJpaRepository
                 @Param("skuId") Long skuId);
 
         // [FIX] Ton kho tong hop theo SKU cho dashboard chart
+        // [BUG-FIX] BỎ `AND s.quantity > 0`: khi confirmPicked trừ quantity về 0
+        // nhưng reserved_qty vẫn > 0 ở row đó → filter quantity>0 bỏ qua row này
+        // → tổng reserved thấp hơn thực tế → availableQty hiện CAO hơn thực tế.
         @Query(value = """
             SELECT s.sku_id AS skuId,
                    sk.sku_code AS skuCode,
@@ -167,7 +170,7 @@ public interface InventorySnapshotJpaRepository
               AND l.is_staging    = false
               AND l.is_defect     = false
               AND l.location_type = 'BIN'
-              AND s.quantity      > 0
+              AND (s.quantity > 0 OR s.reserved_qty > 0)
             GROUP BY s.sku_id, sk.sku_code, sk.sku_name
             ORDER BY SUM(s.quantity - COALESCE(s.reserved_qty, 0)) DESC
             LIMIT 20
