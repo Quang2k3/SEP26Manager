@@ -600,7 +600,6 @@ public class IncidentService {
                         .expectedQty(entry.getValue())
                         .receivedQty(java.math.BigDecimal.ZERO)
                         .qcRequired(false) 
-                        .createdAt(java.time.LocalDateTime.now())
                         .build();
                 receivingItemRepo.save(newItem);
             }

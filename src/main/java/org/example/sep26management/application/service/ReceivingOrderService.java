@@ -826,18 +826,17 @@ public class ReceivingOrderService {
                         BigDecimal expectedQty = dbItem.getExpectedQty() != null
                                 ? dbItem.getExpectedQty() : BigDecimal.ZERO;
 
+                        // Retrieve attachmentUrl if there are any failures
+                        String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0 ? lines.stream()
+                                .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId) && "FAIL".equals(l.getCondition()))
+                                .map(ScanLineItem::getAttachmentUrl)
+                                .filter(u -> u != null && !u.isBlank())
+                                .findFirst()
+                                .orElse(null) : null;
+
                         // 1. Kiểm tra hàng hỏng (DAMAGE)
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                 hasIssues = true;
-
-                                // Gộp attachmentUrl từ mọi line FAIL của SKU này
-                                String attachmentUrl = lines.stream()
-                                        .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId)
-                                                && "FAIL".equals(l.getCondition()))
-                                        .map(ScanLineItem::getAttachmentUrl)
-                                        .filter(u -> u != null && !u.isBlank())
-                                        .findFirst()
-                                        .orElse(null);
 
                                 IncidentItemEntity incidentItem = IncidentItemEntity.builder()
                                         .skuId(skuId)
@@ -870,13 +869,14 @@ public class ReceivingOrderService {
 
                                         IncidentItemEntity overageItem = IncidentItemEntity.builder()
                                                 .skuId(skuId)
-                                                .damagedQty(BigDecimal.ZERO)   // [FIX] KHÔNG mượn trường damagedQty, tránh UI hiển thị nhầm vào cột Hàng hỏng
+                                                .damagedQty(failQty)
                                                 .expectedQty(expectedQty)
                                                 .actualQty(totalScanned)       // UI tính thừa thiếu qua actualQty - expectedQty
                                                 .reasonCode("OVERAGE")
                                                 .note("Hàng thừa so với phiếu — QC quét " + totalScanned
                                                         + " nhưng phiếu chỉ có " + expectedQty
                                                         + " (thừa " + overageQty + " thùng)")
+                                                .attachmentUrl(attachmentUrl)
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)
                                                 .actionScrapQty(BigDecimal.ZERO)
@@ -892,13 +892,14 @@ public class ReceivingOrderService {
 
                                         IncidentItemEntity shortageItem = IncidentItemEntity.builder()
                                                 .skuId(skuId)
-                                                .damagedQty(BigDecimal.ZERO)   // [FIX] KHÔNG mượn trường damagedQty
+                                                .damagedQty(failQty)
                                                 .expectedQty(expectedQty)
                                                 .actualQty(totalScanned)       // UI tính thừa thiếu qua actualQty - expectedQty
                                                 .reasonCode("SHORTAGE")
                                                 .note("Hàng thiếu so với phiếu — dự kiến " + expectedQty
                                                         + " nhưng QC chỉ quét " + totalScanned
                                                         + " (thiếu " + shortageQty + " thùng)")
+                                                .attachmentUrl(attachmentUrl)
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)
                                                 .actionScrapQty(BigDecimal.ZERO)
