@@ -612,19 +612,33 @@ public class OutboundService {
         return total.subtract(reserved).max(BigDecimal.ZERO);
     }
 
+    // Các trạng thái mà hàng đã được allocate/pick rồi — tồn kho đã trừ khỏi bin,
+    // nên so sánh tồn kho real-time vs orderedQty sẽ cho kết quả sai ("Thiếu" dù đã lấy đủ hàng).
+    private static final Set<String> POST_ALLOCATE_STATUSES = Set.of(
+            "ALLOCATED", "PICKING", "QC_SCAN", "QC_PASSED", "DISPATCHED", "COMPLETED"
+    );
+
     private OutboundResponse buildSalesOrderResponse(
             SalesOrderEntity so, List<SalesOrderItemEntity> items,
             CustomerEntity customer, List<OutboundResponse.StockWarning> warnings) {
+
+        boolean isPostAllocate = POST_ALLOCATE_STATUSES.contains(so.getStatus());
 
         List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream().map(i -> {
             BigDecimal available = getAvailableQty(so.getWarehouseId(), i.getSkuId());
             String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
             String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
+
+            // Sau khi ALLOCATED, hàng đã bị trừ khỏi bin (confirmPicked).
+            // Tồn kho hiện tại thấp là bình thường, không phải thiếu hàng cho đơn này.
+            BigDecimal displayAvailable = isPostAllocate ? i.getOrderedQty() : available;
+            boolean isInsufficient = isPostAllocate ? false : available.compareTo(i.getOrderedQty()) < 0;
+
             return OutboundResponse.OutboundItemResponse.builder()
                     .itemId(i.getSoItemId()).skuId(i.getSkuId())
                     .skuCode(skuCode).skuName(skuName)
-                    .requestedQty(i.getOrderedQty()).availableQty(available)
-                    .insufficientStock(available.compareTo(i.getOrderedQty()) < 0)
+                    .requestedQty(i.getOrderedQty()).availableQty(displayAvailable)
+                    .insufficientStock(isInsufficient)
                     .note(i.getNote()).build();
         }).toList();
 
@@ -655,15 +669,21 @@ public class OutboundService {
             TransferEntity transfer, List<TransferItemEntity> items,
             WarehouseEntity dest, List<OutboundResponse.StockWarning> warnings) {
 
+        boolean isPostAllocate = POST_ALLOCATE_STATUSES.contains(transfer.getStatus());
+
         List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream().map(i -> {
             BigDecimal available = getAvailableQty(transfer.getFromWarehouseId(), i.getSkuId());
             String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
             String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
+
+            BigDecimal displayAvailable = isPostAllocate ? i.getQuantity() : available;
+            boolean isInsufficient = isPostAllocate ? false : available.compareTo(i.getQuantity()) < 0;
+
             return OutboundResponse.OutboundItemResponse.builder()
                     .itemId(i.getTransferItemId()).skuId(i.getSkuId())
                     .skuCode(skuCode).skuName(skuName)
-                    .requestedQty(i.getQuantity()).availableQty(available)
-                    .insufficientStock(available.compareTo(i.getQuantity()) < 0)
+                    .requestedQty(i.getQuantity()).availableQty(displayAvailable)
+                    .insufficientStock(isInsufficient)
                     .build();
         }).toList();
 
