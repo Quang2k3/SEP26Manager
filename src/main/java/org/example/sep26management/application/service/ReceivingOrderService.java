@@ -60,22 +60,12 @@ public class ReceivingOrderService {
     // ─── List ──────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public ApiResponse<PageResponse<ReceivingOrderResponse>> listOrders(
-            String status, int page, int size, Long createdBy) {
+    public ApiResponse<PageResponse<ReceivingOrderResponse>> listOrders(String status, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
 
-        // createdBy != null → Keeper: chỉ thấy đơn do mình tạo
-        // createdBy == null → Manager/QC: thấy tất cả đơn
-        Page<ReceivingOrderEntity> ordersPage;
-        if (createdBy != null) {
-            ordersPage = status != null && !status.isBlank()
-                    ? receivingOrderRepo.findByStatusAndCreatedByOrderByCreatedAtDesc(status, createdBy, pageable)
-                    : receivingOrderRepo.findByCreatedByOrderByCreatedAtDesc(createdBy, pageable);
-        } else {
-            ordersPage = status != null && !status.isBlank()
-                    ? receivingOrderRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
-                    : receivingOrderRepo.findAllByOrderByCreatedAtDesc(pageable);
-        }
+        Page<ReceivingOrderEntity> ordersPage = status != null && !status.isBlank()
+                ? receivingOrderRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
+                : receivingOrderRepo.findAllByOrderByCreatedAtDesc(pageable);
 
         List<ReceivingOrderResponse> content = ordersPage.getContent().stream()
                 .map(o -> toSummaryResponse(o))
@@ -164,7 +154,6 @@ public class ReceivingOrderService {
                                                                 org.example.sep26management.application.dto.request.ReceivingOrderRequest request,
                                                                 Long userId) {
         ReceivingOrderEntity order = findOrder(id);
-        validateOwner(order, userId, "chỉnh sửa");
         if (!"DRAFT".equals(order.getStatus())) {
             throw new org.example.sep26management.infrastructure.exception.BusinessException(
                     "Cannot update: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
@@ -233,7 +222,6 @@ public class ReceivingOrderService {
     @Transactional
     public ApiResponse<Void> deleteDraftOrder(Long id, Long userId) {
         ReceivingOrderEntity order = findOrder(id);
-        validateOwner(order, userId, "xóa");
         if (!"DRAFT".equals(order.getStatus())) {
             throw new org.example.sep26management.infrastructure.exception.BusinessException(
                     "Cannot delete: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
@@ -396,7 +384,6 @@ public class ReceivingOrderService {
     @Transactional
     public ApiResponse<ReceivingOrderResponse> submit(Long id, Long userId) {
         ReceivingOrderEntity order = findOrder(id);
-        validateOwner(order, userId, "submit");
         validateStatus(order, "submit", "DRAFT");
 
         order.setStatus("SUBMITTED");
@@ -1111,6 +1098,21 @@ public class ReceivingOrderService {
         sessionRedis.delete(sessionId);
         sseRegistry.remove(sessionId);
 
+        // Release QC claim trên ReceivingOrder — cho phép QC khác xử lý tiếp nếu cần
+        receivingOrderRepo.releaseQcAssignment(id, qcUserId);
+        log.info("[QCClaim] Released QC claim: receivingId={} qcUserId={}", id, qcUserId);
+
+        // Push WS → QC khác biết phiếu này available lại (hoặc chuyển sang status mới)
+        try {
+            notificationService.notifyRoles(
+                    new String[]{"QC", "MANAGER", "KEEPER"},
+                    "qc_released",
+                    id,
+                    order.getReceivingCode(),
+                    "QC hoàn thành kiểm định"
+            );
+        } catch (Exception ignored) {}
+
         return ApiResponse.success("QC scan session submitted successfully", Map.of(
                 "receivingId", order.getReceivingId(),
                 "status", order.getStatus(),
@@ -1342,21 +1344,6 @@ public class ReceivingOrderService {
                         "Receiving order not found: " + id));
     }
 
-    /**
-     * Kiểm tra userId có phải chủ đơn không.
-     * Keeper chỉ được thao tác đơn do chính mình tạo.
-     * Manager không bị giới hạn (role check ở controller level).
-     */
-    private void validateOwner(ReceivingOrderEntity order, Long userId, String action) {
-        if (userId == null) return; // scanner token — không có userId rõ ràng
-        if (!userId.equals(order.getCreatedBy())) {
-            log.warn("[OwnerCheck] userId={} cố {} đơn #{} của userId={}",
-                    userId, action, order.getReceivingId(), order.getCreatedBy());
-            throw new org.example.sep26management.infrastructure.exception.BusinessException(
-                    "Bạn không có quyền " + action + " đơn này. Chỉ người tạo đơn mới được phép.");
-        }
-    }
-
     private void validateStatus(ReceivingOrderEntity order, String action, String... expectedStatuses) {
         boolean isValid = false;
         for (String expected : expectedStatuses) {
@@ -1436,11 +1423,6 @@ public class ReceivingOrderService {
                 .rejectReason(o.getRejectReason())
                 .totalExpectedQty(totalExpectedQty)
                 .totalLines(items.size())
-                .assignedQcId(o.getAssignedQcId())
-                .assignedQcName(o.getAssignedQcId() != null
-                        ? userRepo.findById(o.getAssignedQcId())
-                        .map(UserEntity::getFullName).orElse(null)
-                        : null)
                 .build();
     }
 
