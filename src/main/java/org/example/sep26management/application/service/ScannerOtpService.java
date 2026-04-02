@@ -6,12 +6,15 @@ import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.scan.ScannerOtpData;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.persistence.redis.ScannerOtpRedisRepository;
+import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
 import org.example.sep26management.infrastructure.security.JwtTokenProvider;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -19,21 +22,23 @@ import java.util.UUID;
  * Business logic cho Secure QR Scanner Flow.
  *
  * FLOW:
- *  Step 1 — Keeper/QC bấm "Generate QR":
- *    POST /v1/scanner-otp/generate
- *    → sessionId (UUID) + OTP BCrypt-hashed → Redis TTL 24h
- *    → OTP gửi email (KHÔNG có trong response / URL)
- *    → response: { sessionId, ttlSeconds, message }
+ *  Step 1 — Keeper/QC bấm "Generate QR" trên web:
+ *    POST /v1/scanner-otp/generate?receivingId=284
+ *    → Nếu QC: atomic claim receiving_orders.assigned_qc_id ngay lập tức
+ *    → sessionId + OTP BCrypt-hashed → Redis TTL 24h
+ *    → OTP gửi email (KHÔNG có trong response)
+ *    → response: { sessionId, ttlSeconds }
+ *    → Push WS "qc_claimed" → QC khác thấy lock ngay (< 2s)
  *
- *  Step 2 — Mobile mở: /scan?sessionId={uuid}
- *    → FE hiện form nhập OTP
+ *  Step 2 — Mobile mở: /scan?sessionId={uuid} → nhập OTP
  *
  *  Step 3 — Mobile POST /v1/scanner-otp/verify { sessionId, otp }
- *    → validate: tồn tại, chưa used, brute-force ok, OTP khớp
- *    → cấp SCANNER_TEMP JWT (TTL = thời gian còn lại)
- *    → xóa session (one-time done)
+ *    → validate → cấp SCANNER_TEMP JWT
  *
- *  Step 4 — Scanner gửi scan-events với SCANNER_TEMP JWT
+ *  Step 4 — Phone gọi POST /receiving-sessions?receivingId=284
+ *    → tạo ScanSessionData với assignedQcId đã set sẵn
+ *
+ *  Step 5 — Phone scan barcode → POST /v1/scan-events
  */
 @Service
 @RequiredArgsConstructor
@@ -42,13 +47,16 @@ public class ScannerOtpService {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
-    private final ScannerOtpRedisRepository otpRedis;
-    private final JwtTokenProvider          jwtTokenProvider;
-    private final EmailService              emailService;
-    private final PasswordEncoder           passwordEncoder;
+    private final ScannerOtpRedisRepository  otpRedis;
+    private final JwtTokenProvider           jwtTokenProvider;
+    private final EmailService               emailService;
+    private final PasswordEncoder            passwordEncoder;
+    private final ReceivingOrderJpaRepository receivingOrderRepo;
+    private final NotificationService        notificationService;
 
     // ─── Step 1: Generate QR ─────────────────────────────────────────────────
 
+    @Transactional
     public ApiResponse<Map<String, Object>> generateQr(
             Long userId, String userEmail, String role,
             Long warehouseId, String clientIp, Long receivingId) {
@@ -62,6 +70,40 @@ public class ScannerOtpService {
             throw new BusinessException("Quá nhiều yêu cầu tạo QR. Vui lòng thử lại sau 15 phút.");
         }
 
+        // ── QC claim: xảy ra ngay khi bấm "QC Scan" trên web ─────────────────
+        // Không đợi scan QR hay nhập OTP — claim ngay để QC B thấy lock sớm nhất có thể.
+        // Nếu đã có QC khác claim → từ chối, không gửi OTP.
+        if ("QC".equals(role) && receivingId != null) {
+            int claimed = receivingOrderRepo.claimQcAssignment(receivingId, userId);
+            if (claimed == 0) {
+                // Kiểm tra có phải chính mình đang claim không (re-generate QR)
+                var orderOpt = receivingOrderRepo.findById(receivingId);
+                if (orderOpt.isPresent() && orderOpt.get().getAssignedQcId() != null
+                        && !orderOpt.get().getAssignedQcId().equals(userId)) {
+                    log.warn("[QCClaim-OTP] Phiếu #{} đã bị QC userId={} claim. Từ chối userId={}.",
+                            receivingId, orderOpt.get().getAssignedQcId(), userId);
+                    throw new BusinessException(
+                            "Phiếu #" + receivingId + " đang được QC khác kiểm định. "
+                                    + "Vui lòng chờ hoặc liên hệ quản lý.");
+                }
+                // Nếu assigned_qc_id == userId → chính mình re-generate QR → cho phép tiếp tục
+                log.info("[QCClaim-OTP] QC userId={} re-generating QR for receivingId={}", userId, receivingId);
+            } else {
+                // Claim thành công → push WS ngay để QC B thấy lock
+                log.info("[QCClaim-OTP] QC userId={} claimed receivingId={}", userId, receivingId);
+                try {
+                    notificationService.notifyRoles(
+                            new String[]{"QC", "MANAGER"},
+                            "qc_claimed",
+                            receivingId,
+                            "Phiếu #" + receivingId,
+                            "QC userId=" + userId + " bắt đầu kiểm định"
+                    );
+                } catch (Exception ignored) {}
+            }
+        }
+
+        // Tạo OTP session
         String sessionId = UUID.randomUUID().toString();
         String rawOtp    = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
         String otpHash   = passwordEncoder.encode(rawOtp);
@@ -73,7 +115,7 @@ public class ScannerOtpService {
                 .role(role)
                 .otpHash(otpHash)
                 .warehouseId(warehouseId)
-                .receivingId(receivingId)          // bind phiếu cụ thể vào QR
+                .receivingId(receivingId)
                 .used(false)
                 .createdAt(Instant.now().toString())
                 .failedAttempts(0)
@@ -81,19 +123,17 @@ public class ScannerOtpService {
 
         otpRedis.save(data);
         otpRedis.incrementRateLimit(userId, clientIp);
-
-        // Gửi OTP qua email bất đồng bộ
         sendScannerOtpEmail(userEmail, rawOtp, role, sessionId);
 
-        log.info("[ScannerOtp] Generated: sessionId={} userId={} role={} warehouse={}",
-                sessionId, userId, role, warehouseId);
+        log.info("[ScannerOtp] Generated: sessionId={} userId={} role={} receivingId={}",
+                sessionId, userId, role, receivingId);
 
-        return ApiResponse.success("QR đã tạo. OTP đã gửi về email.", Map.of(
-                "sessionId",  sessionId,
-                "role",       role,
-                "ttlSeconds", 86400L,
-                "message",    "OTP đã gửi về " + maskEmail(userEmail)
-        ));
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("sessionId",  sessionId);
+        resp.put("role",       role);
+        resp.put("ttlSeconds", 86400L);
+        resp.put("message",    "OTP đã gửi về " + maskEmail(userEmail));
+        return ApiResponse.success("QR đã tạo. OTP đã gửi về email.", resp);
     }
 
     // ─── Step 3: Verify OTP ───────────────────────────────────────────────────
@@ -105,32 +145,26 @@ public class ScannerOtpService {
                 .orElseThrow(() -> new BusinessException(
                         "QR không hợp lệ hoặc đã hết hạn. Vui lòng tạo QR mới."));
 
-        // Rate limit trên userId+IP
         if (otpRedis.isRateLimited(data.getUserId(), clientIp)) {
             throw new BusinessException("Quá nhiều lần thử. Vui lòng thử lại sau 15 phút.");
         }
 
-        // Replay attack check
         if (data.isUsed()) {
             throw new BusinessException("QR này đã được sử dụng. Vui lòng tạo QR mới.");
         }
 
-        // Session-level brute force check
         if (data.getFailedAttempts() >= ScannerOtpData.MAX_FAILED_ATTEMPTS) {
             otpRedis.delete(sessionId);
             throw new BusinessException("QR bị khoá do nhập sai quá nhiều lần. Vui lòng tạo QR mới.");
         }
 
-        // Verify OTP (BCrypt)
         if (!passwordEncoder.matches(inputOtp, data.getOtpHash())) {
             data.setFailedAttempts(data.getFailedAttempts() + 1);
             otpRedis.update(data);
             otpRedis.incrementRateLimit(data.getUserId(), clientIp);
-
             int remaining = ScannerOtpData.MAX_FAILED_ATTEMPTS - data.getFailedAttempts();
             log.warn("[ScannerOtp] Wrong OTP: sessionId={} userId={} attempts={}/{}",
                     sessionId, data.getUserId(), data.getFailedAttempts(), ScannerOtpData.MAX_FAILED_ATTEMPTS);
-
             if (remaining <= 0) {
                 otpRedis.delete(sessionId);
                 throw new BusinessException("OTP sai. QR đã bị khoá. Vui lòng tạo QR mới.");
@@ -138,10 +172,8 @@ public class ScannerOtpService {
             throw new BusinessException("OTP không đúng. Còn " + remaining + " lần thử.");
         }
 
-        // ✓ OTP đúng — lấy TTL còn lại trước khi xoá
+        // OTP đúng
         long remainingTtl = otpRedis.getTtlSeconds(sessionId);
-
-        // Mark used + xoá session (one-time done)
         data.setUsed(true);
         otpRedis.update(data);
         otpRedis.delete(sessionId);
@@ -150,30 +182,28 @@ public class ScannerOtpService {
         log.info("[ScannerOtp] OTP verified ✓ sessionId={} userId={} role={}",
                 sessionId, data.getUserId(), data.getRole());
 
-        // Cấp SCANNER_TEMP JWT — TTL = thời gian còn lại của session (max 24h)
         long tokenTtlMs = Math.min(remainingTtl, 86_400L) * 1_000L;
         String scannerToken = jwtTokenProvider.generateScannerTemporaryToken(
                 sessionId, data.getWarehouseId(), data.getRole(), data.getUserId(), tokenTtlMs);
 
-        // Build response — includinging receivingId để FE (OtpGate) truyền vào createSession
-        java.util.Map<String, Object> verifyResult = new java.util.HashMap<>();
-        verifyResult.put("scannerToken", scannerToken);
-        verifyResult.put("role",         data.getRole());
-        verifyResult.put("warehouseId",  data.getWarehouseId());
-        verifyResult.put("sessionId",    sessionId);
-        verifyResult.put("ttlSeconds",   remainingTtl);
+        Map<String, Object> result = new HashMap<>();
+        result.put("scannerToken", scannerToken);
+        result.put("role",         data.getRole());
+        result.put("warehouseId",  data.getWarehouseId());
+        result.put("sessionId",    sessionId);
+        result.put("ttlSeconds",   remainingTtl);
         if (data.getReceivingId() != null) {
-            verifyResult.put("receivingId", data.getReceivingId());
+            result.put("receivingId", data.getReceivingId());
         }
-        return ApiResponse.success("Xác thực OTP thành công. Scanner sẵn sàng.", verifyResult);
+        return ApiResponse.success("Xác thực OTP thành công. Scanner sẵn sàng.", result);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private void sendScannerOtpEmail(String email, String otp, String role, String sessionId) {
-        String roleVi   = "KEEPER".equals(role) ? "Thủ kho (Keeper)" : "Kiểm soát chất lượng (QC)";
-        String subject  = "[WMS] Mã OTP Scanner — " + roleVi;
-        String body     = String.format("""
+        String roleVi  = "KEEPER".equals(role) ? "Thủ kho (Keeper)" : "Kiểm soát chất lượng (QC)";
+        String subject = "[WMS] Mã OTP Scanner — " + roleVi;
+        String body    = String.format("""
                 Xin chào,
 
                 Bạn vừa yêu cầu tạo QR Scanner cho vai trò: %s
@@ -193,8 +223,7 @@ public class ScannerOtpService {
 
     private String maskEmail(String email) {
         if (email == null || !email.contains("@")) return "***";
-        String[] parts  = email.split("@");
-        String   masked = parts[0].charAt(0) + "***";
-        return masked + "@" + parts[1];
+        String[] parts = email.split("@");
+        return parts[0].charAt(0) + "***@" + parts[1];
     }
 }
