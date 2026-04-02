@@ -41,56 +41,64 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             if (StringUtils.hasText(jwt) && jwtTokenProvider.validateToken(jwt)) {
 
-                // ── SCANNER token path (iPhone scan events) ──────────────────
+                // ── SCANNER token path (SCANNER / SCANNER_TEMP) ──────────────
                 if (jwtTokenProvider.isScanToken(jwt)) {
                     String sessionId = jwtTokenProvider.getSessionIdFromScanToken(jwt);
 
-                    // Read roles from token claims (roles="KEEPER") instead of hardcoding
-                    // ROLE_SCANNER
                     Set<String> roleCodes = jwtTokenProvider.getRoleCodesFromToken(jwt);
                     List<SimpleGrantedAuthority> authorities = roleCodes.isEmpty()
                             ? List.of(new SimpleGrantedAuthority("ROLE_KEEPER"))
                             : roleCodes.stream()
-                                    .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
-                                    .collect(Collectors.toList());
+                            .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
+                            .collect(Collectors.toList());
 
-                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                            "scanner:" + sessionId, null, authorities);
+                    UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken("scanner:" + sessionId, null, authorities);
 
                     Map<String, Object> details = new HashMap<>();
                     details.put("sessionId", sessionId);
-                    // Extract userId from scan token if present (for submit API etc.)
+
+                    // ── FIX: Extract userId ───────────────────────────────────
                     try {
                         Long scanUserId = jwtTokenProvider.getUserIdFromToken(jwt);
-                        if (scanUserId != null) {
-                            details.put("userId", scanUserId);
-                        }
-                    } catch (Exception ignored) {
-                    }
-                    authentication.setDetails(details);
+                        if (scanUserId != null) details.put("userId", scanUserId);
+                    } catch (Exception ignored) {}
 
+                    // ── FIX: Extract warehouseId → wrap thành warehouseIds list ─
+                    // SCANNER_TEMP token lưu "warehouseId" (singular) trong claims.
+                    // ReceivingSessionController.extractWarehouseId() đọc "warehouseIds" (list).
+                    // Bridge ở đây để cả 2 đều hoạt động.
+                    try {
+                        Long wid = jwtTokenProvider.getWarehouseIdFromScanToken(jwt);
+                        if (wid != null) {
+                            details.put("warehouseId",  wid);
+                            details.put("warehouseIds", List.of(wid)); // ← key ReceivingSessionController cần
+                        }
+                    } catch (Exception ignored) {}
+
+                    authentication.setDetails(details);
                     SecurityContextHolder.getContext().setAuthentication(authentication);
 
                 } else {
                     // ── Normal user token path ────────────────────────────────
-                    String email = jwtTokenProvider.getEmailFromToken(jwt);
-                    Long userId = jwtTokenProvider.getUserIdFromToken(jwt);
-                    Set<String> roleCodes = jwtTokenProvider.getRoleCodesFromToken(jwt);
-                    List<Long> warehouseIds = jwtTokenProvider.getWarehouseIdsFromToken(jwt);
+                    String email        = jwtTokenProvider.getEmailFromToken(jwt);
+                    Long   userId       = jwtTokenProvider.getUserIdFromToken(jwt);
+                    Set<String> roleCodes    = jwtTokenProvider.getRoleCodesFromToken(jwt);
+                    List<Long>  warehouseIds = jwtTokenProvider.getWarehouseIdsFromToken(jwt);
 
                     List<SimpleGrantedAuthority> authorities = roleCodes.stream()
                             .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
                             .collect(Collectors.toList());
 
-                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(email,
-                            null, authorities);
+                    UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken(email, null, authorities);
 
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                     Map<String, Object> details = new HashMap<>();
-                    details.put("userId", userId);
-                    details.put("email", email);
-                    details.put("roles", roleCodes);
+                    details.put("userId",       userId);
+                    details.put("email",        email);
+                    details.put("roles",        roleCodes);
                     details.put("warehouseIds", warehouseIds);
                     authentication.setDetails(details);
 
