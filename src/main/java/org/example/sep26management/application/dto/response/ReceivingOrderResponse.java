@@ -52,6 +52,17 @@ public class ReceivingOrderResponse {
     @Schema(description = "Tên NV tạo", example = "Bui Quang")
     private String createdByName;
 
+    /**
+     * QC claim lock — userId của QC đang giữ phiên scan đơn này.
+     * NULL = chưa có QC nào bắt đầu scan.
+     * FE dùng để ẩn nút "QC Scan" với QC khác khi đơn đã bị QC A claim.
+     */
+    @Schema(description = "ID QC đang giữ phiên scan", example = "7")
+    private Long assignedQcId;
+
+    @Schema(description = "Tên QC đang giữ phiên scan", example = "Nguyen Thi C")
+    private String assignedQcName;
+
     @Schema(description = "Thời gian tạo", example = "2026-03-08T10:00:00")
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

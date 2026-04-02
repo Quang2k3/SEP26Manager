@@ -1436,6 +1436,11 @@ public class ReceivingOrderService {
                 .rejectReason(o.getRejectReason())
                 .totalExpectedQty(totalExpectedQty)
                 .totalLines(items.size())
+                .assignedQcId(o.getAssignedQcId())
+                .assignedQcName(o.getAssignedQcId() != null
+                        ? userRepo.findById(o.getAssignedQcId())
+                        .map(UserEntity::getFullName).orElse(null)
+                        : null)
                 .build();
     }
 
