@@ -185,6 +185,24 @@ public class JwtTokenProvider {
         return claims.getSubject();
     }
 
+    /**
+     * Lấy warehouseId (singular) từ SCANNER / SCANNER_TEMP token.
+     * Dùng trong JwtAuthenticationFilter để bridge sang warehouseIds list
+     * mà ReceivingSessionController cần.
+     */
+    public Long getWarehouseIdFromScanToken(String token) {
+        try {
+            Object raw = parseClaims(token).get("warehouseId");
+            if (raw == null)            return null;
+            if (raw instanceof Long l)  return l;
+            if (raw instanceof Integer i) return i.longValue();
+            if (raw instanceof Number n)  return n.longValue();
+            return Long.parseLong(raw.toString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public boolean isScanToken(String token) {
         try {
             String type = parseClaims(token).get("type", String.class);
