@@ -8,6 +8,8 @@ import org.example.sep26management.application.dto.response.PageResponse;
 import org.example.sep26management.application.dto.response.PutawayAllocationResponse;
 import org.example.sep26management.application.dto.response.PutawaySuggestion;
 import org.example.sep26management.application.dto.response.PutawayTaskResponse;
+import org.example.sep26management.application.event.PutawayEventPublisher;
+import org.example.sep26management.application.event.PutawayTaskEvent;
 import org.example.sep26management.infrastructure.persistence.entity.LocationEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayAllocationEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskEntity;
@@ -52,6 +54,7 @@ public class PutawayTaskService {
     private final GrnJpaRepository grnRepo;
     private final NotificationService notificationService;
     private final ReceivingOrderJpaRepository receivingOrderRepo;
+    private final PutawayEventPublisher putawayEventPublisher;
 
     // ─── List tasks ────────────────────────────────────────────────────────────
 
@@ -67,7 +70,6 @@ public class PutawayTaskService {
         } else if (warehouseId != null) {
             tasksPage = putawayTaskRepo.findByWarehouseIdOrderByCreatedAtDesc(warehouseId, pageable);
         } else {
-            // warehouseId null (user chưa assign warehouse) → trả về tất cả tasks
             tasksPage = putawayTaskRepo.findAllByOrderByCreatedAtDesc(pageable);
         }
 
@@ -119,7 +121,6 @@ public class PutawayTaskService {
             if (suggestion.isPresent()) {
                 suggestions.add(suggestion.get());
             } else {
-                // Return a fallback entry so the caller knows which items couldn't be matched
                 PutawaySuggestion fallback = PutawaySuggestion.builder()
                         .skuId(item.getSkuId())
                         .reason("No matching zone or available BIN found for this SKU. "
@@ -145,13 +146,11 @@ public class PutawayTaskService {
         List<PutawayAllocationResponse> results = new ArrayList<>();
 
         for (PutawayAllocateRequest.AllocateItem alloc : request.getItems()) {
-            // Find matching task item by skuId
             PutawayTaskItemEntity taskItem = taskItems.stream()
                     .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()))
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("SKU " + alloc.getSkuId() + " not found in putaway task " + taskId));
 
-            // Check: allocated + putawayQty + newQty <= totalQty
             BigDecimal alreadyAllocated = allocationRepo.sumReservedQtyByTaskAndSku(taskId, alloc.getSkuId());
             BigDecimal totalUsed = taskItem.getPutawayQty().add(alreadyAllocated).add(alloc.getQty());
             if (totalUsed.compareTo(taskItem.getQuantity()) > 0) {
@@ -160,7 +159,6 @@ public class PutawayTaskService {
                         + ". Remaining to allocate: " + remaining);
             }
 
-            // Check: bin capacity (occupied + putaway_reserved + newQty <= maxCapacity)
             LocationEntity bin = locationRepo.findById(alloc.getLocationId())
                     .orElseThrow(() -> new RuntimeException("Location not found: " + alloc.getLocationId()));
             if (bin.getMaxWeightKg() != null) {
@@ -173,7 +171,6 @@ public class PutawayTaskService {
                 }
             }
 
-            // Create allocation
             PutawayAllocationEntity allocation = PutawayAllocationEntity.builder()
                     .putawayTaskId(taskId)
                     .skuId(alloc.getSkuId())
@@ -188,13 +185,18 @@ public class PutawayTaskService {
             results.add(toAllocationResponse(allocation));
         }
 
-        // Update task status
+        // Update task status + publish realtime
+        String oldStatus = task.getStatus();
         if ("PENDING".equals(task.getStatus()) || "OPEN".equals(task.getStatus())) {
             task.setStatus("IN_PROGRESS");
             task.setAssignedTo(userId);
             task.setStartedAt(LocalDateTime.now());
             putawayTaskRepo.save(task);
         }
+
+        // ── Realtime: push trạng thái IN_PROGRESS / ALLOCATED ────────────────
+        publishEvent(task, oldStatus, "ALLOCATED", userId);
+        // ─────────────────────────────────────────────────────────────────────
 
         log.info("Putaway task {} allocated {} items by userId={}", taskId, results.size(), userId);
         return ApiResponse.success("Allocated " + results.size() + " items successfully.", results);
@@ -214,7 +216,6 @@ public class PutawayTaskService {
 
         List<PutawayTaskItemEntity> taskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
 
-        // Validate: tất cả items phải được phân bổ hết mới cho confirm
         for (PutawayTaskItemEntity item : taskItems) {
             BigDecimal allocated = allocationRepo.sumReservedQtyByTaskAndSku(taskId, item.getSkuId());
             BigDecimal remaining = item.getQuantity().subtract(item.getPutawayQty()).subtract(allocated);
@@ -238,35 +239,28 @@ public class PutawayTaskService {
             Long fromLocationId = task.getFromLocationId();
             BigDecimal qty = alloc.getAllocatedQty();
 
-            // ── Z-INB: Trừ tồn khỏi staging location (Z-INB) khi confirm putaway ──────
-            // Theo nghiệp vụ: tồn đã được cộng vào staging khi PENDING_COUNT (Z-INB).
-            // Khi Keeper confirm putaway → trừ Z-INB và cộng vào BIN đích.
             if (fromLocationId != null) {
                 inventorySnapshotRepo.decrementQuantity(
                         task.getWarehouseId(), item.getSkuId(), item.getLotId(), fromLocationId, qty);
             }
 
-            // Upsert to target BIN (the actual shelf/rack location)
             inventorySnapshotRepo.upsertInventory(
                     task.getWarehouseId(), item.getSkuId(), item.getLotId(), alloc.getLocationId(), qty);
 
-            // Record PUTAWAY transaction
             jdbcTemplate.update(
                     "INSERT INTO inventory_transactions (warehouse_id, sku_id, lot_id, location_id, quantity, txn_type, reference_table, reference_id, created_by) "
                             + "VALUES (?, ?, ?, ?, ?, 'PUTAWAY', 'putaway_tasks', ?, ?)",
                     task.getWarehouseId(), item.getSkuId(), item.getLotId(), alloc.getLocationId(), qty, taskId, userId);
 
-            // Update putaway item
             item.setPutawayQty(item.getPutawayQty().add(qty));
             item.setActualLocationId(alloc.getLocationId());
             putawayTaskItemRepo.save(item);
 
-            // Mark allocation as CONFIRMED
             alloc.setStatus("CONFIRMED");
             allocationRepo.save(alloc);
         }
 
-        // Check if all items are done
+        String oldStatus = task.getStatus();
         boolean allDone = taskItems.stream().allMatch(i -> i.getPutawayQty().compareTo(i.getQuantity()) >= 0);
         if (allDone) {
             task.setStatus("DONE");
@@ -276,10 +270,15 @@ public class PutawayTaskService {
         putawayTaskRepo.save(task);
         log.info("Putaway task {} confirmed all allocations by userId={}, status={}", taskId, userId, task.getStatus());
 
-        // ── Realtime: notify tất cả role putaway hoàn thành ──────────────────
+        String grnCode = grnRepo.findById(task.getGrnId())
+                .map(g -> g.getGrnCode()).orElse("GRN #" + task.getGrnId());
+
+        // ── Realtime: push CONFIRMED / DONE tới tất cả role ──────────────────
+        publishEvent(task, oldStatus, "CONFIRMED", userId);
+        // ─────────────────────────────────────────────────────────────────────
+
+        // Notification bell (giữ nguyên logic cũ)
         if (allDone) {
-            String grnCode = grnRepo.findById(task.getGrnId())
-                    .map(g -> g.getGrnCode()).orElse("GRN #" + task.getGrnId());
             notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
                     "putaway_pending",
                     task.getPutawayTaskId(), "Task #" + task.getPutawayTaskId(),
@@ -318,7 +317,30 @@ public class PutawayTaskService {
         return ApiResponse.success("OK", results);
     }
 
-    // ─── Helpers ───────────────────────────────────────────────────────────────
+    // ─── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Publish realtime event lên Redis Pub/Sub → WebSocket tới FE.
+     * Gọi sau mọi thao tác thay đổi state của task.
+     */
+    private void publishEvent(PutawayTaskEntity task, String oldStatus, String eventType, Long actorUserId) {
+        try {
+            String grnCode = grnRepo.findById(task.getGrnId())
+                    .map(g -> g.getGrnCode()).orElse("GRN#" + task.getGrnId());
+            putawayEventPublisher.publish(PutawayTaskEvent.builder()
+                    .taskId(task.getPutawayTaskId())
+                    .warehouseId(task.getWarehouseId())
+                    .newStatus(task.getStatus())
+                    .oldStatus(oldStatus)
+                    .grnCode(grnCode)
+                    .actorUserId(actorUserId)
+                    .eventType(eventType)
+                    .build());
+        } catch (Exception e) {
+            // Không để realtime failure ảnh hưởng business
+            log.warn("[Putaway] publishEvent failed for taskId={}: {}", task.getPutawayTaskId(), e.getMessage());
+        }
+    }
 
     private void validateTaskStatus(PutawayTaskEntity task) {
         if (!"PENDING".equals(task.getStatus()) && !"OPEN".equals(task.getStatus())
@@ -333,7 +355,6 @@ public class PutawayTaskService {
     }
 
     private PutawayTaskResponse toResponse(PutawayTaskEntity t) {
-        // Resolve GRN code
         String grnCode = null;
         if (t.getGrnId() != null) {
             grnCode = grnRepo.findById(t.getGrnId())
@@ -341,7 +362,6 @@ public class PutawayTaskService {
                     .orElse(null);
         }
 
-        // Resolve receiving code
         String receivingCode = null;
         if (t.getReceivingId() != null) {
             receivingCode = receivingOrderRepo.findById(t.getReceivingId())
@@ -349,7 +369,6 @@ public class PutawayTaskService {
                     .orElse(null);
         }
 
-        // Count items for quick display on list (avoid loading all items for list endpoint)
         int itemCount = (int) putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(t.getPutawayTaskId()).size();
 
         return PutawayTaskResponse.builder()
@@ -372,7 +391,6 @@ public class PutawayTaskService {
     }
 
     private PutawayTaskResponse.PutawayTaskItemDto toItemDtoEnriched(PutawayTaskItemEntity i) {
-        // Calculate allocated (RESERVED) and remaining
         BigDecimal allocatedQty = allocationRepo.sumReservedQtyByTaskAndSku(
                 i.getPutawayTask().getPutawayTaskId(), i.getSkuId());
         BigDecimal remainingQty = i.getQuantity().subtract(i.getPutawayQty()).subtract(allocatedQty);
@@ -390,7 +408,6 @@ public class PutawayTaskService {
                 .suggestedLocationId(i.getSuggestedLocationId())
                 .actualLocationId(i.getActualLocationId());
 
-        // Resolve SKU code & name
         skuRepo.findById(i.getSkuId()).ifPresent(sku -> {
             builder.skuCode(sku.getSkuCode());
             builder.skuName(sku.getSkuName());

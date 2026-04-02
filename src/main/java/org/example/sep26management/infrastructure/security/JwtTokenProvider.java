@@ -28,7 +28,6 @@ public class JwtTokenProvider {
     @Value("${jwt.remember-me-expiration-ms}")
     private long jwtRememberMeExpirationMs;
 
-    // BUG-02 FIX: inject RedisTemplate để lưu blacklist token sau logout
     private final RedisTemplate<String, Object> redisTemplate;
 
     private static final String BLACKLIST_PREFIX = "jwt:blacklist:";
@@ -42,26 +41,20 @@ public class JwtTokenProvider {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    /**
-     * Generate JWT token for user
-     */
+    // ─── Full user token ──────────────────────────────────────────────────────
+
     public String generateToken(User user, boolean rememberMe) {
         Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", user.getUserId());
-        claims.put("email", user.getEmail());
-        // Store role codes as comma-separated string or list
-        claims.put("roles", user.getRoleCodes() != null ? String.join(",", user.getRoleCodes()) : "");
-        // Store permission codes as comma-separated string for fine-grained checks on
-        // frontend if needed
-        claims.put("permissions",
-                user.getPermissionCodes() != null ? String.join(",", user.getPermissionCodes()) : "");
-        claims.put("fullName", user.getFullName());
-        // Embed warehouse IDs the user is assigned to
-        claims.put("warehouseIds", user.getWarehouseIds() != null ? user.getWarehouseIds() : List.of());
+        claims.put("userId",      user.getUserId());
+        claims.put("email",       user.getEmail());
+        claims.put("roles",       user.getRoleCodes()      != null ? String.join(",", user.getRoleCodes())      : "");
+        claims.put("permissions", user.getPermissionCodes() != null ? String.join(",", user.getPermissionCodes()) : "");
+        claims.put("fullName",    user.getFullName());
+        claims.put("warehouseIds", user.getWarehouseIds()  != null ? user.getWarehouseIds() : List.of());
 
         long expiration = rememberMe ? jwtRememberMeExpirationMs : jwtExpirationMs;
 
-        Date now = new Date();
+        Date now        = new Date();
         Date expiryDate = new Date(now.getTime() + expiration);
 
         return Jwts.builder()
@@ -73,214 +66,18 @@ public class JwtTokenProvider {
                 .compact();
     }
 
-    /**
-     * Get email from JWT token
-     */
-    public String getEmailFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
+    // ─── Scanner token (hiện tại — TTL cứng 2h, dùng cho QR token cũ) ────────
 
-        return claims.getSubject();
-    }
-
-    /**
-     * Get user ID from JWT token
-     */
-    public Long getUserIdFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
-
-        Object uid = claims.get("userId");
-        if (uid == null) return null;
-        if (uid instanceof Long) return (Long) uid;
-        if (uid instanceof Integer) return ((Integer) uid).longValue();
-        if (uid instanceof Number) return ((Number) uid).longValue();
-        try { return Long.parseLong(uid.toString()); } catch (Exception e) { return null; }
-    }
-
-    /**
-     * Get role codes from JWT token
-     */
-    public Set<String> getRoleCodesFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
-
-        String rolesStr = claims.get("roles", String.class);
-        if (rolesStr == null || rolesStr.isEmpty()) {
-            return new HashSet<>();
-        }
-        return Arrays.stream(rolesStr.split(","))
-                .collect(Collectors.toSet());
-    }
-
-    /**
-     * Get warehouse IDs from JWT token
-     */
-    @SuppressWarnings("unchecked")
-    public List<Long> getWarehouseIdsFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
-
-        Object raw = claims.get("warehouseIds");
-        if (raw == null)
-            return Collections.emptyList();
-        if (raw instanceof List) {
-            return ((List<?>) raw).stream()
-                    .map(v -> ((Number) v).longValue())
-                    .collect(Collectors.toList());
-        }
-        return Collections.emptyList();
-    }
-
-    /**
-     * Get permission codes from JWT token
-     */
-    public Set<String> getPermissionCodesFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
-
-        String permissionsStr = claims.get("permissions", String.class);
-        if (permissionsStr == null || permissionsStr.isEmpty()) {
-            return new HashSet<>();
-        }
-        return Arrays.stream(permissionsStr.split(","))
-                .collect(Collectors.toSet());
-    }
-
-    /**
-     * Validate JWT token — kiểm tra cả signature/expiry lẫn blacklist (BUG-02 FIX)
-     */
-    public boolean validateToken(String token) {
-        try {
-            Jwts.parserBuilder()
-                    .setSigningKey(getSigningKey())
-                    .build()
-                    .parseClaimsJws(token);
-            // BUG-02 FIX: từ chối token đã bị blacklist sau logout
-            if (isBlacklisted(token)) {
-                log.warn("JWT token is blacklisted (user already logged out)");
-                return false;
-            }
-            return true;
-        } catch (MalformedJwtException ex) {
-            log.error(LogMessages.JWT_INVALID_TOKEN);
-        } catch (ExpiredJwtException ex) {
-            log.error(LogMessages.JWT_EXPIRED_TOKEN);
-        } catch (UnsupportedJwtException ex) {
-            log.error(LogMessages.JWT_UNSUPPORTED_TOKEN);
-        } catch (IllegalArgumentException ex) {
-            log.error(LogMessages.JWT_CLAIMS_EMPTY);
-        }
-        return false;
-    }
-
-    /**
-     * BUG-02 FIX: Blacklist token khi logout.
-     * TTL = thời gian còn lại của token để không lưu Redis mãi mãi.
-     */
-    public void blacklistToken(String token) {
-        try {
-            Claims claims = Jwts.parserBuilder()
-                    .setSigningKey(getSigningKey())
-                    .build()
-                    .parseClaimsJws(token)
-                    .getBody();
-            long remainingMs = claims.getExpiration().getTime() - System.currentTimeMillis();
-            if (remainingMs > 0) {
-                String key = BLACKLIST_PREFIX + token;
-                redisTemplate.opsForValue().set(key, "1", Duration.ofMillis(remainingMs));
-                log.info("JWT token blacklisted, TTL={}ms", remainingMs);
-            }
-        } catch (Exception ex) {
-            log.warn("Could not blacklist token (may already be expired): {}", ex.getMessage());
-        }
-    }
-
-    /**
-     * BUG-02 FIX: Kiểm tra token có trong blacklist không.
-     */
-    public boolean isBlacklisted(String token) {
-        String key = BLACKLIST_PREFIX + token;
-        return Boolean.TRUE.equals(redisTemplate.hasKey(key));
-    }
-
-    /**
-     * Generate a short-lived pending token for OTP verification.
-     * This token carries the user's email and expires in 10 minutes.
-     *
-     * @param email User email
-     * @return Pending JWT token
-     */
-    public String generatePendingToken(String email) {
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("type", "PENDING_OTP");
-
-        Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + 10 * 60 * 1000L); // 10 minutes
-
-        return Jwts.builder()
-                .setClaims(claims)
-                .setSubject(email)
-                .setIssuedAt(now)
-                .setExpiration(expiryDate)
-                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
-                .compact();
-    }
-
-    /**
-     * Extract email from a pending OTP token.
-     * Validates that the token type is PENDING_OTP.
-     *
-     * @param token Pending token
-     * @return Email from the token
-     * @throws JwtException if token is invalid, expired, or not a pending token
-     */
-    public String getEmailFromPendingToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
-
-        String type = claims.get("type", String.class);
-        if (!"PENDING_OTP".equals(type)) {
-            throw new JwtException("Invalid token type");
-        }
-
-        return claims.getSubject();
-    }
-
-    /**
-     * Generate a scan token for iPhone scanner (no DB user required).
-     * Claims: type=SCANNER, sessionId, userId, role (KEEPER or QC), exp=2 hours.
-     */
     public String generateScanToken(String sessionId, Long warehouseId, String role, Long userId) {
         Map<String, Object> claims = new HashMap<>();
-        claims.put("type", "SCANNER");
-        claims.put("sessionId", sessionId);
+        claims.put("type",        "SCANNER");
+        claims.put("sessionId",   sessionId);
         claims.put("warehouseId", warehouseId);
-        claims.put("roles", role != null ? role : "KEEPER");
-        if (userId != null) {
-            claims.put("userId", userId);
-        }
+        claims.put("roles",       role != null ? role : "KEEPER");
+        if (userId != null) claims.put("userId", userId);
 
-        Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + 2 * 60 * 60 * 1000L); // 2 hours
+        Date now        = new Date();
+        Date expiryDate = new Date(now.getTime() + 2 * 60 * 60 * 1000L); // 2h
 
         return Jwts.builder()
                 .setClaims(claims)
@@ -292,35 +89,158 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Check if a JWT token is a SCANNER type token.
+     * Scanner Temporary Token — cấp sau khi OTP verify thành công.
+     *
+     * Khác generateScanToken():
+     *  - TTL động (= thời gian còn lại của OTP session, tối đa 24h)
+     *  - type = "SCANNER_TEMP" để phân biệt với scan token cũ
+     *
+     * @param tokenTtlMs TTL tính bằng milliseconds
      */
+    public String generateScannerTemporaryToken(
+            String sessionId, Long warehouseId, String role, Long userId, long tokenTtlMs) {
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("type",        "SCANNER_TEMP");
+        claims.put("sessionId",   sessionId);
+        claims.put("warehouseId", warehouseId);
+        claims.put("roles",       role != null ? role : "KEEPER");
+        if (userId != null) claims.put("userId", userId);
+
+        long safeTtl = Math.max(60_000L, Math.min(tokenTtlMs, 86_400_000L)); // min 1 phút, max 24h
+
+        Date now        = new Date();
+        Date expiryDate = new Date(now.getTime() + safeTtl);
+
+        return Jwts.builder()
+                .setClaims(claims)
+                .setSubject("scanner:" + sessionId)
+                .setIssuedAt(now)
+                .setExpiration(expiryDate)
+                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+                .compact();
+    }
+
+    // ─── Pending OTP token (login 2FA) ────────────────────────────────────────
+
+    public String generatePendingToken(String email) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("type", "PENDING_OTP");
+
+        Date now        = new Date();
+        Date expiryDate = new Date(now.getTime() + 10 * 60 * 1000L);
+
+        return Jwts.builder()
+                .setClaims(claims)
+                .setSubject(email)
+                .setIssuedAt(now)
+                .setExpiration(expiryDate)
+                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+                .compact();
+    }
+
+    // ─── Extractors ───────────────────────────────────────────────────────────
+
+    public String getEmailFromToken(String token) {
+        return parseClaims(token).getSubject();
+    }
+
+    public Long getUserIdFromToken(String token) {
+        Object uid = parseClaims(token).get("userId");
+        if (uid == null)              return null;
+        if (uid instanceof Long)      return (Long) uid;
+        if (uid instanceof Integer)   return ((Integer) uid).longValue();
+        if (uid instanceof Number)    return ((Number) uid).longValue();
+        try { return Long.parseLong(uid.toString()); } catch (Exception e) { return null; }
+    }
+
+    public Set<String> getRoleCodesFromToken(String token) {
+        String rolesStr = parseClaims(token).get("roles", String.class);
+        if (rolesStr == null || rolesStr.isEmpty()) return new HashSet<>();
+        return Arrays.stream(rolesStr.split(",")).collect(Collectors.toSet());
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<Long> getWarehouseIdsFromToken(String token) {
+        Object raw = parseClaims(token).get("warehouseIds");
+        if (raw == null)        return Collections.emptyList();
+        if (raw instanceof List) {
+            return ((List<?>) raw).stream()
+                    .map(v -> ((Number) v).longValue())
+                    .collect(Collectors.toList());
+        }
+        return Collections.emptyList();
+    }
+
+    public Set<String> getPermissionCodesFromToken(String token) {
+        String str = parseClaims(token).get("permissions", String.class);
+        if (str == null || str.isEmpty()) return new HashSet<>();
+        return Arrays.stream(str.split(",")).collect(Collectors.toSet());
+    }
+
+    public String getEmailFromPendingToken(String token) {
+        Claims claims = parseClaims(token);
+        if (!"PENDING_OTP".equals(claims.get("type", String.class)))
+            throw new JwtException("Invalid token type");
+        return claims.getSubject();
+    }
+
     public boolean isScanToken(String token) {
         try {
-            Claims claims = Jwts.parserBuilder()
-                    .setSigningKey(getSigningKey())
-                    .build()
-                    .parseClaimsJws(token)
-                    .getBody();
-            return "SCANNER".equals(claims.get("type", String.class));
-        } catch (Exception e) {
-            return false;
+            String type = parseClaims(token).get("type", String.class);
+            return "SCANNER".equals(type) || "SCANNER_TEMP".equals(type);
+        } catch (Exception e) { return false; }
+    }
+
+    public String getSessionIdFromScanToken(String token) {
+        Claims claims = parseClaims(token);
+        String type   = claims.get("type", String.class);
+        if (!"SCANNER".equals(type) && !"SCANNER_TEMP".equals(type))
+            throw new JwtException("Not a scanner token");
+        return claims.get("sessionId", String.class);
+    }
+
+    // ─── Validate & Blacklist ─────────────────────────────────────────────────
+
+    public boolean validateToken(String token) {
+        try {
+            Jwts.parserBuilder().setSigningKey(getSigningKey()).build().parseClaimsJws(token);
+            if (isBlacklisted(token)) {
+                log.warn("JWT token is blacklisted (user already logged out)");
+                return false;
+            }
+            return true;
+        } catch (MalformedJwtException ex)    { log.error(LogMessages.JWT_INVALID_TOKEN); }
+        catch (ExpiredJwtException ex)       { log.error(LogMessages.JWT_EXPIRED_TOKEN); }
+        catch (UnsupportedJwtException ex)   { log.error(LogMessages.JWT_UNSUPPORTED_TOKEN); }
+        catch (IllegalArgumentException ex)  { log.error(LogMessages.JWT_CLAIMS_EMPTY); }
+        return false;
+    }
+
+    public void blacklistToken(String token) {
+        try {
+            Claims claims     = parseClaims(token);
+            long  remainingMs = claims.getExpiration().getTime() - System.currentTimeMillis();
+            if (remainingMs > 0) {
+                redisTemplate.opsForValue().set(BLACKLIST_PREFIX + token, "1", Duration.ofMillis(remainingMs));
+                log.info("JWT token blacklisted, TTL={}ms", remainingMs);
+            }
+        } catch (Exception ex) {
+            log.warn("Could not blacklist token (may already be expired): {}", ex.getMessage());
         }
     }
 
-    /**
-     * Extract sessionId from a SCANNER token.
-     */
-    public String getSessionIdFromScanToken(String token) {
-        Claims claims = Jwts.parserBuilder()
+    public boolean isBlacklisted(String token) {
+        return Boolean.TRUE.equals(redisTemplate.hasKey(BLACKLIST_PREFIX + token));
+    }
+
+    // ─── Internal ─────────────────────────────────────────────────────────────
+
+    private Claims parseClaims(String token) {
+        return Jwts.parserBuilder()
                 .setSigningKey(getSigningKey())
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
-
-        String type = claims.get("type", String.class);
-        if (!"SCANNER".equals(type)) {
-            throw new JwtException("Not a scanner token");
-        }
-        return claims.get("sessionId", String.class);
     }
 }
