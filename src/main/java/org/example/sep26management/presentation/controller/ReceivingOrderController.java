@@ -37,8 +37,12 @@ public class ReceivingOrderController {
     public ApiResponse<PageResponse<ReceivingOrderResponse>> list(
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        return receivingOrderService.listOrders(status, page, size);
+            @RequestParam(defaultValue = "10") int size,
+            Authentication auth) {
+        // Keeper chỉ thấy đơn do mình tạo.
+        // Manager/QC truyền null → thấy tất cả.
+        Long createdBy = isKeeper(auth) ? extractUserId(auth) : null;
+        return receivingOrderService.listOrders(status, page, size, createdBy);
     }
 
     @GetMapping("/{id}")
@@ -185,6 +189,13 @@ public class ReceivingOrderController {
     }
 
     @SuppressWarnings("unchecked")
+    /** True nếu user hiện tại là KEEPER — dùng để scope danh sách đơn. */
+    private boolean isKeeper(Authentication auth) {
+        if (auth == null || auth.getAuthorities() == null) return false;
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_KEEPER".equals(a.getAuthority()));
+    }
+
     private Long extractUserId(Authentication auth) {
         if (auth != null && auth.getDetails() instanceof Map) {
             Object uid = ((Map<?, ?>) auth.getDetails()).get("userId");

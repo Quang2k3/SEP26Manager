@@ -4,12 +4,10 @@ import org.example.sep26management.infrastructure.persistence.entity.ReceivingOr
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import jakarta.persistence.LockModeType;
 
 import java.util.Optional;
 
@@ -36,12 +34,18 @@ public interface ReceivingOrderJpaRepository extends JpaRepository<ReceivingOrde
     java.util.List<ReceivingOrderEntity> findActiveBySourceReferenceCode(
             @Param("sourceReferenceCode") String sourceReferenceCode);
 
-    /**
-     * Atomic QC claim — chỉ set nếu chưa có QC nào claim.
-     * WHERE assigned_qc_id IS NULL đảm bảo chỉ 1 QC thành công (affected rows = 1).
-     * QC thứ 2 gọi cùng lúc → affected = 0 → BE trả lỗi "đơn đã được QC khác nhận".
-     * Caller phải dùng trong @Transactional.
-     */
+    // ── Owner-scoped queries — Keeper chỉ thấy đơn do mình tạo ─────────────
+
+    /** Tất cả đơn của 1 Keeper, sắp xếp mới nhất trước. */
+    Page<ReceivingOrderEntity> findByCreatedByOrderByCreatedAtDesc(
+            Long createdBy, Pageable pageable);
+
+    /** Đơn của 1 Keeper theo status. */
+    Page<ReceivingOrderEntity> findByStatusAndCreatedByOrderByCreatedAtDesc(
+            String status, Long createdBy, Pageable pageable);
+
+    // ── QC claim lock ────────────────────────────────────────────────────────
+
     @Modifying
     @Query("""
             UPDATE ReceivingOrderEntity r
@@ -55,9 +59,6 @@ public interface ReceivingOrderJpaRepository extends JpaRepository<ReceivingOrde
             @Param("receivingId") Long receivingId,
             @Param("qcUserId")    Long qcUserId);
 
-    /**
-     * Release QC claim — gọi sau khi qcSubmitSession hoàn thành hoặc QC release.
-     */
     @Modifying
     @Query("""
             UPDATE ReceivingOrderEntity r
