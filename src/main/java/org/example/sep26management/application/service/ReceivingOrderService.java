@@ -60,12 +60,22 @@ public class ReceivingOrderService {
     // ─── List ──────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public ApiResponse<PageResponse<ReceivingOrderResponse>> listOrders(String status, int page, int size) {
+    public ApiResponse<PageResponse<ReceivingOrderResponse>> listOrders(
+            String status, int page, int size, Long createdBy) {
         Pageable pageable = PageRequest.of(page, size);
 
-        Page<ReceivingOrderEntity> ordersPage = status != null && !status.isBlank()
-                ? receivingOrderRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
-                : receivingOrderRepo.findAllByOrderByCreatedAtDesc(pageable);
+        // createdBy != null → Keeper: chỉ thấy đơn do mình tạo
+        // createdBy == null → Manager/QC: thấy tất cả
+        Page<ReceivingOrderEntity> ordersPage;
+        if (createdBy != null) {
+            ordersPage = status != null && !status.isBlank()
+                    ? receivingOrderRepo.findByStatusAndCreatedByOrderByCreatedAtDesc(status, createdBy, pageable)
+                    : receivingOrderRepo.findByCreatedByOrderByCreatedAtDesc(createdBy, pageable);
+        } else {
+            ordersPage = status != null && !status.isBlank()
+                    ? receivingOrderRepo.findByStatusOrderByCreatedAtDesc(status, pageable)
+                    : receivingOrderRepo.findAllByOrderByCreatedAtDesc(pageable);
+        }
 
         List<ReceivingOrderResponse> content = ordersPage.getContent().stream()
                 .map(o -> toSummaryResponse(o))
