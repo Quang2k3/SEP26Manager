@@ -15,6 +15,7 @@ import org.example.sep26management.infrastructure.persistence.redis.ScanSessionR
 import org.example.sep26management.infrastructure.persistence.repository.ReceivingItemJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.SupplierJpaRepository;
+import org.example.sep26management.application.service.NotificationService;
 import org.example.sep26management.infrastructure.security.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -38,6 +39,7 @@ public class ReceivingSessionService {
         private final ReceivingOrderJpaRepository   receivingOrderRepo;
         private final ReceivingItemJpaRepository    receivingItemRepo;
         private final SupplierJpaRepository         supplierRepo;
+        private final NotificationService           notificationService;
 
         @Value("${app.base-url:http://localhost:8080/api}")
         private String baseUrl;
@@ -64,10 +66,17 @@ public class ReceivingSessionService {
                                         existingId, userId, warehouseId, receivingId);
                                 ScanSessionData data = existingDataOpt.get();
                                 // Reset lines + rebind phiếu + role + xóa QC claim cũ
+                                Long oldReceivingId = data.getReceivingId();
                                 data.setLines(new ArrayList<>());
                                 data.setReceivingId(receivingId);
                                 data.setRole(role);
                                 data.setAssignedQcId(null);
+                                // Release claim cũ nếu đang giữ phiếu khác
+                                if ("QC".equals(role) && oldReceivingId != null
+                                        && !oldReceivingId.equals(receivingId)) {
+                                        receivingOrderRepo.releaseQcAssignment(oldReceivingId, userId);
+                                        log.info("[QCClaim] Released old claim receivingId={} userId={}", oldReceivingId, userId);
+                                }
                                 sessionRedis.save(existingId, data);
                                 return ApiResponse.success("Reused existing session (lines cleared)",
                                         toResponse(data));
@@ -92,6 +101,34 @@ public class ReceivingSessionService {
                 sessionRedis.saveActiveSession(warehouseId, userId, sessionId);
                 log.info("Scan session created: {} userId={} warehouseId={} receivingId={} role={}",
                         sessionId, userId, warehouseId, receivingId, role);
+
+                // QC claim ngay khi tạo session — không đợi scan barcode đầu tiên.
+                // Như vậy QC B thấy nút bị lock ngay sau khi QC A bấm "QC Scan" và tạo QR.
+                if ("QC".equals(role) && receivingId != null) {
+                        int claimed = receivingOrderRepo.claimQcAssignment(receivingId, userId);
+                        if (claimed > 0) {
+                                data.setAssignedQcId(userId);
+                                sessionRedis.save(sessionId, data);
+                                log.info("[QCClaim] QC userId={} pre-claimed receivingId={} at session create", userId, receivingId);
+                                // Push WS → QC khác reload danh sách ngay, thấy nút lock
+                                try {
+                                        notificationService.notifyRoles(
+                                                new String[]{"QC", "MANAGER"},
+                                                "qc_claimed",
+                                                receivingId,
+                                                "Phiếu #" + receivingId,
+                                                "QC userId=" + userId + " bắt đầu kiểm định"
+                                        );
+                                } catch (Exception ignored) {}
+                        } else {
+                                // Ai đó đã claim trước — từ chối tạo session
+                                sessionRedis.deleteActiveSession(warehouseId, userId);
+                                sessionRedis.delete(sessionId);
+                                log.warn("[QCClaim] Phiếu #{} đã bị QC khác claim. Từ chối userId={}", receivingId, userId);
+                                return ApiResponse.error(
+                                        "Phiếu #" + receivingId + " đang được QC khác kiểm định. Vui lòng chờ hoặc liên hệ quản lý.");
+                        }
+                }
 
                 return ApiResponse.success("Session created", toResponse(data));
         }
