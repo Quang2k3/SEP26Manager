@@ -31,14 +31,17 @@ public class ReceivingSessionController {
     /** POST /v1/receiving-sessions — Laptop creates a session */
     @PostMapping
     @Operation(summary = "Tạo phiên scan mới (Laptop/Web)", description = "Laptop tạo phiên scan. \n\n"
-            + "**Data yêu cầu:** Không cần data truyền vào.\n"
+            + "**Data yêu cầu:** Không bắt buộc. Truyền `receivingId` (query param) để bind session với phiếu cụ thể.\n"
             + "**Lưu ý:** API sẽ tự động lấy `warehouseId` từ profile của user đang đăng nhập (thông qua token). "
-            + "Backend trả về `sessionId` (ví dụ: chuỗi UUID) và link tạo QR code (`qrCodeUrl`). \n"
-            + "👉 **FE cần LƯU LẠI `sessionId` này** để dùng làm tham số cho tất cả các API phía sau thuộc phiên làm việc này.")
-    public ApiResponse<ScanSessionResponse> createSession(Authentication auth) {
-        Long userId = extractUserId(auth);
+            + "Backend trả về `sessionId` (ví dụ: chuỗi UUID). \n"
+            + "👉 **FE cần LƯU LẠI `sessionId` này** để dùng làm tham số cho tất cả các API phía sau.")
+    public ApiResponse<ScanSessionResponse> createSession(
+            Authentication auth,
+            @RequestParam(required = false) Long receivingId) {
+        Long userId      = extractUserId(auth);
         Long warehouseId = extractWarehouseId(auth);
-        return receivingSessionService.createSession(warehouseId, userId);
+        String role      = extractRole(auth);
+        return receivingSessionService.createSession(warehouseId, userId, receivingId, role);
     }
 
     /** POST /v1/receiving-sessions/{id}/scan-token — Generate iPhone scan JWT */

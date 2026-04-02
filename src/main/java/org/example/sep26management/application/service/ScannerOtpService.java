@@ -51,7 +51,7 @@ public class ScannerOtpService {
 
     public ApiResponse<Map<String, Object>> generateQr(
             Long userId, String userEmail, String role,
-            Long warehouseId, String clientIp) {
+            Long warehouseId, String clientIp, Long receivingId) {
 
         if (!"KEEPER".equals(role) && !"QC".equals(role)) {
             throw new BusinessException("Role không hợp lệ cho scanner: " + role);
@@ -73,6 +73,7 @@ public class ScannerOtpService {
                 .role(role)
                 .otpHash(otpHash)
                 .warehouseId(warehouseId)
+                .receivingId(receivingId)          // bind phiếu cụ thể vào QR
                 .used(false)
                 .createdAt(Instant.now().toString())
                 .failedAttempts(0)
@@ -154,13 +155,17 @@ public class ScannerOtpService {
         String scannerToken = jwtTokenProvider.generateScannerTemporaryToken(
                 sessionId, data.getWarehouseId(), data.getRole(), data.getUserId(), tokenTtlMs);
 
-        return ApiResponse.success("Xác thực OTP thành công. Scanner sẵn sàng.", Map.of(
-                "scannerToken", scannerToken,
-                "role",         data.getRole(),
-                "warehouseId",  data.getWarehouseId(),
-                "sessionId",    sessionId,
-                "ttlSeconds",   remainingTtl
-        ));
+        // Build response — includinging receivingId để FE (OtpGate) truyền vào createSession
+        java.util.Map<String, Object> verifyResult = new java.util.HashMap<>();
+        verifyResult.put("scannerToken", scannerToken);
+        verifyResult.put("role",         data.getRole());
+        verifyResult.put("warehouseId",  data.getWarehouseId());
+        verifyResult.put("sessionId",    sessionId);
+        verifyResult.put("ttlSeconds",   remainingTtl);
+        if (data.getReceivingId() != null) {
+            verifyResult.put("receivingId", data.getReceivingId());
+        }
+        return ApiResponse.success("Xác thực OTP thành công. Scanner sẵn sàng.", verifyResult);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

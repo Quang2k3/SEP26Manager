@@ -320,12 +320,12 @@ public class OutboundController {
         Long userId = getUserId();
         Long warehouseId = getWarehouseId();
 
-        // Tạo hoặc reuse scan session
-        var sessionResp = receivingSessionService.createSession(warehouseId, userId);
+        // Tạo hoặc reuse scan session — outbound picking không bind receivingId (null)
+        String role = getCurrentRole();
+        var sessionResp = receivingSessionService.createSession(warehouseId, userId, null, role);
         String sessionId = sessionResp.getData().getSessionId();
 
         // Sinh scan token với role KEEPER
-        String role = getCurrentRole();
         var tokenResp = receivingSessionService.generateScanToken(sessionId, userId, role);
         String scanToken = tokenResp.getData().get("scanToken");
 
