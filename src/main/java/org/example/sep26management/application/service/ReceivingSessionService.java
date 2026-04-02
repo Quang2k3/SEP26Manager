@@ -32,114 +32,108 @@ import java.util.UUID;
 @Slf4j
 public class ReceivingSessionService {
 
-        private final ScanSessionRedisRepository sessionRedis;
-        private final JwtTokenProvider jwtTokenProvider;
-        private final SseEmitterRegistry sseRegistry;
-        private final ReceivingOrderJpaRepository receivingOrderRepo;
-        private final ReceivingItemJpaRepository receivingItemRepo;
-        private final SupplierJpaRepository supplierRepo;
+        private final ScanSessionRedisRepository    sessionRedis;
+        private final JwtTokenProvider              jwtTokenProvider;
+        private final SseEmitterRegistry            sseRegistry;
+        private final ReceivingOrderJpaRepository   receivingOrderRepo;
+        private final ReceivingItemJpaRepository    receivingItemRepo;
+        private final SupplierJpaRepository         supplierRepo;
 
         @Value("${app.base-url:http://localhost:8080/api}")
         private String baseUrl;
 
         // ─── Create session ───────────────────────────────────────────────────────
+        //
+        // receivingId : phiếu nhận hàng mà QR này phục vụ (null = outbound/legacy)
+        // role        : "KEEPER" hoặc "QC" — lưu vào session để ScanEventService validate
+        //
+        // Hai caller:
+        //   1. ReceivingSessionController  — inbound Keeper/QC, truyền receivingId thật
+        //   2. OutboundController          — outbound picking,  truyền null
 
-        public ApiResponse<ScanSessionResponse> createSession(Long warehouseId, Long userId) {
-                // Check if an active session already exists for this user in this warehouse
-                Optional<String> activeSessionOpt = sessionRedis.findActiveSession(warehouseId, userId);
-                if (activeSessionOpt.isPresent()) {
-                        String existingSessionId = activeSessionOpt.get();
-                        // Verify the session data actually still exists in Redis
-                        Optional<ScanSessionData> sessionDataOpt = sessionRedis.findById(existingSessionId);
-                        if (sessionDataOpt.isPresent()) {
-                                log.info("Reusing existing scan session: {} for userId={}, warehouseId={} — clearing old lines",
-                                                existingSessionId, userId, warehouseId);
-                                ScanSessionData data = sessionDataOpt.get();
-                                // Reset lines to avoid stale data from previous receiving order
+        public ApiResponse<ScanSessionResponse> createSession(
+                Long warehouseId, Long userId, Long receivingId, String role) {
+
+                // Kiểm tra session đang hoạt động cho user này
+                Optional<String> activeOpt = sessionRedis.findActiveSession(warehouseId, userId);
+                if (activeOpt.isPresent()) {
+                        String existingId = activeOpt.get();
+                        Optional<ScanSessionData> existingDataOpt = sessionRedis.findById(existingId);
+                        if (existingDataOpt.isPresent()) {
+                                log.info("Reusing scan session: {} userId={} warehouseId={} — reset lines, rebind receivingId={}",
+                                        existingId, userId, warehouseId, receivingId);
+                                ScanSessionData data = existingDataOpt.get();
+                                // Reset lines + rebind phiếu + role + xóa QC claim cũ
                                 data.setLines(new ArrayList<>());
-                                sessionRedis.save(existingSessionId, data);
-                                ScanSessionResponse response = ScanSessionResponse.builder()
-                                                .sessionId(data.getSessionId())
-                                                .warehouseId(data.getWarehouseId())
-                                                .lines(new ArrayList<>())
-                                                .build();
-                                return ApiResponse.success("Reused existing session (lines cleared)", response);
+                                data.setReceivingId(receivingId);
+                                data.setRole(role);
+                                data.setAssignedQcId(null);
+                                sessionRedis.save(existingId, data);
+                                return ApiResponse.success("Reused existing session (lines cleared)",
+                                        toResponse(data));
                         } else {
-                                // Active session key exists but data is gone (expired/deleted), clean up the
-                                // stale key
+                                // Key active tồn tại nhưng data đã hết hạn → dọn key
                                 sessionRedis.deleteActiveSession(warehouseId, userId);
                         }
                 }
 
+                // Tạo session mới
                 String sessionId = "RS_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-
                 ScanSessionData data = ScanSessionData.builder()
-                                .sessionId(sessionId)
-                                .warehouseId(warehouseId)
-                                .createdBy(userId)
-                                .lines(new ArrayList<>())
-                                .build();
+                        .sessionId(sessionId)
+                        .warehouseId(warehouseId)
+                        .createdBy(userId)
+                        .receivingId(receivingId)   // null nếu outbound
+                        .role(role)                  // "KEEPER" | "QC" | null (legacy)
+                        .lines(new ArrayList<>())
+                        .build();
 
                 sessionRedis.save(sessionId, data);
                 sessionRedis.saveActiveSession(warehouseId, userId, sessionId);
-                log.info("Scan session created: {} by userId={}, warehouseId={}", sessionId, userId, warehouseId);
+                log.info("Scan session created: {} userId={} warehouseId={} receivingId={} role={}",
+                        sessionId, userId, warehouseId, receivingId, role);
 
-                ScanSessionResponse response = ScanSessionResponse.builder()
-                                .sessionId(sessionId)
-                                .warehouseId(warehouseId)
-                                .lines(new ArrayList<>())
-                                .build();
-
-                return ApiResponse.success("Session created", response);
+                return ApiResponse.success("Session created", toResponse(data));
         }
 
         // ─── Generate scan token ──────────────────────────────────────────────────
 
-        public ApiResponse<Map<String, String>> generateScanToken(String sessionId, Long userId, String role) {
-                ScanSessionData session = sessionRedis.findById(sessionId)
-                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+        public ApiResponse<Map<String, String>> generateScanToken(
+                String sessionId, Long userId, String role) {
 
-                String token = jwtTokenProvider.generateScanToken(sessionId, session.getWarehouseId(), role, userId);
+                ScanSessionData session = sessionRedis.findById(sessionId)
+                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+
+                String token   = jwtTokenProvider.generateScanToken(sessionId, session.getWarehouseId(), role, userId);
                 String scanUrl = baseUrl + "/v1/scan?token=" + token;
 
-                log.info("Scan token generated for session {} by userId={}, role={}", sessionId, userId, role);
+                log.info("Scan token generated: session={} userId={} role={}", sessionId, userId, role);
 
                 return ApiResponse.success("Scan token generated", Map.of(
-                                "sessionId", sessionId,
-                                "scanToken", token,
-                                "scanUrl", scanUrl));
+                        "sessionId", sessionId,
+                        "scanToken", token,
+                        "scanUrl",   scanUrl));
         }
 
         // ─── Get session snapshot ─────────────────────────────────────────────────
 
         public ApiResponse<ScanSessionResponse> getSession(String sessionId) {
                 ScanSessionData data = sessionRedis.findById(sessionId)
-                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
-
-                ScanSessionResponse response = ScanSessionResponse.builder()
-                                .sessionId(data.getSessionId())
-                                .warehouseId(data.getWarehouseId())
-                                .lines(data.getLines())
-                                .build();
-
-                return ApiResponse.success("OK", response);
+                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                return ApiResponse.success("OK", toResponse(data));
         }
 
-        // ─── SSE stream ──────────────────────────────────────────────────────────
+        // ─── SSE stream ───────────────────────────────────────────────────────────
 
         public SseEmitter stream(String sessionId) {
-                // Validate session exists
                 sessionRedis.findById(sessionId)
-                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
 
-                SseEmitter emitter = new SseEmitter(600_000L); // 10 min timeout
+                SseEmitter emitter = new SseEmitter(600_000L); // 10 phút
                 sseRegistry.register(sessionId, emitter);
 
-                // Send initial snapshot immediately
-                ScanSessionData data = sessionRedis.findById(sessionId).orElse(null);
-                if (data != null) {
-                        sseRegistry.send(sessionId, data);
-                }
+                // Gửi snapshot hiện tại ngay khi connect
+                sessionRedis.findById(sessionId).ifPresent(data -> sseRegistry.send(sessionId, data));
 
                 return emitter;
         }
@@ -147,9 +141,8 @@ public class ReceivingSessionService {
         // ─── Delete session ───────────────────────────────────────────────────────
 
         public ApiResponse<Void> deleteSession(String sessionId) {
-                sessionRedis.findById(sessionId).ifPresent(session -> {
-                        sessionRedis.deleteActiveSession(session.getWarehouseId(), session.getCreatedBy());
-                });
+                sessionRedis.findById(sessionId).ifPresent(session ->
+                        sessionRedis.deleteActiveSession(session.getWarehouseId(), session.getCreatedBy()));
                 sessionRedis.delete(sessionId);
                 sseRegistry.remove(sessionId);
                 log.info("Scan session deleted: {}", sessionId);
@@ -159,74 +152,80 @@ public class ReceivingSessionService {
         // ─── Create GRN from session ──────────────────────────────────────────────
 
         @Transactional
-        public ApiResponse<Map<String, Object>> createGrn(String sessionId, CreateGrnRequest request, Long userId) {
+        public ApiResponse<Map<String, Object>> createGrn(
+                String sessionId, CreateGrnRequest request, Long userId) {
+
                 ScanSessionData session = sessionRedis.findById(sessionId)
-                                .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
 
                 List<ScanLineItem> lines = session.getLines();
                 if (lines == null || lines.isEmpty()) {
-                        return ApiResponse.error("No items scanned in this session");
+                        return ApiResponse.error("Chưa có sản phẩm nào được scan trong phiên này");
                 }
 
-                // Generate receiving code: GRN + timestamp suffix
-                String receivingCode = "GRN" + System.currentTimeMillis() % 1_000_000;
-
-                // Resolve supplierId from supplierCode if provided
+                // Resolve supplierId
                 Long supplierId = null;
                 if (request.getSupplierCode() != null && !request.getSupplierCode().isBlank()) {
                         supplierId = supplierRepo.findBySupplierCode(request.getSupplierCode())
-                                        .map(SupplierEntity::getSupplierId)
-                                        .orElseThrow(() -> new RuntimeException(
-                                                        "Supplier not found with code: " + request.getSupplierCode()));
+                                .map(SupplierEntity::getSupplierId)
+                                .orElseThrow(() -> new RuntimeException(
+                                        "Supplier not found: " + request.getSupplierCode()));
                 }
 
-                // If called from scanner page, userId will be null. Use the session creator.
                 Long effectiveUserId = (userId != null) ? userId : session.getCreatedBy();
+                String receivingCode = "GRN" + System.currentTimeMillis() % 1_000_000;
 
                 ReceivingOrderEntity order = ReceivingOrderEntity.builder()
-                                .warehouseId(session.getWarehouseId()) // taken from session (set from JWT at creation)
-                                .receivingCode(receivingCode)
-                                .status("DRAFT")
-                                .sourceType(request.getSourceType())
-                                .supplierId(supplierId)
-                                .sourceReferenceCode(request.getSourceReferenceCode())
-                                .note(request.getNote())
-                                .createdBy(effectiveUserId)
-                                .build();
+                        .warehouseId(session.getWarehouseId())
+                        .receivingCode(receivingCode)
+                        .status("DRAFT")
+                        .sourceType(request.getSourceType())
+                        .supplierId(supplierId)
+                        .sourceReferenceCode(request.getSourceReferenceCode())
+                        .note(request.getNote())
+                        .createdBy(effectiveUserId)
+                        .build();
 
                 ReceivingOrderEntity saved = receivingOrderRepo.save(order);
 
-                // Create line items from session lines
                 List<ReceivingItemEntity> items = new ArrayList<>();
                 for (ScanLineItem line : lines) {
                         boolean isFail = "FAIL".equalsIgnoreCase(line.getCondition());
-                        ReceivingItemEntity item = ReceivingItemEntity.builder()
-                                        .receivingOrder(saved)
-                                        .skuId(line.getSkuId())
-                                        .receivedQty(line.getQty())
-                                        .lotNumber(request.getLotNumber())
-                                        .expiryDate(request.getExpiryDate())
-                                        .manufactureDate(request.getManufactureDate())
-                                        .condition(line.getCondition() != null ? line.getCondition() : "PASS")
-                                        .reasonCode(line.getReasonCode())
-                                        .qcRequired(isFail) // FAIL items automatically need QC
-                                        .build();
-                        items.add(item);
+                        items.add(ReceivingItemEntity.builder()
+                                .receivingOrder(saved)
+                                .skuId(line.getSkuId())
+                                .receivedQty(line.getQty())
+                                .lotNumber(request.getLotNumber())
+                                .expiryDate(request.getExpiryDate())
+                                .manufactureDate(request.getManufactureDate())
+                                .condition(line.getCondition() != null ? line.getCondition() : "PASS")
+                                .reasonCode(line.getReasonCode())
+                                .qcRequired(isFail)
+                                .build());
                 }
                 receivingItemRepo.saveAll(items);
 
-                // Clean up session after GRN created
+                // Dọn dẹp session
                 sessionRedis.deleteActiveSession(session.getWarehouseId(), session.getCreatedBy());
                 sessionRedis.delete(sessionId);
                 sseRegistry.remove(sessionId);
 
-                log.info("GRN created: {} (receivingId={}) from session {}", receivingCode, saved.getReceivingId(),
-                                sessionId);
+                log.info("GRN created: {} (receivingId={}) from session {}", receivingCode, saved.getReceivingId(), sessionId);
 
                 return ApiResponse.success("GRN created successfully", Map.of(
-                                "receivingId", saved.getReceivingId(),
-                                "receivingCode", saved.getReceivingCode(),
-                                "status", saved.getStatus(),
-                                "itemCount", items.size()));
+                        "receivingId",   saved.getReceivingId(),
+                        "receivingCode", saved.getReceivingCode(),
+                        "status",        saved.getStatus(),
+                        "itemCount",     items.size()));
+        }
+
+        // ─── Helper ───────────────────────────────────────────────────────────────
+
+        private ScanSessionResponse toResponse(ScanSessionData data) {
+                return ScanSessionResponse.builder()
+                        .sessionId(data.getSessionId())
+                        .warehouseId(data.getWarehouseId())
+                        .lines(data.getLines() != null ? data.getLines() : new ArrayList<>())
+                        .build();
         }
 }

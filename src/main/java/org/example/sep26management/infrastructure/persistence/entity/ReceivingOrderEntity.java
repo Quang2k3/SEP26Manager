@@ -72,6 +72,15 @@ public class ReceivingOrderEntity {
     @Column(name = "qc_session_id", length = 255)
     private String qcSessionId;
 
+    /**
+     * QC claim lock — userId của QC đang xử lý đơn này.
+     * Set bằng atomic UPDATE WHERE assigned_qc_id IS NULL khi QC bắt đầu scan.
+     * NULL = chưa có QC nào claim.
+     * Mục đích: ngăn 2 QC cùng scan một đơn đồng thời.
+     */
+    @Column(name = "assigned_qc_id")
+    private Long assignedQcId;
+
     @OneToMany(mappedBy = "receivingOrder", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
     private List<ReceivingItemEntity> items = new ArrayList<>();

@@ -2,13 +2,16 @@ package org.example.sep26management.infrastructure.persistence.repository;
 
 import org.example.sep26management.infrastructure.persistence.entity.PickingTaskItemEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import jakarta.persistence.LockModeType;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface PickingTaskItemJpaRepository extends JpaRepository<PickingTaskItemEntity, Long> {
@@ -75,6 +78,40 @@ public interface PickingTaskItemJpaRepository extends JpaRepository<PickingTaskI
               AND i.qcResult = 'PASS'
             """)
     List<PickingTaskItemEntity> findPassedItemsBySoId(@Param("soId") Long soId);
+
+    /**
+     * SELECT FOR UPDATE — lock row khi QC scan để tránh lost-update.
+     * Phải dùng trong @Transactional.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM PickingTaskItemEntity i WHERE i.pickingTaskItemId = :itemId")
+    Optional<PickingTaskItemEntity> findForUpdateById(@Param("itemId") Long itemId);
+
+    /**
+     * Atomic increment qcPassQty — tránh race condition khi 2 QC scan đồng thời.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE PickingTaskItemEntity i
+            SET i.qcPassQty   = i.qcPassQty + 1,
+                i.qcResult    = CASE WHEN i.qcFailQty > 0 THEN 'FAIL' ELSE 'PASS' END,
+                i.qcScannedAt = CURRENT_TIMESTAMP
+            WHERE i.pickingTaskItemId = :itemId
+            """)
+    int incrementQcPassQty(@Param("itemId") Long itemId);
+
+    /**
+     * Atomic increment qcFailQty — tránh race condition khi 2 QC scan đồng thời.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE PickingTaskItemEntity i
+            SET i.qcFailQty   = i.qcFailQty + 1,
+                i.qcResult    = 'FAIL',
+                i.qcScannedAt = CURRENT_TIMESTAMP
+            WHERE i.pickingTaskItemId = :itemId
+            """)
+    int incrementQcFailQty(@Param("itemId") Long itemId);
 
     /**
      * Fetch all items for a SO across all active picking tasks.

@@ -40,6 +40,13 @@ public class ScannerOtpData implements Serializable {
 
     private Long    warehouseId;
 
+    /**
+     * Phiếu nhận hàng mà QR này phục vụ.
+     * Được truyền từ FE khi generate QR (Keeper/QC đang mở đơn nào).
+     * Sau verify OTP → gắn vào ScanSessionData để BE enforce.
+     */
+    private Long    receivingId;
+
     /** One-time flag — set true ngay sau khi verify thành công */
     @Builder.Default
     private boolean used = false;

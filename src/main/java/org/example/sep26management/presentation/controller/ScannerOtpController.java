@@ -38,17 +38,20 @@ public class ScannerOtpController {
     @PreAuthorize("hasAnyRole('KEEPER', 'QC')")
     @Operation(summary = "Tạo QR Scanner (Step 1)",
             description = "Tạo sessionId + OTP. OTP gửi email, không có trong response. " +
-                    "FE encode sessionId vào QR: `{FE_URL}/scan?sessionId={sessionId}`")
+                    "FE encode sessionId vào QR: `{FE_URL}/scan?sessionId={sessionId}`. " +
+                    "Truyền `receivingId` (request body hoặc query param) để bind QR với phiếu cụ thể.")
     public ApiResponse<Map<String, Object>> generateQr(
             Authentication auth,
-            HttpServletRequest request) {
+            HttpServletRequest request,
+            @RequestParam(required = false) Long receivingId) {
 
         return scannerOtpService.generateQr(
                 extractUserId(auth),
                 extractEmail(auth),
                 extractRole(auth),
                 extractWarehouseId(auth),
-                getClientIp(request)
+                getClientIp(request),
+                receivingId    // null nếu không truyền — backward compat
         );
     }
 
