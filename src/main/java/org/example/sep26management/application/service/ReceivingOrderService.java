@@ -531,6 +531,16 @@ public class ReceivingOrderService {
                                 receivingOrderRepo.save(order);
 
                                 Long qcUserId = order.getRejectedBy() != null ? order.getRejectedBy() : userId;
+
+                                // Xóa Keeper rescan session trước khi gọi qcSubmitSession
+                                if (activeSessionId.isPresent()) {
+                                        String keeperRescanSid = activeSessionId.get();
+                                        sessionRedis.deleteActiveSession(order.getWarehouseId(), userId);
+                                        sessionRedis.delete(keeperRescanSid);
+                                        sseRegistry.remove(keeperRescanSid);
+                                        log.info("[finalizeCount KEEPER_RESCAN match] Keeper session {} deleted → QR invalidated", keeperRescanSid);
+                                }
+
                                 qcSubmitSession(id, qcSessionId, qcUserId);
 
                                 ReceivingOrderEntity updatedOrder = findOrder(id);
@@ -542,11 +552,20 @@ public class ReceivingOrderService {
                                 return ApiResponse.success(
                                         "Keeper rescan khớp QC! Hệ thống tự xử lý.", getOrder(id).getData());
                         } else {
-                                // ❌ Keeper vẫn lệch QC → QC_RESCAN → QC quét lại lần 2
+                                // Keeper vẫn lệch QC → QC_RESCAN → QC quét lại lần 2
                                 order.setStatus("QC_RESCAN");
                                 // GIỮ NGUYÊN qcSessionId — QC lần 2 cần merge data cũ
                                 // GIỮ NGUYÊN receivedQty từ Keeper rescan — không reset
                                 order.setUpdatedAt(LocalDateTime.now());
+
+                                // Xóa Keeper rescan session → QR Keeper vô hiệu ngay
+                                if (activeSessionId.isPresent()) {
+                                        String keeperRescanSid2 = activeSessionId.get();
+                                        sessionRedis.deleteActiveSession(order.getWarehouseId(), userId);
+                                        sessionRedis.delete(keeperRescanSid2);
+                                        sseRegistry.remove(keeperRescanSid2);
+                                        log.info("[finalizeCount QC_RESCAN] Keeper session {} deleted → QR invalidated", keeperRescanSid2);
+                                }
                                 String note = "[Keeper rescan vẫn lệch QC → QC_RESCAN] " + String.join(", ", rescanMismatches);
                                 order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + note);
                                 receivingOrderRepo.save(order);
@@ -572,6 +591,15 @@ public class ReceivingOrderService {
                 order.setStatus("PENDING_COUNT");
                 order.setUpdatedAt(LocalDateTime.now());
                 receivingOrderRepo.save(order);
+
+                // ── Xóa Keeper scan session ngay khi finalize → QR vô hiệu tức thì ──
+                if (activeSessionId.isPresent()) {
+                        String keeperSid = activeSessionId.get();
+                        sessionRedis.deleteActiveSession(order.getWarehouseId(), userId);
+                        sessionRedis.delete(keeperSid);
+                        sseRegistry.remove(keeperSid);
+                        log.info("[finalizeCount] Keeper scan session {} deleted → QR invalidated immediately", keeperSid);
+                }
 
                 // ── Z-INB: Cộng tồn vào staging khi PENDING_COUNT ────────────────────
                 addInboundStockToStaging(order, userId);
@@ -1033,7 +1061,7 @@ public class ReceivingOrderService {
                         order.setStatus("PENDING_INCIDENT");
                         order.setRejectedBy(qcUserId);
                         order.setRejectedAt(LocalDateTime.now());
-                        
+
                         String rejectReason = createdIncidents.stream()
                                 .map(inc -> inc.getIncidentType() + " (" + inc.getIncidentId() + ")")
                                 .collect(Collectors.joining(", "));
