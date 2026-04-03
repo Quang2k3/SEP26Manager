@@ -3,7 +3,9 @@ package org.example.sep26management.infrastructure.persistence.repository;
 import org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -43,6 +45,16 @@ public interface ReceivingOrderJpaRepository extends JpaRepository<ReceivingOrde
     /** Đơn của 1 Keeper theo status. */
     Page<ReceivingOrderEntity> findByStatusAndCreatedByOrderByCreatedAtDesc(
             String status, Long createdBy, Pageable pageable);
+
+
+    /**
+     * SELECT FOR UPDATE — chống double-submit/double-status-change.
+     * Dùng trong mọi phương thức thay đổi status ReceivingOrder.
+     * Khóa row cho đến khi transaction commit → T2 thấy status mới → fail validateStatus.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM ReceivingOrderEntity r WHERE r.receivingId = :id")
+    java.util.Optional<ReceivingOrderEntity> findByIdForUpdate(@Param("id") Long id);
 
     // ── QC claim lock ────────────────────────────────────────────────────────
 
