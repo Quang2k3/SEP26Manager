@@ -238,13 +238,10 @@ public class PutawayTaskService {
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Task item not found for SKU: " + alloc.getSkuId()));
 
-            Long fromLocationId = task.getFromLocationId();
             BigDecimal qty = alloc.getAllocatedQty();
 
-            if (fromLocationId != null) {
-                inventorySnapshotRepo.decrementQuantity(
-                        task.getWarehouseId(), item.getSkuId(), item.getLotId(), fromLocationId, qty);
-            }
+            // [FIX] KHÔNG trừ từ staging vì GrnService.post() không còn cộng inventory vào staging.
+            // Inventory chỉ được tạo mới tại BIN khi Keeper confirm putaway.
 
             inventorySnapshotRepo.upsertInventory(
                     task.getWarehouseId(), item.getSkuId(), item.getLotId(), alloc.getLocationId(), qty);

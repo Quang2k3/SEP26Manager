@@ -35,8 +35,6 @@ public class GrnService {
     private final ReceivingOrderJpaRepository receivingOrderRepo;
     private final SupplierJpaRepository supplierRepo;
     private final InventoryLotJpaRepository inventoryLotRepo;
-    private final InventoryTransactionJpaRepository inventoryTransactionRepo;
-    private final InventorySnapshotJpaRepository inventorySnapshotRepo;
     private final NotificationService notificationService;
     private final UserJpaRepository userRepo;
 
@@ -190,7 +188,6 @@ public class GrnService {
                             .orElse(null));
 
             // BUG FIX 3: recItemId = null -> receiving_item_id NOT NULL violation
-            // Throw BusinessException ro rang thay vi de DB throw constraint error
             if (matchedReceivingItem == null) {
                 throw new BusinessException(
                         "Không tìm thấy receiving item cho SKU " + item.getSkuId()
@@ -219,24 +216,9 @@ public class GrnService {
                 lotId = lot.getLotId();
             }
 
-            InventoryTransactionEntity tx = InventoryTransactionEntity.builder()
-                    .warehouseId(grn.getWarehouseId())
-                    .locationId(stagingLocationId)
-                    .skuId(item.getSkuId())
-                    .txnType("RECEIVING")
-                    .quantity(item.getQuantity())
-                    .referenceTable("GRN")
-                    .referenceId(id)
-                    .createdBy(userId)
-                    .build();
-            inventoryTransactionRepo.save(tx);
-
-            inventorySnapshotRepo.upsertInventory(
-                    grn.getWarehouseId(),
-                    item.getSkuId(),
-                    lotId,
-                    stagingLocationId,
-                    item.getQuantity());
+            // [FIX] KHÔNG cộng inventory ở bước post.
+            // Inventory chỉ được cộng khi Keeper confirm putaway (PutawayTaskService.confirmAll).
+            // Trước đây tạo InventoryTransaction + upsert InventorySnapshot ở đây → sai logic.
 
             Long destLocationId = null;
             Optional<org.example.sep26management.application.dto.response.PutawaySuggestion> sug =
