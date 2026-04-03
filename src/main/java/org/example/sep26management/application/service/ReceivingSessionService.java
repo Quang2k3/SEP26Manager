@@ -53,6 +53,7 @@ public class ReceivingSessionService {
         //   1. ReceivingSessionController  — inbound Keeper/QC, truyền receivingId thật
         //   2. OutboundController          — outbound picking,  truyền null
 
+        @Transactional
         public ApiResponse<ScanSessionResponse> createSession(
                 Long warehouseId, Long userId, Long receivingId, String role) {
 
