@@ -79,6 +79,24 @@ public class ScannerOtpController {
         return scannerOtpService.verifyOtp(sessionId, otp, getClientIp(request));
     }
 
+    /**
+     * Step 3b — FE gọi sau khi tạo scan session + scan token thành công.
+     * Xóa OTP session khỏi Redis (dọn dẹp).
+     * PUBLIC với scannerToken (SCANNER_TEMP JWT) — không cần full auth.
+     * Body: { "sessionId": "uuid" }
+     */
+    @PostMapping("/cleanup")
+    @Operation(summary = "Cleanup OTP session sau khi scanner ready (Step 3b)",
+            description = "Gọi sau khi POST /receiving-sessions và /scan-token đều thành công. " +
+                    "Xóa OTP session khỏi Redis. Nếu không gọi endpoint này, OTP sẽ tự hết hạn sau 24h.")
+    public ApiResponse<Void> cleanupOtpSession(@RequestBody Map<String, String> body) {
+        String sessionId = body.get("sessionId");
+        if (sessionId == null || sessionId.isBlank())
+            return ApiResponse.error("sessionId không được để trống");
+        scannerOtpService.cleanupOtpSession(sessionId);
+        return ApiResponse.success("OTP session đã dọn dẹp", null);
+    }
+
     // ─── Auth helpers ─────────────────────────────────────────────────────────
 
     private Long extractUserId(Authentication auth) {

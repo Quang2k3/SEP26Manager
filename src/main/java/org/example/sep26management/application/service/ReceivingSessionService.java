@@ -107,6 +107,7 @@ public class ReceivingSessionService {
                 if ("QC".equals(role) && receivingId != null) {
                         int claimed = receivingOrderRepo.claimQcAssignment(receivingId, userId);
                         if (claimed > 0) {
+                                // Claim mới thành công
                                 data.setAssignedQcId(userId);
                                 sessionRedis.save(sessionId, data);
                                 log.info("[QCClaim] QC userId={} pre-claimed receivingId={} at session create", userId, receivingId);
@@ -121,12 +122,23 @@ public class ReceivingSessionService {
                                         );
                                 } catch (Exception ignored) {}
                         } else {
-                                // Ai đó đã claim trước — từ chối tạo session
-                                sessionRedis.deleteActiveSession(warehouseId, userId);
-                                sessionRedis.delete(sessionId);
-                                log.warn("[QCClaim] Phiếu #{} đã bị QC khác claim. Từ chối userId={}", receivingId, userId);
-                                return ApiResponse.error(
-                                        "Phiếu #" + receivingId + " đang được QC khác kiểm định. Vui lòng chờ hoặc liên hệ quản lý.");
+                                // claimed == 0: có thể đã claim từ bước generateQr, kiểm tra xem có phải chính mình không
+                                var orderOpt = receivingOrderRepo.findById(receivingId);
+                                boolean selfClaimed = orderOpt.isPresent()
+                                        && userId.equals(orderOpt.get().getAssignedQcId());
+                                if (selfClaimed) {
+                                        // FIXED: Chính mình đã claim từ bước generateQr → cho phép tạo session
+                                        data.setAssignedQcId(userId);
+                                        sessionRedis.save(sessionId, data);
+                                        log.info("[QCClaim] QC userId={} already claimed receivingId={} from OTP generate step, proceeding.", userId, receivingId);
+                                } else {
+                                        // QC khác đã claim → từ chối tạo session
+                                        sessionRedis.deleteActiveSession(warehouseId, userId);
+                                        sessionRedis.delete(sessionId);
+                                        log.warn("[QCClaim] Phiếu #{} đã bị QC khác claim. Từ chối userId={}", receivingId, userId);
+                                        return ApiResponse.error(
+                                                "Phiếu #" + receivingId + " đang được QC khác kiểm định. Vui lòng chờ hoặc liên hệ quản lý.");
+                                }
                         }
                 }
 
