@@ -164,6 +164,7 @@ public class ReceivingOrderService {
                                                                 org.example.sep26management.application.dto.request.ReceivingOrderRequest request,
                                                                 Long userId) {
         ReceivingOrderEntity order = findOrder(id);
+        validateOwnership(order, userId, "sửa");
         if (!"DRAFT".equals(order.getStatus())) {
             throw new org.example.sep26management.infrastructure.exception.BusinessException(
                     "Cannot update: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
@@ -232,6 +233,7 @@ public class ReceivingOrderService {
     @Transactional
     public ApiResponse<Void> deleteDraftOrder(Long id, Long userId) {
         ReceivingOrderEntity order = findOrder(id);
+        validateOwnership(order, userId, "xóa");
         if (!"DRAFT".equals(order.getStatus())) {
             throw new org.example.sep26management.infrastructure.exception.BusinessException(
                     "Cannot delete: only allowed in DRAFT status. Current status: '" + order.getStatus() + "'");
@@ -394,6 +396,7 @@ public class ReceivingOrderService {
     @Transactional
     public ApiResponse<ReceivingOrderResponse> submit(Long id, Long userId) {
         ReceivingOrderEntity order = findOrder(id);
+        validateOwnership(order, userId, "submit");
         validateStatus(order, "submit", "DRAFT");
 
         order.setStatus("SUBMITTED");
@@ -421,6 +424,7 @@ public class ReceivingOrderService {
     @Transactional
     public ApiResponse<ReceivingOrderResponse> finalizeCount(Long id, Long userId) {
         ReceivingOrderEntity order = findOrder(id);
+        validateOwnership(order, userId, "finalize-count");
 
         validateStatus(order, "finalize-count", "SUBMITTED", "KEEPER_RESCAN");
 
@@ -1352,6 +1356,20 @@ public class ReceivingOrderService {
         return receivingOrderRepo.findById(id)
                 .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.BusinessException(
                         "Receiving order not found: " + id));
+    }
+
+    /**
+     * Kiểm tra quyền sở hữu: Keeper chỉ được thao tác đơn do mình tạo.
+     * userId = null → bỏ qua kiểm tra (Manager/QC không bị giới hạn).
+     * userId = 0L   → scanner token không có userId → bỏ qua.
+     */
+    private void validateOwnership(ReceivingOrderEntity order, Long userId, String action) {
+        if (userId == null || userId == 0L) return; // Manager/QC hoặc scanner → pass
+        if (!userId.equals(order.getCreatedBy())) {
+            throw new org.example.sep26management.infrastructure.exception.BusinessException(
+                    "Không có quyền " + action + " phiếu #" + order.getReceivingId()
+                            + " — phiếu n㣊y do Keeper khác tạo.");
+        }
     }
 
     private void validateStatus(ReceivingOrderEntity order, String action, String... expectedStatuses) {
