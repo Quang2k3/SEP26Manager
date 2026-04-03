@@ -39,6 +39,12 @@ public class SignedNoteService {
         SalesOrderEntity so = salesOrderRepository.findById(soId)
                 .orElseThrow(() -> new BusinessException("Sales Order không tồn tại: " + soId));
 
+        // [ONE-TIME LOCK] Chặn upload lần 2 — mỗi phiếu chỉ được upload 1 lần duy nhất
+        if (so.getSignedNoteUrl() != null && !so.getSignedNoteUrl().isBlank()) {
+            throw new BusinessException(
+                    "Đã có ảnh phiếu xuất kho. Mỗi đơn chỉ được upload 1 lần — không thể ghi đ財.");
+        }
+
         // Validate file
         if (file == null || file.isEmpty()) {
             throw new BusinessException("Vui lòng chọn ảnh phiếu đã ký.");

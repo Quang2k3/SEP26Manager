@@ -39,6 +39,12 @@ public class PutawaySignedNoteService {
         PutawayTaskEntity task = putawayTaskRepo.findById(taskId)
                 .orElseThrow(() -> new BusinessException("Putaway Task không tồn tại: " + taskId));
 
+        // [ONE-TIME LOCK] Chặn upload lần 2
+        if (task.getSignedNoteUrl() != null && !task.getSignedNoteUrl().isBlank()) {
+            throw new BusinessException(
+                    "Đã có ảnh phiếu cất hàng. Mỗi task chỉ được upload 1 lần — không thể ghi đ財.");
+        }
+
         if (file == null || file.isEmpty()) {
             throw new BusinessException("Vui lòng chọn ảnh phiếu đã ký.");
         }
