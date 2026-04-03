@@ -65,17 +65,40 @@ public class ReceivingSessionService {
                                 log.info("Reusing scan session: {} userId={} warehouseId={} — reset lines, rebind receivingId={}",
                                         existingId, userId, warehouseId, receivingId);
                                 ScanSessionData data = existingDataOpt.get();
-                                // Reset lines + rebind phiếu + role + xóa QC claim cũ
+                                // Reset lines + rebind phiếu + role
                                 Long oldReceivingId = data.getReceivingId();
                                 data.setLines(new ArrayList<>());
                                 data.setReceivingId(receivingId);
                                 data.setRole(role);
                                 data.setAssignedQcId(null);
-                                // Release claim cũ nếu đang giữ phiếu khác
+                                // Release claim cũ nếu đang giữ phiếu KHÁC
                                 if ("QC".equals(role) && oldReceivingId != null
                                         && !oldReceivingId.equals(receivingId)) {
                                         receivingOrderRepo.releaseQcAssignment(oldReceivingId, userId);
                                         log.info("[QCClaim] Released old claim receivingId={} userId={}", oldReceivingId, userId);
+                                }
+                                // FIXED: Re-establish QC claim cho phiếu mới (hoặc phiếu cũ nếu cùng receivingId)
+                                // Tránh session bị trả về mà assignedQcId = null
+                                if ("QC".equals(role) && receivingId != null) {
+                                        int claimed = receivingOrderRepo.claimQcAssignment(receivingId, userId);
+                                        if (claimed > 0) {
+                                                data.setAssignedQcId(userId);
+                                                log.info("[QCClaim] Re-claimed receivingId={} userId={} on session reuse", receivingId, userId);
+                                        } else {
+                                                // Đã claim từ bước generateQr hoặc chính mình đang giữ → kiểm tra
+                                                var orderOpt = receivingOrderRepo.findById(receivingId);
+                                                boolean selfClaimed = orderOpt.isPresent()
+                                                        && userId.equals(orderOpt.get().getAssignedQcId());
+                                                if (selfClaimed) {
+                                                        data.setAssignedQcId(userId);
+                                                        log.info("[QCClaim] Self-claimed confirmed on reuse: receivingId={} userId={}", receivingId, userId);
+                                                } else {
+                                                        // QC khác đã claim → từ chối reuse
+                                                        log.warn("[QCClaim] Phiếu #{} bị QC khác claim, từ chối reuse userId={}", receivingId, userId);
+                                                        return ApiResponse.error(
+                                                                "Phiếu #" + receivingId + " đang được QC khác kiểm định. Vui lòng chờ hoặc liên hệ quản lý.");
+                                                }
+                                        }
                                 }
                                 sessionRedis.save(existingId, data);
                                 return ApiResponse.success("Reused existing session (lines cleared)",

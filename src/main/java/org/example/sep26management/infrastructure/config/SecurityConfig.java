@@ -88,7 +88,7 @@ public class SecurityConfig {
 
                         // ── Scanner OTP: verify PUBLIC (mobile belum punya JWT) ───────
                         // generate endpoint diproteksi @PreAuthorize di controller
-                        .requestMatchers("/v1/scanner-otp/verify").permitAll()
+                        .requestMatchers("/v1/scanner-otp/verify", "/v1/scanner-otp/cleanup").permitAll()
 
                         // ── Scan events ───────────────────────────────────────────────
                         .requestMatchers("/v1/scan-events", "/api/v1/scan-events").hasAnyRole("KEEPER", "QC")
