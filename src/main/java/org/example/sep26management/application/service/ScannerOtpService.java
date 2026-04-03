@@ -53,6 +53,7 @@ public class ScannerOtpService {
     private final PasswordEncoder            passwordEncoder;
     private final ReceivingOrderJpaRepository receivingOrderRepo;
     private final NotificationService        notificationService;
+    private final org.example.sep26management.infrastructure.persistence.redis.ScanSessionRedisRepository sessionRedis;
 
     // ─── Step 1: Generate QR ─────────────────────────────────────────────────
 
@@ -125,7 +126,26 @@ public class ScannerOtpService {
         otpRedis.incrementRateLimit(userId, clientIp);
         sendScannerOtpEmail(userEmail, rawOtp, role, sessionId);
 
-        log.info("[ScannerOtp] Generated: sessionId={} userId={} role={} receivingId={}",
+        // CREATE SCAN SESSION DATA IMMEDIATELY
+        // Để Frontend Web có thể subscribe SSE stream ngay lập tức mà không bị lỗi 500
+        org.example.sep26management.application.dto.scan.ScanSessionData sessionData = org.example.sep26management.application.dto.scan.ScanSessionData.builder()
+                .sessionId(sessionId)
+                .warehouseId(warehouseId)
+                .createdBy(userId)
+                .receivingId(receivingId)
+                .role(role)
+                .lines(new java.util.ArrayList<>())
+                .build();
+        // pre-claim QC if needed
+        if ("QC".equals(role) && receivingId != null) {
+                sessionData.setAssignedQcId(userId);
+        }
+        
+        // Lưu ScanSessionData vào Redis để Laptop có thể SSE ngay
+        sessionRedis.save(sessionId, sessionData);
+        sessionRedis.saveActiveSession(warehouseId, userId, sessionId);
+        
+        log.info("[ScannerOtp] Generated + ScanSession created: sessionId={} userId={} role={} receivingId={}",
                 sessionId, userId, role, receivingId);
 
         Map<String, Object> resp = new HashMap<>();
