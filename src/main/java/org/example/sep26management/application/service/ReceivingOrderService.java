@@ -145,12 +145,11 @@ public class ReceivingOrderService {
 
         log.info("Draft GRN {} created by userId={}", receivingCode, userId);
 
-        // ── Realtime: notify tất cả role có đơn inbound mới được tạo ─────
+        // ── Realtime: notify QC có đơn inbound mới được tạo ─────
         String supplierNameNew = supplierId != null
                 ? supplierRepo.findById(supplierId).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
-                "receiving_pending_qc",
+        notificationService.notifyRole("QC", "receiving_pending_qc",
                 savedOrder.getReceivingId(), receivingCode,
                 supplierNameNew + " — Đơn inbound mới");
 
@@ -219,9 +218,8 @@ public class ReceivingOrderService {
 
         log.info("Draft GRN {} updated by userId={}", order.getReceivingCode(), userId);
 
-        // ── Realtime: notify tất cả role đơn inbound vừa được cập nhật ──
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
-                "receiving_pending_qc",
+        // ── Realtime: notify QC đơn inbound vừa được cập nhật ──
+        notificationService.notifyRole("QC", "receiving_pending_qc",
                 order.getReceivingId(), order.getReceivingCode(),
                 "Đơn inbound đã cập nhật");
 
@@ -252,9 +250,8 @@ public class ReceivingOrderService {
 
         log.info("Draft GRN {} deleted by userId={}", deletedCode, userId);
 
-        // ── Realtime: notify tất cả role đơn inbound vừa bị xóa ──────────
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
-                "receiving_pending_qc",
+        // ── Realtime: notify QC đơn inbound vừa bị xóa ──────────
+        notificationService.notifyRole("QC", "receiving_pending_qc",
                 deletedId, deletedCode,
                 "Đơn inbound đã bị xóa");
 
@@ -407,7 +404,7 @@ public class ReceivingOrderService {
         String supplierName = order.getSupplierId() != null
                 ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_pending_qc",
+        notificationService.notifyRole("QC", "receiving_pending_qc",
                 order.getReceivingId(), order.getReceivingCode(), supplierName);
 
         log.info("Receiving Order {} submitted (DRAFT → SUBMITTED) by userId={}",
@@ -569,7 +566,7 @@ public class ReceivingOrderService {
                 String supNameMismatch = order.getSupplierId() != null
                         ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                         : "—";
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "qc_rescan_required",
+                notificationService.notifyRole("QC", "qc_rescan_required",
                         order.getReceivingId(), order.getReceivingCode(),
                         supNameMismatch + " — Keeper rescan vẫn lệch, QC cần quét lại lần 2 (" + rescanMismatches.size() + " SKU)");
 
@@ -594,7 +591,7 @@ public class ReceivingOrderService {
         String supplierNamePc = order.getSupplierId() != null
                 ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_pending_qc",
+        notificationService.notifyRole("QC", "receiving_pending_qc",
                 order.getReceivingId(), order.getReceivingCode(),
                 supplierNamePc + " — sẵn sàng kiểm đếm");
 
@@ -630,14 +627,15 @@ public class ReceivingOrderService {
 
         log.info("Receiving Order {} QC approved by userId={}", order.getReceivingCode(), qcUserId);
 
-        // ── Realtime: notify KEEPER rằng QC xong, cần tạo GRN ──────────────
+        // ── Realtime: notify KEEPER (người tạo đơn) rằng QC xong, cần tạo GRN ──────────────
         String supplierName = order.getSupplierId() != null
                 ? supplierRepo.findById(order.getSupplierId())
                 .map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_create_ready",
-                order.getReceivingId(), order.getReceivingCode(),
-                supplierName + " — QC đã kiểm đếm xong");
+        final String grnReadySubtitle1 = supplierName + " — QC đã kiểm đếm xong";
+        userRepo.findById(order.getCreatedBy()).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "grn_create_ready",
+                        order.getReceivingId(), order.getReceivingCode(), grnReadySubtitle1));
 
         return ApiResponse.success("QC approved successfully", getOrder(id).getData());
     }
@@ -792,13 +790,14 @@ public class ReceivingOrderService {
                 }
             }
 
-            // ── Realtime: notify KEEPER cần quét lại SKU lệch ─────────
+            // ── Realtime: notify KEEPER (người tạo đơn) cần quét lại SKU lệch ─────────
             String supNameRescan = order.getSupplierId() != null
                     ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                     : "—";
-            notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "keeper_rescan_required",
-                    order.getReceivingId(), order.getReceivingCode(),
-                    supNameRescan + " — QC phát hiện lệch SL, Keeper cần quét lại (" + mismatchedSkuCodes.size() + " SKU: " + String.join(", ", mismatchedSkuCodes) + ")");
+            final String rescanSubtitle = supNameRescan + " — QC phát hiện lệch SL, Keeper cần quét lại (" + mismatchedSkuCodes.size() + " SKU: " + String.join(", ", mismatchedSkuCodes) + ")";
+            userRepo.findById(order.getCreatedBy()).ifPresent(u ->
+                    notificationService.notifyUser(u.getEmail(), "keeper_rescan_required",
+                            order.getReceivingId(), order.getReceivingCode(), rescanSubtitle));
 
             log.info("QC scan for GRN {} — {} SKU(s) mismatch with Keeper. KEEPER_RESCAN. {}",
                     order.getReceivingCode(), mismatchDetails.size(), mismatchNote);
@@ -1055,11 +1054,14 @@ public class ReceivingOrderService {
             order.setUpdatedAt(LocalDateTime.now());
             receivingOrderRepo.save(order);
 
-            // ── Realtime: notify MANAGER + KEEPER
+            // ── Realtime: notify MANAGER (broadcast) + KEEPER (người tạo đơn)
             for (IncidentEntity inc : createdIncidents) {
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
-                        inc.getIncidentId(), inc.getIncidentCode(),
-                        order.getReceivingCode() + " — QC phát hiện " + (inc.getIncidentType().name().equals("DAMAGE") ? "hàng lỗi" : "thừa/thiếu"));
+                String incSubtitle = order.getReceivingCode() + " — QC phát hiện " + (inc.getIncidentType().name().equals("DAMAGE") ? "hàng lỗi" : "thừa/thiếu");
+                notificationService.notifyRole("MANAGER", "incident_open",
+                        inc.getIncidentId(), inc.getIncidentCode(), incSubtitle);
+                userRepo.findById(order.getCreatedBy()).ifPresent(u ->
+                        notificationService.notifyUser(u.getEmail(), "incident_open",
+                                inc.getIncidentId(), inc.getIncidentCode(), incSubtitle));
             }
 
             // Audit log: QC rejected (fail items found)
@@ -1086,13 +1088,14 @@ public class ReceivingOrderService {
             order.setUpdatedAt(LocalDateTime.now());
             receivingOrderRepo.save(order);
 
-            // ── Realtime: notify KEEPER QC xong 100% pass → cần tạo GRN ──
+            // ── Realtime: notify KEEPER (người tạo đơn) QC xong 100% pass → cần tạo GRN ──
             String supNameQc = order.getSupplierId() != null
                     ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                     : "—";
-            notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_create_ready",
-                    order.getReceivingId(), order.getReceivingCode(),
-                    supNameQc + " — QC 100% PASS");
+            final String grnReadySubtitle2 = supNameQc + " — QC 100% PASS";
+            userRepo.findById(order.getCreatedBy()).ifPresent(u ->
+                    notificationService.notifyUser(u.getEmail(), "grn_create_ready",
+                            order.getReceivingId(), order.getReceivingCode(), grnReadySubtitle2));
 
             // Audit log: QC approved (100% pass)
             auditLogService.logAction(
@@ -1118,13 +1121,8 @@ public class ReceivingOrderService {
 
         // Push WS → QC khác biết phiếu này available lại (hoặc chuyển sang status mới)
         try {
-            notificationService.notifyRoles(
-                    new String[]{"QC", "MANAGER", "KEEPER"},
-                    "qc_released",
-                    id,
-                    order.getReceivingCode(),
-                    "QC hoàn thành kiểm định"
-            );
+            notificationService.notifyRole("QC", "qc_released",
+                    id, order.getReceivingCode(), "QC hoàn thành kiểm định");
         } catch (Exception ignored) {}
 
         return ApiResponse.success("QC scan session submitted successfully", Map.of(
@@ -1288,13 +1286,14 @@ public class ReceivingOrderService {
         order.setStatus("GRN_CREATED");
         receivingOrderRepo.save(order);
 
-        // ── Realtime: notify MANAGER GRN đã tạo xong, chờ submit lên duyệt ─
+        // ── Realtime: notify KEEPER (người tạo đơn) GRN đã tạo xong, cần gửi Manager ─
         String supGrn = order.getSupplierId() != null
                 ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_create_ready",
-                order.getReceivingId(), order.getReceivingCode(),
-                supGrn + " — GRN đã tạo, cần gửi Manager");
+        final String generateGrnSubtitle = supGrn + " — GRN đã tạo, cần gửi Manager";
+        userRepo.findById(order.getCreatedBy()).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "grn_create_ready",
+                        order.getReceivingId(), order.getReceivingCode(), generateGrnSubtitle));
 
         // DTO mapping for response
         List<org.example.sep26management.application.dto.response.GrnItemResponse> itemResponses = validGrnItems
