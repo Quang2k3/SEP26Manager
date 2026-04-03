@@ -174,9 +174,12 @@ public class ScannerOtpService {
 
         // OTP đúng
         long remainingTtl = otpRedis.getTtlSeconds(sessionId);
+        // FIXED: Chỉ mark used=true, KHÔNG xóa key ngay.
+        // Key sẽ được xóa sau khi FE tạo scan session + scan token thành công.
+        // Điều này cho phép FE retry tạo session nếu lần đầu thất bại,
+        // mà không cần người dùng phải tạo lại mã OTP mới.
         data.setUsed(true);
         otpRedis.update(data);
-        otpRedis.delete(sessionId);
         otpRedis.resetRateLimit(data.getUserId(), clientIp);
 
         log.info("[ScannerOtp] OTP verified ✓ sessionId={} userId={} role={}",
@@ -196,6 +199,14 @@ public class ScannerOtpService {
             result.put("receivingId", data.getReceivingId());
         }
         return ApiResponse.success("Xác thực OTP thành công. Scanner sẵn sàng.", result);
+    }
+
+    // ─── Step 3b: Cleanup OTP sau khi scan session tạo thành công ────────────
+    // Được gọi bởi FE sau khi POST /receiving-sessions + /scan-token đều thành công.
+    // Tách ra endpoint riêng để tránh lỗi "OTP đã dùng nhưng session chưa tạo được".
+    public void cleanupOtpSession(String sessionId) {
+        otpRedis.delete(sessionId);
+        log.info("[ScannerOtp] OTP session cleaned up after successful scan session: {}", sessionId);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
