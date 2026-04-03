@@ -75,9 +75,34 @@ public class ScanSessionRedisRepository {
      * Trả về newQty dạng String, hoặc null nếu session hết hạn.
      */
     private static final String LUA_UPDATE_LINE =
-            "local raw = redis.call('GET', KEYS[1])\nif not raw then return nil end\nlocal data = cjson.decode(raw)\nif not data.lines then data.lines = {} end\nlocal skuId = ARGV[1]\nlocal cond = ARGV[2]\nlocal delta = tonumber(ARGV[3])\nlocal ttl = tonumber(ARGV[4])\nlocal found = false\nlocal newQty = delta\nfor i, line in ipairs(data.lines) do\n  if tostring(line.skuId) == skuId and line.condition == cond then\n    line.qty = (line.qty or 0) + delta\n    newQty = line.qty\n    found = true\n    break\n  end\nend\nif not found then\n  table.insert(data.lines, {skuId=tonumber(skuId), condition=cond, qty=delta})\nend\nredis.call('SET', KEYS[1], cjson.encode(data), 'EX', ttl)\nreturn tostring(newQty)\n";
+            "local raw = redis.call('GET', KEYS[1])\n" +
+            "if not raw then return nil end\n" +
+            "local data = cjson.decode(raw)\n" +
+            "if not data.lines then data.lines = {} end\n" +
+            "local skuId = ARGV[1]\n" +
+            "local cond = ARGV[2]\n" +
+            "local delta = tonumber(ARGV[3])\n" +
+            "local ttl = tonumber(ARGV[4])\n" +
+            "local skuCode = ARGV[5]\n" +
+            "local skuName = ARGV[6]\n" +
+            "local barcode = ARGV[7]\n" +
+            "local found = false\n" +
+            "local newQty = delta\n" +
+            "for i, line in ipairs(data.lines) do\n" +
+            "  if tostring(line.skuId) == skuId and line.condition == cond then\n" +
+            "    line.qty = (line.qty or 0) + delta\n" +
+            "    newQty = line.qty\n" +
+            "    found = true\n" +
+            "    break\n" +
+            "  end\n" +
+            "end\n" +
+            "if not found then\n" +
+            "  table.insert(data.lines, {skuId=tonumber(skuId), condition=cond, qty=delta, skuCode=skuCode, skuName=skuName, barcode=barcode})\n" +
+            "end\n" +
+            "redis.call('SET', KEYS[1], cjson.encode(data), 'EX', ttl)\n" +
+            "return tostring(newQty)\n";
 
-    public String atomicUpdateLine(String sessionId, Long skuId, String condition, java.math.BigDecimal delta) {
+    public String atomicUpdateLine(String sessionId, Long skuId, String condition, java.math.BigDecimal delta, String skuCode, String skuName, String barcode) {
         try {
             DefaultRedisScript<String> script = new DefaultRedisScript<>(LUA_UPDATE_LINE, String.class);
             long ttlSec = TTL.getSeconds();
@@ -89,7 +114,10 @@ public class ScanSessionRedisRepository {
                     String.valueOf(skuId),
                     condition,
                     delta.toPlainString(),
-                    String.valueOf(ttlSec)
+                    String.valueOf(ttlSec),
+                    skuCode != null ? skuCode : "",
+                    skuName != null ? skuName : "",
+                    barcode != null ? barcode : ""
             );
             return result != null ? result.toString() : null;
         } catch (Exception e) {

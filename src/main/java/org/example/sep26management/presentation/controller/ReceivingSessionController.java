@@ -84,8 +84,12 @@ public class ReceivingSessionController {
             + "**Data yêu cầu:** \n"
             + "- `@PathVariable sessionId`: Chuỗi UUID, lấy từ bước Khởi tạo phiên.\n"
             + "👉 Web truyền vào URL EventSource để kết nối stream liên tục.")
-    public SseEmitter stream(@PathVariable String sessionId) {
-        return receivingSessionService.stream(sessionId);
+    public org.springframework.http.ResponseEntity<SseEmitter> stream(@PathVariable String sessionId) {
+        SseEmitter emitter = receivingSessionService.stream(sessionId);
+        return org.springframework.http.ResponseEntity.ok()
+                .header("X-Accel-Buffering", "no")
+                .header("Cache-Control", "no-cache")
+                .body(emitter);
     }
 
     /**

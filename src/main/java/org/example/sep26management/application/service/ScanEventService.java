@@ -107,7 +107,7 @@ public class ScanEventService {
 
         // 7. Cập nhật session Redis — dùng Lua atomic để tránh lost-update khi 2 scan đồng thời
         BigDecimal inc = request.getQty() != null ? request.getQty() : BigDecimal.ONE;
-        String luaResult = sessionRedis.atomicUpdateLine(sessionId, sku.getSkuId(), condition, inc);
+        String luaResult = sessionRedis.atomicUpdateLine(sessionId, sku.getSkuId(), condition, inc, sku.getSkuCode(), sku.getSkuName(), sku.getBarcode());
         BigDecimal newQty = luaResult != null ? new BigDecimal(luaResult) : inc;
 
         // 7b. Reload session từ Redis để push SSE (Lua đã save rồi)
