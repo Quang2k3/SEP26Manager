@@ -584,8 +584,10 @@ public class ReceivingOrderService {
         order.setUpdatedAt(LocalDateTime.now());
         receivingOrderRepo.save(order);
 
-        // ── Z-INB: Cộng tồn vào staging khi PENDING_COUNT ────────────────────
-        addInboundStockToStaging(order, userId);
+        // [FIX] KHÔNG cộng tồn vào staging ở bước này.
+        // Hàng chỉ được cộng vào inventory khi Manager post GRN (GrnService.post()).
+        // Trước đây gọi addInboundStockToStaging() ở đây → hàng bị cộng 2 lần
+        // (lần 1 ở đây, lần 2 ở GrnService.post()).
 
         // ── Realtime: notify QC phiếu đã scan xong, chờ QC kiểm đếm ─────────
         String supplierNamePc = order.getSupplierId() != null
