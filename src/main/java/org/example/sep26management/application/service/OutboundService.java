@@ -637,9 +637,9 @@ public class OutboundService {
             String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
             String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
 
-            // Sau khi ALLOCATED, hàng đã bị trừ khỏi bin (confirmPicked).
-            // Tồn kho hiện tại thấp là bình thường, không phải thiếu hàng cho đơn này.
-            BigDecimal displayAvailable = isPostAllocate ? i.getOrderedQty() : available;
+            // [FIX] Luôn hiển thị tồn khả dụng thực tế (available) — không thay thế bằng orderedQty.
+            // Trước đây khi post-allocate, displayAvailable = orderedQty → user thấy sai (VD: 2 thay vì 8).
+            BigDecimal displayAvailable = available;
             boolean isInsufficient = isPostAllocate ? false : available.compareTo(i.getOrderedQty()) < 0;
 
             return OutboundResponse.OutboundItemResponse.builder()
@@ -684,7 +684,8 @@ public class OutboundService {
             String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
             String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
 
-            BigDecimal displayAvailable = isPostAllocate ? i.getQuantity() : available;
+            // [FIX] Luôn hiển thị tồn khả dụng thực tế
+            BigDecimal displayAvailable = available;
             boolean isInsufficient = isPostAllocate ? false : available.compareTo(i.getQuantity()) < 0;
 
             return OutboundResponse.OutboundItemResponse.builder()
