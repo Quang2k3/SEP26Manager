@@ -62,12 +62,41 @@ public class OutboundQcService {
     @Transactional
     public ApiResponse<Void> startQcSession(Long taskId, Long userId) {
         PickingTaskEntity task = findPickingTask(taskId);
-        if (!"PICKED".equals(task.getStatus())) {
+        if (!"PICKED".equals(task.getStatus()) && !"QC_IN_PROGRESS".equals(task.getStatus())) {
             throw new BusinessException(
-                    "QC session can only be started for tasks in PICKED status. Current: " + task.getStatus());
+                    "QC session chỉ khởi động được khi task ở PICKED hoặc QC_IN_PROGRESS. Hiện: " + task.getStatus());
         }
-        task.setStatus("QC_IN_PROGRESS");
-        pickingTaskRepository.save(task);
+
+        // ── Giải pháp 4: QC claim ngay khi bấm "QC Scan" ────────────────────
+        // Kiểm tra: nếu assignedQcId == mình → re-start OK
+        if (task.getAssignedQcId() != null && !task.getAssignedQcId().equals(userId)) {
+            throw new BusinessException(
+                    "Pick List #" + taskId + " đang được QC khác kiểm định. Vui lòng liên hệ quản lý.");
+        }
+
+        if (task.getAssignedQcId() == null) {
+            int claimed = pickingTaskRepository.claimQcAssignment(taskId, userId);
+            if (claimed == 0) {
+                // Race: QC khác claim cùng lúc
+                PickingTaskEntity fresh = findPickingTask(taskId);
+                if (fresh.getAssignedQcId() != null && !fresh.getAssignedQcId().equals(userId)) {
+                    throw new BusinessException(
+                            "Pick List #" + taskId + " vừa được QC khác nhận. Vui lòng thử lại.");
+                }
+            } else {
+                log.info("[QcClaim-OB] QC userId={} claimed taskId={}", userId, taskId);
+                try {
+                    notificationService.notifyRoles(new String[]{"QC", "MANAGER"},
+                            "outbound_qc_claimed", taskId, "Task #" + taskId,
+                            "QC userId=" + userId + " bắt đầu kiểm định outbound");
+                } catch (Exception ignored) {}
+            }
+        }
+
+        if (!"QC_IN_PROGRESS".equals(task.getStatus())) {
+            task.setStatus("QC_IN_PROGRESS");
+            pickingTaskRepository.save(task);
+        }
 
         if (task.getSoId() != null) {
             salesOrderRepository.findById(task.getSoId()).ifPresent(so -> {
@@ -286,6 +315,14 @@ public class OutboundQcService {
                 }
             });
         }
+
+        // Release QC claim — task đã finalize, QC khác có thể xem lại nếu cần
+        try { pickingTaskRepository.releaseQcAssignment(taskId, userId); } catch (Exception ignored) {}
+        try {
+            notificationService.notifyRoles(new String[]{"QC", "MANAGER", "KEEPER"},
+                    "outbound_qc_released", taskId, "Task #" + taskId,
+                    "QC hoàn thành kiểm định outbound");
+        } catch (Exception ignored) {}
 
         log.info("QC finalized taskId={}: pass={}, fail={}, hold={}", taskId, pass, fail, hold);
         return ApiResponse.success("QC finalized.", QcSummaryResponse.builder()

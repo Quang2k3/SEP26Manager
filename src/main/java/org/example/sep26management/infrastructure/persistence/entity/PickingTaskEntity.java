@@ -36,8 +36,21 @@ public class PickingTaskEntity {
     @Builder.Default
     private Integer priority = 3;
 
+    /**
+     * Keeper được giao task picking này.
+     * Set khi Keeper bấm "Tạo QR Picking" — atomic claim WHERE assigned_to IS NULL.
+     * NULL = chưa có Keeper nào nhận task.
+     */
     @Column(name = "assigned_to")
     private Long assignedTo;
+
+    /**
+     * QC claim lock — userId của QC đang scan task này.
+     * Set khi QC bấm "Tạo QR QC" — atomic claim WHERE assigned_qc_id IS NULL.
+     * NULL = chưa có QC nào claim.
+     */
+    @Column(name = "assigned_qc_id")
+    private Long assignedQcId;
 
     @Column(name = "started_at")
     private LocalDateTime startedAt;

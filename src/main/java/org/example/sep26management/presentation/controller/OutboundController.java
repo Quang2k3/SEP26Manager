@@ -64,6 +64,8 @@ public class OutboundController {
     private final PickListService pickListService;
     private final OutboundQcService outboundQcService;
     private final ReceivingSessionService receivingSessionService;
+    private final org.example.sep26management.infrastructure.persistence.repository.PickingTaskJpaRepository pickingTaskRepository;
+    private final org.example.sep26management.application.service.NotificationService notificationService;
     private final DispatchPdfService dispatchPdfService;
     private final SignedNoteService signedNoteService;
     private final Cloudinary cloudinary;
@@ -317,19 +319,47 @@ public class OutboundController {
             @PathVariable Long taskId,
             Authentication auth,
             HttpServletRequest http) {
-        Long userId = getUserId();
+        Long userId      = getUserId();
         Long warehouseId = getWarehouseId();
+        String role      = getCurrentRole();
 
-        // Tạo hoặc reuse scan session — outbound picking không bind receivingId (null)
-        String role = getCurrentRole();
+        // ── Giải pháp 3: Keeper claim ngay khi bấm "Tạo QR Picking" ──────────
+        var taskOpt = pickingTaskRepository.findById(taskId);
+        if (taskOpt.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("Không tìm thấy Pick List #" + taskId));
+        }
+        var task = taskOpt.get();
+
+        if (task.getAssignedTo() != null && !task.getAssignedTo().equals(userId)) {
+            // Task đã bị Keeper khác claim → từ chối ngay
+            return ResponseEntity.status(409)
+                    .body(ApiResponse.error("Pick List #" + taskId
+                            + " đang được Keeper khác thực hiện. Vui lòng liên hệ quản lý."));
+        }
+
+        if (task.getAssignedTo() == null) {
+            // Chưa ai claim → atomic claim
+            int claimed = pickingTaskRepository.claimKeeperAssignment(taskId, userId);
+            if (claimed == 0) {
+                return ResponseEntity.status(409)
+                        .body(ApiResponse.error("Pick List #" + taskId
+                                + " vừa được Keeper khác nhận. Vui lòng thử lại."));
+            }
+            try {
+                notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"},
+                        "picking_claimed", taskId, "Task #" + taskId,
+                        "Keeper userId=" + userId + " bắt đầu picking");
+            } catch (Exception ignored) {}
+            log.info("[PickingClaim] Keeper userId={} claimed taskId={}", userId, taskId);
+        }
+        // Nếu task.assignedTo == userId → re-generate QR bình thường, skip claim
+
         var sessionResp = receivingSessionService.createSession(warehouseId, userId, null, role);
         String sessionId = sessionResp.getData().getSessionId();
-
-        // Sinh scan token với role KEEPER
-        var tokenResp = receivingSessionService.generateScanToken(sessionId, userId, role);
+        var tokenResp    = receivingSessionService.generateScanToken(sessionId, userId, role);
         String scanToken = tokenResp.getData().get("scanToken");
 
-        // Build URL trang scanner với mode=outbound_picking&taskId=...
         String base = http.getScheme() + "://" + http.getServerName()
                 + (http.getServerPort() == 80 || http.getServerPort() == 443 ? ""
                 : ":" + http.getServerPort());
@@ -337,10 +367,10 @@ public class OutboundController {
                 + "&mode=outbound_picking&taskId=" + taskId + "&v=qr3";
 
         Map<String, String> result = new java.util.LinkedHashMap<>();
-        result.put("scanUrl", scanUrl);
+        result.put("scanUrl",   scanUrl);
         result.put("scanToken", scanToken);
         result.put("sessionId", sessionId);
-        result.put("taskId", String.valueOf(taskId));
+        result.put("taskId",    String.valueOf(taskId));
 
         return ResponseEntity.ok(ApiResponse.success("Scan URL created for picking task " + taskId, result));
     }
