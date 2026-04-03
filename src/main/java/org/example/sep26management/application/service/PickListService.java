@@ -216,6 +216,7 @@ public class PickListService {
                         .documentCode(documentCode)
                         .status("OPEN")
                         .assignedTo(savedTask.getAssignedTo())
+                        .assignedQcId(savedTask.getAssignedQcId())
                         .items(responseItems)
                         .generatedAt(LocalDateTime.now())
                         .build());
@@ -268,6 +269,7 @@ public class PickListService {
                 .documentId(task.getSoId())
                 .status(task.getStatus())
                 .assignedTo(task.getAssignedTo())
+                .assignedQcId(task.getAssignedQcId())
                 .items(responseItems)
                 .build());
     }
@@ -291,6 +293,13 @@ public class PickListService {
         PickingTaskEntity task = pickingTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         String.format(MessageConstants.PICKLIST_NOT_FOUND, taskId)));
+
+        // ── Giải pháp 3: Validate Keeper ownership ────────────────────────────
+        if (task.getAssignedTo() != null && !task.getAssignedTo().equals(userId)) {
+            throw new BusinessException(
+                    "Bạn không có quyền xác nhận Pick List #" + taskId
+                            + ". Task này đang được Keeper khác thực hiện.");
+        }
 
         if (!("OPEN".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()))) {
             throw new BusinessException(
@@ -386,6 +395,8 @@ public class PickListService {
         auditLogService.logAction(userId, "PICKING_CONFIRMED", "picking_tasks", taskId,
                 "Pick task " + taskId + " confirmed PICKED — tồn kho đã trừ trực tiếp từ BIN", ip, ua);
 
+        // Release Keeper claim — task đã PICKED, Keeper khác có thể xem nhưng không nhận lại
+        try { pickingTaskRepository.releaseKeeperAssignment(taskId, userId); } catch (Exception ignored) {}
         log.info("confirmPicked OK: taskId={} → PICKED, inventory deducted", taskId);
         return getPickList(taskId);
     }

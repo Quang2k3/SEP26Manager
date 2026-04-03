@@ -43,6 +43,12 @@ public class PickListResponse {
     @Schema(description = "Tên NV lấy hàng", example = "Lê Văn C")
     private String assignedToName;
 
+    @Schema(description = "ID QC đang scan task này — null = chưa ai claim", example = "7")
+    private Long   assignedQcId;
+
+    @Schema(description = "Tên QC đang scan task này", example = "Nguyen Thi C")
+    private String assignedQcName;
+
     @Schema(description = "Danh sách chi tiết các món cần lấy (ĐÃ ĐƯỢC AI TỐI ƯU HÓA ĐƯỜNG ĐI ĐỂ LẤY NHANH NHẤT LẦN LƯỢT THEO ZONE)")
     private List<PickListItem> items; // sorted by optimal route
 
