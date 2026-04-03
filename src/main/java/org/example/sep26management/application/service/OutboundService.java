@@ -37,6 +37,7 @@ public class OutboundService {
     private final AuditLogService auditLogService;
     private final AllocateStockService allocateStockService;
     private final NotificationService notificationService;
+    private final UserJpaRepository userRepository;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
@@ -103,12 +104,14 @@ public class OutboundService {
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "SALES_ORDER", saved.getSoId(),
                 "Sales order " + code + " created DRAFT", ip, ua);
 
-        // ── Realtime: notify tất cả role có lệnh xuất mới được tạo ──────────
+        // ── Realtime: notify Keeper (người tạo) biết lệnh xuất DRAFT vừa được tạo ──────────
         String customerName = customer != null ? customer.getCustomerName() : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
-                "outbound_approved",
-                saved.getSoId(), code,
-                customerName + " — Lệnh xuất mới");
+        final String soCode = code;
+        final Long soId = saved.getSoId();
+        final String custName = customerName;
+        userRepository.findById(createdBy).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "outbound_approved",
+                        soId, soCode, custName + " — Lệnh xuất mới"));
 
         return buildSalesOrderResponse(saved, items, customer, warnings);
     }
@@ -150,12 +153,14 @@ public class OutboundService {
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "TRANSFER", saved.getTransferId(),
                 "Internal transfer " + code + " created DRAFT", ip, ua);
 
-        // ── Realtime: notify tất cả role có lệnh chuyển kho mới được tạo ────
+        // ── Realtime: notify Keeper (người tạo) biết lệnh chuyển kho vừa được tạo ────
         String destName = destWarehouse != null ? destWarehouse.getWarehouseName() : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"},
-                "outbound_approved",
-                saved.getTransferId(), code,
-                "Chuyển kho → " + destName + " — Lệnh mới");
+        final Long transferId = saved.getTransferId();
+        final String transferCode = code;
+        final String transferSubtitle = "Chuyển kho → " + destName + " — Lệnh mới";
+        userRepository.findById(createdBy).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "outbound_approved",
+                        transferId, transferCode, transferSubtitle));
 
         return buildTransferResponse(saved, items, destWarehouse, warnings);
     }
@@ -354,7 +359,7 @@ public class OutboundService {
 
         // ── Realtime: notify MANAGER có lệnh xuất mới chờ duyệt ─────────────
         CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_pending_approval",
+        notificationService.notifyRole("MANAGER", "outbound_pending_approval",
                 soId, so.getSoCode(),
                 custForNotif != null ? custForNotif.getCustomerName() : "—");
 
@@ -436,11 +441,14 @@ public class OutboundService {
         auditLogService.logAction(managerId, "OUTBOUND_APPROVED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " approved", ip, ua);
 
-        // ── Realtime: notify KEEPER lệnh xuất vừa được duyệt, cần phân bổ tồn kho ──
+        // ── Realtime: notify KEEPER (người tạo đơn) lệnh xuất vừa được duyệt ──
         CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
-                soId, so.getSoCode(),
-                custForNotif != null ? custForNotif.getCustomerName() : "—");
+        final String approveSubtitle = custForNotif != null ? custForNotif.getCustomerName() : "—";
+        final Long approvedSoId = soId;
+        final String approvedSoCode = so.getSoCode();
+        userRepository.findById(so.getCreatedBy()).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "outbound_approved",
+                        approvedSoId, approvedSoCode, approveSubtitle));
 
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_APPROVED_SUCCESS,

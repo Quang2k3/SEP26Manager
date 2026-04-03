@@ -38,6 +38,7 @@ public class GrnService {
     private final InventoryTransactionJpaRepository inventoryTransactionRepo;
     private final InventorySnapshotJpaRepository inventorySnapshotRepo;
     private final NotificationService notificationService;
+    private final UserJpaRepository userRepo;
 
     public ApiResponse<PageResponse<GrnResponse>> listGrns(Long warehouseId, String status, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
@@ -87,12 +88,14 @@ public class GrnService {
             receivingOrderRepo.save(order);
         });
 
-        // ── Realtime: notify KEEPER rằng GRN vừa được Manager duyệt ─────────
+        // ── Realtime: notify KEEPER (người tạo GRN) rằng GRN vừa được Manager duyệt ─────────
         String supplierName = grn.getSupplierId() != null
                 ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_approved",
-                grn.getGrnId(), grn.getGrnCode(), supplierName);
+        final String supplierNameFinal = supplierName;
+        userRepo.findById(grn.getCreatedBy()).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "grn_approved",
+                        grn.getGrnId(), grn.getGrnCode(), supplierNameFinal));
 
         return ApiResponse.success("GRN approved.", toSummaryResponse(grn));
     }
@@ -115,12 +118,14 @@ public class GrnService {
             receivingOrderRepo.save(order);
         });
 
-        // ── Realtime: notify KEEPER rằng GRN bị Manager từ chối ─────────────
+        // ── Realtime: notify KEEPER (người tạo GRN) rằng GRN bị Manager từ chối ─────────────
         String supplierName = grn.getSupplierId() != null
                 ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_rejected",
-                grn.getGrnId(), grn.getGrnCode(), supplierName + " — " + reason);
+        final String rejectSubtitle = supplierName + " — " + reason;
+        userRepo.findById(grn.getCreatedBy()).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "grn_rejected",
+                        grn.getGrnId(), grn.getGrnCode(), rejectSubtitle));
 
         return ApiResponse.success("GRN rejected", toSummaryResponse(grn));
     }
@@ -260,10 +265,12 @@ public class GrnService {
             receivingOrderRepo.save(order);
         });
 
-        // ── Realtime: notify KEEPER rằng có putaway task mới ────────────────
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "putaway_pending",
-                task.getPutawayTaskId(), "Task #" + task.getPutawayTaskId(),
-                "GRN " + grn.getGrnCode() + " — cần putaway");
+        // ── Realtime: notify KEEPER (người tạo GRN) rằng có putaway task mới ────────────────
+        final Long putawayTaskId = task.getPutawayTaskId();
+        final String putawaySubtitle = "GRN " + grn.getGrnCode() + " — cần putaway";
+        userRepo.findById(grn.getCreatedBy()).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "putaway_pending",
+                        putawayTaskId, "Task #" + putawayTaskId, putawaySubtitle));
 
         return ApiResponse.success("GRN posted, Putaway task created successfully.", toSummaryResponse(grn));
     }
@@ -289,7 +296,7 @@ public class GrnService {
         String supplierName = grn.getSupplierId() != null
                 ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "grn_pending_approval",
+        notificationService.notifyRole("MANAGER", "grn_pending_approval",
                 grn.getGrnId(), grn.getGrnCode(), supplierName);
 
         return ApiResponse.success("GRN submitted to manager for approval", toSummaryResponse(grn));
