@@ -330,10 +330,57 @@ public class ReceivingOrderService {
                 ? userRepo.findById(order.getCreatedBy()).map(UserEntity::getFullName).orElse(null)
                 : null;
 
+        // Fetch incidents to accurately split PASS and FAIL quantities
+        List<IncidentEntity> incidents = incidentRepo.findByReceivingIdOrderByCreatedAtDesc(id);
+        List<IncidentItemEntity> allIncidentItems = new ArrayList<>();
+        for (IncidentEntity inc : incidents) {
+            allIncidentItems.addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
+        }
+
         // Map items
-        List<ReceivingItemResponse> itemResponses = items.stream()
-                .map(item -> toItemResponse(item, skuMap))
-                .collect(Collectors.toList());
+        List<ReceivingItemResponse> itemResponses = new ArrayList<>();
+        for (ReceivingItemEntity item : items) {
+             BigDecimal totalQty = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
+             
+             // Check if there are DAMAGE incidents for this SKU
+             List<IncidentItemEntity> damageItems = allIncidentItems.stream()
+                  .filter(i -> "DAMAGE".equals(i.getReasonCode()) && item.getSkuId().equals(i.getSkuId()))
+                  .collect(Collectors.toList());
+             
+             BigDecimal failQty = damageItems.stream()
+                  .map(IncidentItemEntity::getDamagedQty)
+                  .filter(Objects::nonNull)
+                  .reduce(BigDecimal.ZERO, BigDecimal::add);
+                  
+             if (failQty.compareTo(BigDecimal.ZERO) > 0) {
+                  BigDecimal passQty = totalQty.subtract(failQty);
+                  
+                  // Add PASS part if any
+                  if (passQty.compareTo(BigDecimal.ZERO) > 0) {
+                       ReceivingItemResponse passResp = toItemResponse(item, skuMap);
+                       passResp.setReceivedQty(passQty);
+                       passResp.setCondition("PASS");
+                       passResp.setReasonCode(null);
+                       // We don't overwrite ID so they are somewhat the same, but it's OK for frontend UI
+                       itemResponses.add(passResp);
+                  }
+                  
+                  // Add FAIL part
+                  ReceivingItemResponse failResp = toItemResponse(item, skuMap);
+                  failResp.setReceivedQty(failQty);
+                  failResp.setCondition("FAIL");
+                  failResp.setReasonCode("DAMAGE");
+                  // Get attachmentUrl
+                  String attachmentUrl = damageItems.stream()
+                       .map(IncidentItemEntity::getAttachmentUrl)
+                       .filter(u -> u != null && !u.isBlank())
+                       .findFirst().orElse(null);
+                  failResp.setAttachmentUrl(attachmentUrl);
+                  itemResponses.add(failResp);
+             } else {
+                  itemResponses.add(toItemResponse(item, skuMap));
+             }
+        }
 
         int totalLines = itemResponses.size();
         BigDecimal totalExpectedQty = items.stream()

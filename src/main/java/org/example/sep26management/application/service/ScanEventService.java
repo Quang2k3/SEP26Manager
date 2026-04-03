@@ -110,9 +110,25 @@ public class ScanEventService {
         String luaResult = sessionRedis.atomicUpdateLine(sessionId, sku.getSkuId(), condition, inc, sku.getSkuCode(), sku.getSkuName(), sku.getBarcode());
         BigDecimal newQty = luaResult != null ? new BigDecimal(luaResult) : inc;
 
-        // 7b. Reload session từ Redis để push SSE (Lua đã save rồi)
-        // 8. Push SSE
-        sessionRedis.findById(sessionId).ifPresent(updated -> sseRegistry.send(sessionId, updated));
+        // 7b. Reload session từ Redis để push SSE (Lua đã save rồi) và gán ảnh nếu có
+        sessionRedis.findById(sessionId).ifPresent(updated -> {
+            boolean changed = false;
+            // Add attachmentUrl into the fetched session line
+            if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
+                for (ScanLineItem line : updated.getLines()) {
+                    if (sku.getSkuId().equals(line.getSkuId()) && condition.equals(line.getCondition())) {
+                        line.setAttachmentUrl(mergePhotoUrls(line.getAttachmentUrl(), request.getAttachmentUrl()));
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            if (changed) {
+                sessionRedis.save(sessionId, updated);
+            }
+            // 8. Push SSE
+            sseRegistry.send(sessionId, updated);
+        });
 
         log.info("Scan OK: session={} sku={} condition={} qty={}", sessionId, sku.getSkuCode(), condition, newQty);
 
