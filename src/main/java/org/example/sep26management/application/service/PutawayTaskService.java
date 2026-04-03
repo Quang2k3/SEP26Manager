@@ -159,7 +159,9 @@ public class PutawayTaskService {
                         + ". Remaining to allocate: " + remaining);
             }
 
-            LocationEntity bin = locationRepo.findById(alloc.getLocationId())
+            // SELECT FOR UPDATE: khóa bin row trước check capacity
+            // → chống 2 Keeper putaway vào cùng BIN đồng thời gây overflow
+            LocationEntity bin = locationRepo.findByIdForUpdate(alloc.getLocationId())
                     .orElseThrow(() -> new RuntimeException("Location not found: " + alloc.getLocationId()));
             if (bin.getMaxWeightKg() != null) {
                 BigDecimal occupied = inventorySnapshotRepo.sumQuantityByLocationId(alloc.getLocationId());

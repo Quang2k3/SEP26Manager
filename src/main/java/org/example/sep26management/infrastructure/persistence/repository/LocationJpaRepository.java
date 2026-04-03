@@ -4,7 +4,9 @@ import org.example.sep26management.application.enums.LocationType;
 import org.example.sep26management.infrastructure.persistence.entity.LocationEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -172,4 +174,15 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
                         LIMIT 1
                         """)
         Optional<LocationEntity> findFirstByWarehouseId(@Param("warehouseId") Long warehouseId);
+
+        /**
+         * SELECT FOR UPDATE — lock BIN row trước khi kiểm tra + ghi capacity putaway.
+         * Chống 2 Keeper putaway vào cùng 1 BIN đồng thời:
+         *   T1 đọc available=5 → T2 đọc available=5 → cả 2 ghi → bin overflow.
+         * Với FOR UPDATE: T2 block cho đến khi T1 commit → T2 đọc giả trị mới → fail capacity check.
+         */
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("SELECT l FROM LocationEntity l WHERE l.locationId = :id")
+        Optional<LocationEntity> findByIdForUpdate(@Param("id") Long id);
+
 }

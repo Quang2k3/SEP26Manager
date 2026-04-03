@@ -1,6 +1,8 @@
 package org.example.sep26management.infrastructure.persistence.repository;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -51,6 +53,7 @@ public interface InventoryAllocationRepository
               AND UPPER(z.zoneCode) NOT LIKE '%DAMAGE%'
             ORDER BY l.expiryDate ASC NULLS LAST, loc.locationCode ASC
             """)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     List<FEFOAllocationProjection> findAvailableStockFEFO(
             @Param("warehouseId") Long warehouseId,
             @Param("skuId") Long skuId);
@@ -80,6 +83,7 @@ public interface InventoryAllocationRepository
               AND UPPER(z.zoneCode) NOT LIKE '%DAMAGE%'
             ORDER BY loc.locationCode ASC
             """)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     List<FEFOAllocationProjection> findAvailableStockFEFONoLot(
             @Param("warehouseId") Long warehouseId,
             @Param("skuId") Long skuId);

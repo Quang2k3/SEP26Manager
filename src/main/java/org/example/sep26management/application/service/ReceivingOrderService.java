@@ -232,7 +232,7 @@ public class ReceivingOrderService {
 
     @Transactional
     public ApiResponse<Void> deleteDraftOrder(Long id, Long userId) {
-        ReceivingOrderEntity order = findOrder(id);
+        ReceivingOrderEntity order = findOrderForUpdate(id); // SELECT FOR UPDATE
         validateOwnership(order, userId, "xóa");
         if (!"DRAFT".equals(order.getStatus())) {
             throw new org.example.sep26management.infrastructure.exception.BusinessException(
@@ -395,7 +395,7 @@ public class ReceivingOrderService {
 
     @Transactional
     public ApiResponse<ReceivingOrderResponse> submit(Long id, Long userId) {
-        ReceivingOrderEntity order = findOrder(id);
+        ReceivingOrderEntity order = findOrderForUpdate(id); // SELECT FOR UPDATE: chống double-submit
         validateOwnership(order, userId, "submit");
         validateStatus(order, "submit", "DRAFT");
 
@@ -423,7 +423,7 @@ public class ReceivingOrderService {
 
     @Transactional
     public ApiResponse<ReceivingOrderResponse> finalizeCount(Long id, Long userId) {
-        ReceivingOrderEntity order = findOrder(id);
+        ReceivingOrderEntity order = findOrderForUpdate(id); // SELECT FOR UPDATE
         validateOwnership(order, userId, "finalize-count");
 
         validateStatus(order, "finalize-count", "SUBMITTED", "KEEPER_RESCAN");
@@ -608,7 +608,7 @@ public class ReceivingOrderService {
 
     @Transactional
     public ApiResponse<ReceivingOrderResponse> qcApprove(Long id, Long qcUserId) {
-        ReceivingOrderEntity order = findOrder(id);
+        ReceivingOrderEntity order = findOrderForUpdate(id); // SELECT FOR UPDATE
         // QC chỉ xử lý đơn ở PENDING_COUNT (Keeper đã scan xong, gửi QC)
         // hoặc PENDING_INCIDENT (xử lý sự cố tiếp theo).
         validateStatus(order, "qc-approve", "PENDING_COUNT", "PENDING_INCIDENT");
@@ -1159,7 +1159,7 @@ public class ReceivingOrderService {
     @Transactional
     public ApiResponse<org.example.sep26management.application.dto.response.GrnResponse> generateGrn(Long id,
                                                                                                      Long userId) {
-        ReceivingOrderEntity order = findOrder(id);
+        ReceivingOrderEntity order = findOrderForUpdate(id); // SELECT FOR UPDATE
 
         if (!"QC_APPROVED".equals(order.getStatus())) {
             throw new org.example.sep26management.infrastructure.exception.BusinessException(
@@ -1354,6 +1354,18 @@ public class ReceivingOrderService {
 
     private ReceivingOrderEntity findOrder(Long id) {
         return receivingOrderRepo.findById(id)
+                .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.BusinessException(
+                        "Receiving order not found: " + id));
+    }
+
+    /**
+     * findOrder với SELECT FOR UPDATE — dùng trong cảc phương thức thay đổi status.
+     * Giú: đảm bảo chỉ 1 transaction có thể đọc và commit thay đổi ở một thời điểm.
+     * Nếu 2 request cùng submit/finalize đồng thời: T2 bị block cho đến khi T1 commit
+     * → T2 thấy status mới → validateStatus fail → BusinessException (không silent nếa).
+     */
+    private ReceivingOrderEntity findOrderForUpdate(Long id) {
+        return receivingOrderRepo.findByIdForUpdate(id)
                 .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.BusinessException(
                         "Receiving order not found: " + id));
     }
