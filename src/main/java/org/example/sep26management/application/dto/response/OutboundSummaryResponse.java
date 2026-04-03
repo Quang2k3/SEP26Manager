@@ -16,6 +16,9 @@ public class OutboundSummaryResponse {
     private long allocated;
     private long picking;
     private long qcScan;
+    private long qcPassed;
+    private long onHold;
+    private long waitingStock;
     private long dispatched;
     private long rejected;
 }

@@ -113,13 +113,17 @@ public class OutboundListService {
         long allocated  = safeCount(warehouseId, "ALLOCATED");
         long picking    = safeCount(warehouseId, "PICKING");
         long qcScan     = safeCount(warehouseId, "QC_SCAN");
+        long qcPassed   = safeCount(warehouseId, "QC_PASSED");
+        long onHold     = safeCount(warehouseId, "ON_HOLD");
+        long waitingStock = safeCount(warehouseId, "WAITING_STOCK");
         long dispatched = safeCount(warehouseId, "DISPATCHED");
         long rejected   = safeCount(warehouseId, "REJECTED");
 
         return ApiResponse.success("OK", OutboundSummaryResponse.builder()
-                .total(draft + pending + approved + allocated + picking + qcScan + dispatched + rejected)
+                .total(draft + pending + approved + allocated + picking + qcScan + qcPassed + onHold + waitingStock + dispatched + rejected)
                 .draft(draft).pendingApproval(pending).approved(approved)
                 .allocated(allocated).picking(picking).qcScan(qcScan)
+                .qcPassed(qcPassed).onHold(onHold).waitingStock(waitingStock)
                 .dispatched(dispatched).rejected(rejected)
                 .build());
     }
@@ -127,6 +131,15 @@ public class OutboundListService {
     private List<SalesOrderEntity> fetchSalesOrders(Long warehouseId, String status, String keyword,
                                                     boolean hasStatus, boolean hasKeyword) {
         try {
+            // [FIX] Hỗ trợ multi-status: "PICKING,QC_SCAN,QC_PASSED"
+            if (hasStatus && status.contains(",")) {
+                List<String> statuses = java.util.Arrays.stream(status.split(","))
+                        .map(String::trim).filter(s -> !s.isEmpty()).toList();
+                List<SalesOrderEntity> all = hasKeyword
+                        ? soQueryRepository.findByWarehouseIdAndSoCodeContainingIgnoreCaseOrderByCreatedAtDesc(warehouseId, keyword)
+                        : soQueryRepository.findByWarehouseIdOrderByCreatedAtDesc(warehouseId);
+                return all.stream().filter(so -> statuses.contains(so.getStatus())).toList();
+            }
             if (hasStatus && hasKeyword)
                 return soQueryRepository.findByWarehouseIdAndStatusAndSoCodeContainingIgnoreCaseOrderByCreatedAtDesc(warehouseId, status, keyword);
             if (hasStatus)
@@ -142,6 +155,13 @@ public class OutboundListService {
 
     private List<TransferEntity> fetchTransfers(Long warehouseId, String status, boolean hasStatus) {
         try {
+            // [FIX] Hỗ trợ multi-status: "PICKING,QC_SCAN,QC_PASSED"
+            if (hasStatus && status.contains(",")) {
+                List<String> statuses = java.util.Arrays.stream(status.split(","))
+                        .map(String::trim).filter(s -> !s.isEmpty()).toList();
+                return transferRepository.findByFromWarehouseIdOrderByCreatedAtDesc(warehouseId)
+                        .stream().filter(t -> statuses.contains(t.getStatus())).toList();
+            }
             if (hasStatus)
                 return transferRepository.findByFromWarehouseIdAndStatus(warehouseId, status);
             return transferRepository.findByFromWarehouseIdOrderByCreatedAtDesc(warehouseId);
