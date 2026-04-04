@@ -537,6 +537,29 @@ public class IncidentService {
                             overageQty = java.math.BigDecimal.ZERO;
                         }
 
+                        // [FIX] Nếu cùng SKU đã có DAMAGE item được RETURN_DAMAGE trong cùng incident,
+                        // overageQty (actual - expected) đã BAO GỒM phần hỏng rồi.
+                        // Cần trừ đi damagedQty đã return để tránh trừ 2 lần.
+                        // Ví dụ: expected=3, actual=5, fail=1 → overage = 5-3 = 2 (gồm 1 fail + 1 pass thừa)
+                        // Nếu Manager RETURN_DAMAGE 1 fail + RETURN 2 overage → bị trừ 3 → sai!
+                        // Đáng lẽ: RETURN_DAMAGE 1 fail → rcv giảm 1 (5→4), 
+                        //           RETURN overage → chỉ trừ 1 (overage thực = 2 - 1 fail đã trừ = 1) → rcv = 3
+                        java.math.BigDecimal alreadyReturnedDamage = java.math.BigDecimal.ZERO;
+                        for (org.example.sep26management.application.dto.request.ResolveDiscrepancyRequest.ItemResolution otherRes : request.getItems()) {
+                            if ("RETURN_DAMAGE".equalsIgnoreCase(otherRes.getAction())) {
+                                IncidentItemEntity otherItem = incidentItemRepo.findById(otherRes.getIncidentItemId()).orElse(null);
+                                if (otherItem != null && otherItem.getSkuId().equals(incItem.getSkuId())) {
+                                    java.math.BigDecimal dmg = otherItem.getDamagedQty() != null ? otherItem.getDamagedQty() : java.math.BigDecimal.ZERO;
+                                    alreadyReturnedDamage = alreadyReturnedDamage.add(dmg);
+                                }
+                            }
+                        }
+                        // overageQty thực sự = (actual - expected) - phần hỏng đã return
+                        overageQty = overageQty.subtract(alreadyReturnedDamage);
+                        if (overageQty.compareTo(java.math.BigDecimal.ZERO) < 0) {
+                            overageQty = java.math.BigDecimal.ZERO;
+                        }
+
                         incItem.setActionReturnQty(overageQty);
 
                         // receivedQty sau hoàn = receivedQty hiện tại - overageQty
@@ -552,8 +575,8 @@ public class IncidentService {
                             rcItem.setCondition("RETURNED");
                         }
                         receivingItemRepo.save(rcItem);
-                        log.info("OVERAGE RETURN: SKU {} overageQty={} remainingReceivedQty={} on order {}",
-                                incItem.getSkuId(), overageQty, newReceivedQty, order.getReceivingCode());
+                        log.info("OVERAGE RETURN: SKU {} overageQty={} (after deducting {} already-returned-damage) remainingReceivedQty={} on order {}",
+                                incItem.getSkuId(), overageQty, alreadyReturnedDamage, newReceivedQty, order.getReceivingCode());
                     }
                     incItem.setNote(appendNote(incItem.getNote(),
                             "[Manager]: RETURN — Trả hàng thừa cho nhà cung cấp"));
