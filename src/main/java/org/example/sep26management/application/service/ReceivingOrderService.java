@@ -1095,8 +1095,51 @@ public class ReceivingOrderService {
 
             List<IncidentEntity> createdIncidents = new ArrayList<>();
 
-            // 1. Tạo Incident Hư Hỏng (DAMAGE)
-            if (!damageItems.isEmpty()) {
+            // ════════════════════════════════════════════════════════════════════
+            // [FIX] Mỗi đơn chỉ tạo TỐI ĐA 1 incident:
+            //   - Chỉ DAMAGE        → 1 incident DAMAGE (Hư hỏng)
+            //   - Có DISCREPANCY    → 1 incident DISCREPANCY (Tổng hợp),
+            //                         gộp cả DAMAGE items vào nếu có
+            // ════════════════════════════════════════════════════════════════════
+
+            if (!discrepancyItems.isEmpty()) {
+                // Có thừa/thiếu/ngoài phiếu → Tạo 1 incident DISCREPANCY tổng hợp
+                // GỘP cả damage items vào incident này
+                List<IncidentItemEntity> allItems = new ArrayList<>(discrepancyItems);
+                allItems.addAll(damageItems); // Gộp hư hỏng vào cùng phiếu tổng hợp
+
+                String incCode = "INC-QC-RCV-" + id + "-" + (System.currentTimeMillis() % 100_000);
+                long overageCount = discrepancyItems.stream().filter(i -> "OVERAGE".equals(i.getReasonCode())).count();
+                long shortageCount = discrepancyItems.stream().filter(i -> "SHORTAGE".equals(i.getReasonCode())).count();
+                long extraCount = discrepancyItems.stream().filter(i -> "UNEXPECTED_ITEM".equals(i.getReasonCode())).count();
+                long dmgCount = damageItems.size();
+
+                String desc = "Phát hiện thừa/thiếu qua bước kiểm định QC (Scanner)"
+                        + (overageCount > 0 ? " — " + overageCount + " SKU thừa" : "")
+                        + (shortageCount > 0 ? " — " + shortageCount + " SKU thiếu" : "")
+                        + (extraCount > 0 ? " — " + extraCount + " SKU ngoài phiếu" : "")
+                        + (dmgCount > 0 ? " — " + dmgCount + " SKU hỏng" : "");
+
+                IncidentEntity inc = IncidentEntity.builder()
+                        .warehouseId(order.getWarehouseId())
+                        .incidentCode(incCode)
+                        .incidentType(org.example.sep26management.application.enums.IncidentType.DISCREPANCY)
+                        .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
+                        .severity(dmgCount > 0 ? "HIGH" : "MEDIUM")
+                        .occurredAt(java.time.LocalDateTime.now())
+                        .description(desc)
+                        .receivingId(id)
+                        .status("OPEN")
+                        .reportedBy(qcUserId)
+                        .build();
+                IncidentEntity savedInc = incidentRepo.save(inc);
+                createdIncidents.add(savedInc);
+                for (IncidentItemEntity incItem : allItems) {
+                    incItem.setIncident(savedInc);
+                    incidentItemRepo.save(incItem);
+                }
+            } else if (!damageItems.isEmpty()) {
+                // CHỈ có hư hỏng (không thừa/thiếu) → Tạo 1 incident DAMAGE riêng
                 String damageCode = "INC-QC-RCV-" + id + "-" + (System.currentTimeMillis() % 100_000);
                 IncidentEntity damageInc = IncidentEntity.builder()
                         .warehouseId(order.getWarehouseId())
@@ -1114,37 +1157,6 @@ public class ReceivingOrderService {
                 createdIncidents.add(savedDamageInc);
                 for (IncidentItemEntity incItem : damageItems) {
                     incItem.setIncident(savedDamageInc);
-                    incidentItemRepo.save(incItem);
-                }
-            }
-
-            // 2. Tạo Incident Thừa/Thiếu (DISCREPANCY)
-            if (!discrepancyItems.isEmpty()) {
-                String discCode = "INC-QC-RCV-" + id + "-" + ((System.currentTimeMillis() + 10) % 100_000);
-                long overageCount = discrepancyItems.stream().filter(i -> "OVERAGE".equals(i.getReasonCode())).count();
-                long shortageCount = discrepancyItems.stream().filter(i -> "SHORTAGE".equals(i.getReasonCode())).count();
-                long extraCount = discrepancyItems.stream().filter(i -> "UNEXPECTED_ITEM".equals(i.getReasonCode())).count();
-                String discDesc = "Phát hiện thừa/thiếu qua bước kiểm định QC (Scanner)"
-                        + (overageCount > 0 ? " — " + overageCount + " SKU thừa" : "")
-                        + (shortageCount > 0 ? " — " + shortageCount + " SKU thiếu" : "")
-                        + (extraCount > 0 ? " — " + extraCount + " SKU ngoài phiếu" : "");
-
-                IncidentEntity discInc = IncidentEntity.builder()
-                        .warehouseId(order.getWarehouseId())
-                        .incidentCode(discCode)
-                        .incidentType(org.example.sep26management.application.enums.IncidentType.DISCREPANCY)
-                        .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
-                        .severity("MEDIUM")
-                        .occurredAt(java.time.LocalDateTime.now())
-                        .description(discDesc)
-                        .receivingId(id)
-                        .status("OPEN")
-                        .reportedBy(qcUserId)
-                        .build();
-                IncidentEntity savedDiscInc = incidentRepo.save(discInc);
-                createdIncidents.add(savedDiscInc);
-                for (IncidentItemEntity incItem : discrepancyItems) {
-                    incItem.setIncident(savedDiscInc);
                     incidentItemRepo.save(incItem);
                 }
             }
