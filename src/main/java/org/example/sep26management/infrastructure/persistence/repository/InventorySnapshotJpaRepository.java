@@ -92,6 +92,29 @@ public interface InventorySnapshotJpaRepository
                                 row -> (BigDecimal) row[1]));
         }
 
+        /**
+         * Batch — tổng trọng lượng thực tế (kg) per location.
+         * = SUM(quantity * weightPerCartonKg) cho từng bin.
+         * Chỉ tính các row có sku.weight_per_carton_kg IS NOT NULL.
+         */
+        @Query("""
+            SELECT s.locationId, COALESCE(SUM(s.quantity * sk.weightPerCartonKg), 0)
+            FROM InventorySnapshotEntity s
+            JOIN SkuEntity sk ON sk.skuId = s.skuId
+            WHERE s.locationId IN :locationIds
+              AND sk.weightPerCartonKg IS NOT NULL
+            GROUP BY s.locationId
+            """)
+        List<Object[]> sumWeightKgGroupedByLocationIds(@Param("locationIds") List<Long> locationIds);
+
+        default Map<Long, BigDecimal> sumWeightKgByLocationIds(List<Long> locationIds) {
+                if (locationIds == null || locationIds.isEmpty()) return Collections.emptyMap();
+                return sumWeightKgGroupedByLocationIds(locationIds).stream()
+                        .collect(Collectors.toMap(
+                                row -> (Long) row[0],
+                                row -> (BigDecimal) row[1]));
+        }
+
         // ── Projection interface (MUST stay here — BinService depends on it) ─────
 
         /** Projection interface for findDetailByLocationId — used by BinService */
