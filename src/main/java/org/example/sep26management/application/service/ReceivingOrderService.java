@@ -366,48 +366,10 @@ public class ReceivingOrderService {
              BigDecimal totalExpected = aggExpectedQty.getOrDefault(skuId, BigDecimal.ZERO);
              BigDecimal totalQty = aggReceivedQty.getOrDefault(skuId, BigDecimal.ZERO);
              
-             // Check if there are DAMAGE incidents for this SKU
-             List<IncidentItemEntity> damageItems = allIncidentItems.stream()
-                  .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
-                  .collect(Collectors.toList());
-             
-             BigDecimal failQty = damageItems.stream()
-                  .map(IncidentItemEntity::getDamagedQty)
-                  .filter(Objects::nonNull)
-                  .reduce(BigDecimal.ZERO, BigDecimal::add);
-                  
-             if (failQty.compareTo(BigDecimal.ZERO) > 0) {
-                  BigDecimal passQty = totalQty.subtract(failQty);
-                  
-                  // Add PASS part if any
-                  if (passQty.compareTo(BigDecimal.ZERO) > 0) {
-                       ReceivingItemResponse passResp = toItemResponse(bestItem, skuMap);
-                       passResp.setExpectedQty(totalExpected);
-                       passResp.setReceivedQty(passQty);
-                       passResp.setCondition("PASS");
-                       passResp.setReasonCode(null);
-                       itemResponses.add(passResp);
-                  }
-                  
-                  // Add FAIL part
-                  ReceivingItemResponse failResp = toItemResponse(bestItem, skuMap);
-                  failResp.setExpectedQty(totalExpected);
-                  failResp.setReceivedQty(failQty);
-                  failResp.setCondition("FAIL");
-                  failResp.setReasonCode("DAMAGE");
-                  // Get attachmentUrl
-                  String attachmentUrl = damageItems.stream()
-                       .map(IncidentItemEntity::getAttachmentUrl)
-                       .filter(u -> u != null && !u.isBlank())
-                       .findFirst().orElse(null);
-                  failResp.setAttachmentUrl(attachmentUrl);
-                  itemResponses.add(failResp);
-             } else {
-                  ReceivingItemResponse resp = toItemResponse(bestItem, skuMap);
-                  resp.setExpectedQty(totalExpected);
-                  resp.setReceivedQty(totalQty);
-                  itemResponses.add(resp);
-             }
+             ReceivingItemResponse resp = toItemResponse(bestItem, skuMap);
+             resp.setExpectedQty(totalExpected);
+             resp.setReceivedQty(totalQty);
+             itemResponses.add(resp);
         }
 
         int totalLines = itemResponses.size();
