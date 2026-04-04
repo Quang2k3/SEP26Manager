@@ -337,14 +337,38 @@ public class ReceivingOrderService {
             allIncidentItems.addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
         }
 
-        // Map items
-        List<ReceivingItemResponse> itemResponses = new ArrayList<>();
+        // [FIX] Gộp receiving items theo skuId trước khi build response
+        // Tránh hiển thị nhiều dòng riêng biệt cho cùng 1 SKU
+        java.util.Map<Long, BigDecimal> aggExpectedQty = new java.util.LinkedHashMap<>();
+        java.util.Map<Long, BigDecimal> aggReceivedQty = new java.util.LinkedHashMap<>();
+        java.util.Map<Long, ReceivingItemEntity> aggBestItem = new java.util.LinkedHashMap<>();
+
         for (ReceivingItemEntity item : items) {
-             BigDecimal totalQty = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
+            Long skuId = item.getSkuId();
+            BigDecimal exp = item.getExpectedQty() != null ? item.getExpectedQty() : BigDecimal.ZERO;
+            BigDecimal rcv = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
+            aggExpectedQty.merge(skuId, exp, BigDecimal::add);
+            aggReceivedQty.merge(skuId, rcv, BigDecimal::add);
+            // Ưu tiên row có thông tin lot/date đầy đủ nhất
+            ReceivingItemEntity current = aggBestItem.get(skuId);
+            if (current == null
+                    || (current.getLotNumber() == null && item.getLotNumber() != null)
+                    || (current.getExpiryDate() == null && item.getExpiryDate() != null)) {
+                aggBestItem.put(skuId, item);
+            }
+        }
+
+        // Map aggregated items
+        List<ReceivingItemResponse> itemResponses = new ArrayList<>();
+        for (java.util.Map.Entry<Long, ReceivingItemEntity> entry : aggBestItem.entrySet()) {
+             Long skuId = entry.getKey();
+             ReceivingItemEntity bestItem = entry.getValue();
+             BigDecimal totalExpected = aggExpectedQty.getOrDefault(skuId, BigDecimal.ZERO);
+             BigDecimal totalQty = aggReceivedQty.getOrDefault(skuId, BigDecimal.ZERO);
              
              // Check if there are DAMAGE incidents for this SKU
              List<IncidentItemEntity> damageItems = allIncidentItems.stream()
-                  .filter(i -> "DAMAGE".equals(i.getReasonCode()) && item.getSkuId().equals(i.getSkuId()))
+                  .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
                   .collect(Collectors.toList());
              
              BigDecimal failQty = damageItems.stream()
@@ -357,16 +381,17 @@ public class ReceivingOrderService {
                   
                   // Add PASS part if any
                   if (passQty.compareTo(BigDecimal.ZERO) > 0) {
-                       ReceivingItemResponse passResp = toItemResponse(item, skuMap);
+                       ReceivingItemResponse passResp = toItemResponse(bestItem, skuMap);
+                       passResp.setExpectedQty(totalExpected);
                        passResp.setReceivedQty(passQty);
                        passResp.setCondition("PASS");
                        passResp.setReasonCode(null);
-                       // We don't overwrite ID so they are somewhat the same, but it's OK for frontend UI
                        itemResponses.add(passResp);
                   }
                   
                   // Add FAIL part
-                  ReceivingItemResponse failResp = toItemResponse(item, skuMap);
+                  ReceivingItemResponse failResp = toItemResponse(bestItem, skuMap);
+                  failResp.setExpectedQty(totalExpected);
                   failResp.setReceivedQty(failQty);
                   failResp.setCondition("FAIL");
                   failResp.setReasonCode("DAMAGE");
@@ -378,7 +403,10 @@ public class ReceivingOrderService {
                   failResp.setAttachmentUrl(attachmentUrl);
                   itemResponses.add(failResp);
              } else {
-                  itemResponses.add(toItemResponse(item, skuMap));
+                  ReceivingItemResponse resp = toItemResponse(bestItem, skuMap);
+                  resp.setExpectedQty(totalExpected);
+                  resp.setReceivedQty(totalQty);
+                  itemResponses.add(resp);
              }
         }
 
@@ -1270,66 +1298,100 @@ public class ReceivingOrderService {
                 .build();
         GrnEntity savedGrn = grnRepo.save(grn);
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // [FIX] Gộp receiving items theo skuId trước khi tạo GRN items.
+        // Cùng 1 SKU có thể xuất hiện nhiều lần trong receiving_items do:
+        //   - KEEPER_RESCAN tạo placeholder (expectedQty=0, receivedQty=0)
+        //   - QC phát hiện extra item → tạo thêm row
+        //   - Keeper tạo đơn trùng SKU code
+        // Nếu không gộp → GRN hiển thị nhiều dòng riêng biệt cho cùng 1 SKU.
+        // ═══════════════════════════════════════════════════════════════════════
+        // Bước 1: Gộp theo skuId — tổng qty + lấy lot/date từ row có thông tin đầy đủ nhất
+        java.util.Map<Long, BigDecimal> skuQtyMap = new java.util.LinkedHashMap<>();
+        java.util.Map<Long, ReceivingItemEntity> skuBestItemMap = new java.util.LinkedHashMap<>();
+
         for (ReceivingItemEntity item : items) {
-            // [FIX] Bỏ qua item đã bị hoàn NCC (RETURNED) hoặc item receivedQty = 0
             if ("RETURNED".equals(item.getCondition())) {
                 log.info("generateGrn: skipping RETURNED item skuId={}", item.getSkuId());
                 continue;
             }
             Long skuId = item.getSkuId();
-            // receivedQty already reflects Manager's decision from resolveDiscrepancy()
             BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
                     : BigDecimal.ZERO;
             if (receivedQty.compareTo(BigDecimal.ZERO) <= 0) {
                 log.info("generateGrn: skipping zero-qty item skuId={}", skuId);
                 continue;
             }
-            // ACCEPT → vào GRN đủ số (receivedQty đã được cập nhật bởi resolveDiscrepancy/resolveIncident)
-            // RETURN → phần hoàn trả đã trừ trực tiếp khỏi receivedQty.
-            // GRN chỉ cần lấy số lượng receivedQty cuối cùng.
-            BigDecimal finalPassQty = receivedQty;
-            if (finalPassQty.compareTo(BigDecimal.ZERO) < 0)
-                finalPassQty = BigDecimal.ZERO;
 
-            if (finalPassQty.compareTo(BigDecimal.ZERO) > 0) {
-                // Auto-calculate lot/date if missing
-                String lotNumber = item.getLotNumber();
-                LocalDate manufactureDate = item.getManufactureDate();
-                LocalDate expiryDate = item.getExpiryDate();
+            // Cộng dồn quantity
+            skuQtyMap.merge(skuId, receivedQty, BigDecimal::add);
 
-                SkuEntity sku = skuRepo.findById(skuId).orElse(null);
-
-                if (lotNumber == null || lotNumber.isBlank()) {
-                    String skuCode = sku != null ? sku.getSkuCode() : String.valueOf(skuId);
-                    lotNumber = "LOT-" + grnCode + "-" + skuCode; // FIX: dùng grnCode thay vì receivingCode để mỗi GRN có lot riêng
-                    item.setLotNumber(lotNumber);
-                }
-
-                if (manufactureDate == null) {
-                    manufactureDate = LocalDate.now();
-                    item.setManufactureDate(manufactureDate);
-                }
-
-                if (expiryDate == null && sku != null && sku.getShelfLifeDays() != null
-                        && sku.getShelfLifeDays() > 0) {
-                    expiryDate = manufactureDate.plusDays(sku.getShelfLifeDays());
-                    item.setExpiryDate(expiryDate);
-                }
-
-                // Save back to receiving item for record-keeping
-                receivingItemRepo.save(item);
-
-                GrnItemEntity grnItem = GrnItemEntity.builder()
-                        .grn(savedGrn)
-                        .skuId(skuId)
-                        .quantity(finalPassQty)
-                        .lotNumber(lotNumber)
-                        .manufactureDate(manufactureDate)
-                        .expiryDate(expiryDate)
-                        .build();
-                grnItemRepo.save(grnItem);
-                validGrnItems.add(grnItem);
+            // Giữ row có thông tin lot/date đầy đủ nhất (ưu tiên row có lotNumber)
+            ReceivingItemEntity current = skuBestItemMap.get(skuId);
+            if (current == null
+                    || (current.getLotNumber() == null && item.getLotNumber() != null)
+                    || (current.getExpiryDate() == null && item.getExpiryDate() != null)) {
+                skuBestItemMap.put(skuId, item);
             }
+        }
+
+        // Bước 2: Tạo 1 GRN item duy nhất cho mỗi SKU
+        for (java.util.Map.Entry<Long, BigDecimal> entry : skuQtyMap.entrySet()) {
+            Long skuId = entry.getKey();
+            BigDecimal finalPassQty = entry.getValue();
+            if (finalPassQty.compareTo(BigDecimal.ZERO) < 0) finalPassQty = BigDecimal.ZERO;
+            if (finalPassQty.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            ReceivingItemEntity bestItem = skuBestItemMap.get(skuId);
+
+            // Auto-calculate lot/date if missing
+            String lotNumber = bestItem.getLotNumber();
+            LocalDate manufactureDate = bestItem.getManufactureDate();
+            LocalDate expiryDate = bestItem.getExpiryDate();
+
+            SkuEntity sku = skuRepo.findById(skuId).orElse(null);
+
+            if (lotNumber == null || lotNumber.isBlank()) {
+                String skuCode = sku != null ? sku.getSkuCode() : String.valueOf(skuId);
+                lotNumber = "LOT-" + grnCode + "-" + skuCode;
+            }
+
+            if (manufactureDate == null) {
+                manufactureDate = LocalDate.now();
+            }
+
+            if (expiryDate == null && sku != null && sku.getShelfLifeDays() != null
+                    && sku.getShelfLifeDays() > 0) {
+                expiryDate = manufactureDate.plusDays(sku.getShelfLifeDays());
+            }
+
+            // Cập nhật tất cả receiving items của SKU này với lot/date (record-keeping)
+            final String finalLotNumber = lotNumber;
+            final LocalDate finalMfgDate = manufactureDate;
+            final LocalDate finalExpDate = expiryDate;
+            items.stream()
+                    .filter(i -> i.getSkuId().equals(skuId) && !"RETURNED".equals(i.getCondition()))
+                    .forEach(i -> {
+                        if (i.getLotNumber() == null || i.getLotNumber().isBlank()) i.setLotNumber(finalLotNumber);
+                        if (i.getManufactureDate() == null) i.setManufactureDate(finalMfgDate);
+                        if (i.getExpiryDate() == null) i.setExpiryDate(finalExpDate);
+                        receivingItemRepo.save(i);
+                    });
+
+            GrnItemEntity grnItem = GrnItemEntity.builder()
+                    .grn(savedGrn)
+                    .skuId(skuId)
+                    .quantity(finalPassQty)
+                    .lotNumber(lotNumber)
+                    .manufactureDate(manufactureDate)
+                    .expiryDate(expiryDate)
+                    .build();
+            grnItemRepo.save(grnItem);
+            validGrnItems.add(grnItem);
+
+            log.info("generateGrn: SKU {} → qty={} (aggregated from {} receiving items)",
+                    skuId, finalPassQty,
+                    items.stream().filter(i -> i.getSkuId().equals(skuId)).count());
         }
 
         order.setStatus("GRN_CREATED");
