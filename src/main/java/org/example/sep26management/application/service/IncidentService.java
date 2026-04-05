@@ -445,10 +445,9 @@ public class IncidentService {
 
             switch (action) {
                 case "CLOSE_SHORT":
-                    // Chốt thiếu: expectedQty = receivedQty (accept what was received)
+                    // Chốt thiếu: giữ nguyên expectedQty, chỉ lưu hành động để hoàn tất
                     if (rcItem != null) {
-                        rcItem.setExpectedQty(rcItem.getReceivedQty());
-                        receivingItemRepo.save(rcItem);
+                        // Do not modify expectedQty per user request
                     }
                     incItem.setNote(appendNote(incItem.getNote(),
                             "[Manager]: CLOSE_SHORT — Chốt thiếu, chấp nhận số lượng nhận được"));
@@ -464,10 +463,9 @@ public class IncidentService {
                         if (missingQty.compareTo(java.math.BigDecimal.ZERO) > 0) {
                             backorderSkus.put(incItem.getSkuId(), missingQty);
                             
-                            // [FIX] Cắt đuôi: Điều chỉnh expectedQty phiếu hiện tại về bằng đúng receivedQty 
-                            // để chốt số liệu cho kiện hàng lần này
-                            rcItem.setExpectedQty(rcItem.getReceivedQty());
-                            receivingItemRepo.save(rcItem);
+                            // Do not modify expectedQty per user request
+                            // rcItem.setExpectedQty(rcItem.getReceivedQty());
+                            // receivingItemRepo.save(rcItem);
                         }
                     }
                     hasWaitBackorder = true;
@@ -476,10 +474,9 @@ public class IncidentService {
                     break;
 
                 case "ACCEPT":
-                    // Nhận hàng thừa: expectedQty = receivedQty (accept all received)
+                    // Nhận hàng thừa: giữ nguyên expectedQty, số lượng dư được tính vào receivedQty
                     if (rcItem != null) {
-                        rcItem.setExpectedQty(rcItem.getReceivedQty());
-                        receivingItemRepo.save(rcItem);
+                        // Do not modify expectedQty
                     }
                     java.math.BigDecimal acceptActual = incItem.getActualQty() != null ? incItem.getActualQty() : java.math.BigDecimal.ZERO;
                     java.math.BigDecimal acceptExpected = incItem.getExpectedQty() != null ? incItem.getExpectedQty() : java.math.BigDecimal.ZERO;
@@ -507,7 +504,6 @@ public class IncidentService {
                             newReceivedQty = java.math.BigDecimal.ZERO;
                         
                         // Hợp thức hóa số lượng nhập kho (phần nguyên vẹn)
-                        rcItem.setExpectedQty(newReceivedQty);
                         rcItem.setReceivedQty(newReceivedQty);
                         
                         if (newReceivedQty.compareTo(java.math.BigDecimal.ZERO) == 0) {
@@ -621,7 +617,7 @@ public class IncidentService {
                     .sourceReferenceCode(order.getSourceReferenceCode() != null ? order.getSourceReferenceCode() + " (Bù)" : "Giao bù")
                     .status("INITIAL") // [FIX] Trạng thái INITIAL để thủ kho có thể bắt đầu phiên nhận hàng mới
                     .createdAt(java.time.LocalDateTime.now())
-                    .createdBy(managerId)
+                    .createdBy(order.getCreatedBy())
                     .note("Phiếu tự động sinh do Manager chốt chờ nhận bù cho Incident " + incident.getIncidentCode())
                     .build();
             receivingOrderRepo.save(backorderPO);
