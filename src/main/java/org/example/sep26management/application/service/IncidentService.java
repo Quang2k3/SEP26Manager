@@ -525,6 +525,17 @@ public class IncidentService {
                             "[Manager]: RETURN_DAMAGE — Hoàn trả phần lỗi, nhập kho phần nguyên vẹn"));
                     break;
 
+                case "ACCEPT_DAMAGE":
+                    // Chấp nhận nhập kho luôn cả phần hàng hỏng (không trừ receivedQty)
+                    if (rcItem != null) {
+                        java.math.BigDecimal failQty = incItem.getDamagedQty() != null 
+                            ? incItem.getDamagedQty() : java.math.BigDecimal.ZERO;
+                        incItem.setActionPassQty(failQty);
+                    }
+                    incItem.setNote(appendNote(incItem.getNote(),
+                            "[Manager]: ACCEPT_DAMAGE — Nhập kho nguyên trạng, chấp nhận lỗi"));
+                    break;
+
                 case "RETURN":
                     // Trả hàng thừa/UNEXPECTED: trừ phần thừa khỏi receivedQty → chỉ nhận đúng expectedQty
                     if (rcItem != null) {
@@ -585,7 +596,7 @@ public class IncidentService {
                 default:
                     throw new IllegalArgumentException(
                             "Invalid action: " + action
-                                    + ". Must be CLOSE_SHORT, WAIT_BACKORDER, ACCEPT, or RETURN");
+                                    + ". Must be CLOSE_SHORT, WAIT_BACKORDER, ACCEPT, RETURN_DAMAGE, ACCEPT_DAMAGE, or RETURN");
             }
 
             incidentItemRepo.save(incItem);
