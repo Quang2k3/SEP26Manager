@@ -366,9 +366,40 @@ public class ReceivingOrderService {
              BigDecimal totalExpected = aggExpectedQty.getOrDefault(skuId, BigDecimal.ZERO);
              BigDecimal totalQty = aggReceivedQty.getOrDefault(skuId, BigDecimal.ZERO);
              
+             // [FIX] Tính damagedQty từ incident data thay vì dùng condition trên DB row
+             BigDecimal failQty = allIncidentItems.stream()
+                  .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
+                  .map(IncidentItemEntity::getDamagedQty)
+                  .filter(java.util.Objects::nonNull)
+                  .reduce(BigDecimal.ZERO, BigDecimal::add);
+             
+             // Lấy attachmentUrl từ incident DAMAGE items
+             String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0
+                  ? allIncidentItems.stream()
+                       .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
+                       .map(IncidentItemEntity::getAttachmentUrl)
+                       .filter(u -> u != null && !u.isBlank())
+                       .findFirst().orElse(null)
+                  : null;
+             
              ReceivingItemResponse resp = toItemResponse(bestItem, skuMap);
              resp.setExpectedQty(totalExpected);
              resp.setReceivedQty(totalQty);
+             resp.setDamagedQty(failQty);
+             resp.setAttachmentUrl(attachmentUrl);
+             
+             // [FIX] Set condition chính xác: chỉ FAIL nếu toàn bộ là hỏng
+             if (failQty.compareTo(BigDecimal.ZERO) > 0) {
+                  BigDecimal passQty = totalQty.subtract(failQty);
+                  if (passQty.compareTo(BigDecimal.ZERO) <= 0) {
+                       resp.setCondition("FAIL");   // Toàn bộ hỏng
+                  } else {
+                       resp.setCondition("PASS");   // Có cả pass lẫn fail → để PASS, frontend dùng damagedQty để tách
+                  }
+             } else {
+                  resp.setCondition("PASS");
+             }
+             
              itemResponses.add(resp);
         }
 

@@ -55,4 +55,7 @@ public class ReceivingItemResponse {
 
     @Schema(description = "URL ảnh bằng chứng hàng hỏng (chụp khi scan FAIL)")
     private String attachmentUrl;
+
+    @Schema(description = "Số lượng hàng hỏng (FAIL) — tính từ incident data", example = "1")
+    private BigDecimal damagedQty;
 }
