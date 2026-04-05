@@ -342,6 +342,10 @@ public class ReceivingOrderService {
         java.util.Map<Long, BigDecimal> aggExpectedQty = new java.util.LinkedHashMap<>();
         java.util.Map<Long, BigDecimal> aggReceivedQty = new java.util.LinkedHashMap<>();
         java.util.Map<Long, ReceivingItemEntity> aggBestItem = new java.util.LinkedHashMap<>();
+        
+        java.util.Map<Long, String> bestLotBySku = new java.util.HashMap<>();
+        java.util.Map<Long, java.time.LocalDate> bestMfgBySku = new java.util.HashMap<>();
+        java.util.Map<Long, java.time.LocalDate> bestExpBySku = new java.util.HashMap<>();
 
         for (ReceivingItemEntity item : items) {
             Long skuId = item.getSkuId();
@@ -349,11 +353,13 @@ public class ReceivingOrderService {
             BigDecimal rcv = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
             aggExpectedQty.merge(skuId, exp, BigDecimal::add);
             aggReceivedQty.merge(skuId, rcv, BigDecimal::add);
-            // Ưu tiên row có thông tin lot/date đầy đủ nhất
-            ReceivingItemEntity current = aggBestItem.get(skuId);
-            if (current == null
-                    || (current.getLotNumber() == null && item.getLotNumber() != null)
-                    || (current.getExpiryDate() == null && item.getExpiryDate() != null)) {
+            
+            // Collect the best available metadata instead of replacing the entire row
+            if (item.getLotNumber() != null) bestLotBySku.put(skuId, item.getLotNumber());
+            if (item.getManufactureDate() != null) bestMfgBySku.put(skuId, item.getManufactureDate());
+            if (item.getExpiryDate() != null) bestExpBySku.put(skuId, item.getExpiryDate());
+
+            if (!aggBestItem.containsKey(skuId)) {
                 aggBestItem.put(skuId, item);
             }
         }
@@ -387,6 +393,10 @@ public class ReceivingOrderService {
              resp.setReceivedQty(totalQty);
              resp.setDamagedQty(failQty);
              resp.setAttachmentUrl(attachmentUrl);
+             // Apply merged meta
+             resp.setLotNumber(bestLotBySku.get(skuId));
+             resp.setManufactureDate(bestMfgBySku.get(skuId));
+             resp.setExpiryDate(bestExpBySku.get(skuId));
              
              // [FIX] Set condition chính xác: chỉ FAIL nếu toàn bộ là hỏng
              if (failQty.compareTo(BigDecimal.ZERO) > 0) {
