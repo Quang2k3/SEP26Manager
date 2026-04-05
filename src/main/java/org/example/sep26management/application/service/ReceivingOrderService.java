@@ -631,9 +631,10 @@ public class ReceivingOrderService {
                 return ApiResponse.success(
                         "Keeper rescan khớp QC! Hệ thống tự xử lý.", getOrder(id).getData());
             } else {
-                // ❌ Keeper vẫn lệch QC → QC_RESCAN → QC quét lại lần 2
-                order.setStatus("QC_RESCAN");
-                // GIỮ NGUYÊN qcSessionId — QC lần 2 cần merge data cũ
+                // ❌ Keeper vẫn lệch QC → CO_INSPECT_PENDING → Chờ đồng kiểm
+                // [CO_INSPECT_CHANGE]: Đổi trạng thái từ QC_RESCAN sang CO_INSPECT_PENDING
+                order.setStatus("CO_INSPECT_PENDING");
+                // GIỮ NGUYÊN qcSessionId
                 // GIỮ NGUYÊN receivedQty từ Keeper rescan — không reset
                 order.setUpdatedAt(LocalDateTime.now());
                 String note = "[Keeper rescan vẫn lệch QC → QC_RESCAN] " + String.join(", ", rescanMismatches);
