@@ -172,8 +172,23 @@ public class ReceivingOrderController {
     public ApiResponse<Map<String, Object>> qcSubmitSession(
             @PathVariable Long id,
             @RequestParam String sessionId,
+            @RequestParam(defaultValue = "false") boolean isCoInspection,
             Authentication auth) {
-        return receivingOrderService.qcSubmitSession(id, sessionId, extractUserId(auth));
+        return receivingOrderService.qcSubmitSession(id, sessionId, extractUserId(auth), isCoInspection);
+    }
+
+    /** POST /v1/receiving-orders/{id}/co-inspect-confirm — Keeper / QC xác nhận Đồng kiểm */
+    @PostMapping("/{id}/co-inspect-confirm")
+    @Operation(summary = "Xác nhận tham gia Đồng kiểm", description = "Keeper hoặc QC xác nhận tiến hành Co-Inspection.")
+    public ApiResponse<ReceivingOrderResponse> confirmCoInspect(
+            @PathVariable Long id,
+            Authentication auth) {
+        // Lấy Role cao nhất để quyết định tư cách
+        String role = "KEEPER";
+        if (auth.getAuthorities().stream().anyMatch(a -> "ROLE_QC".equals(a.getAuthority()))) {
+            role = "QC";
+        }
+        return receivingOrderService.confirmCoInspect(id, extractUserId(auth), role);
     }
 
     /** POST /v1/receiving-orders/{id}/generate-grn — Keeper */

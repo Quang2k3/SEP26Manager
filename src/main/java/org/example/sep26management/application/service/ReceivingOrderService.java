@@ -724,8 +724,12 @@ public class ReceivingOrderService {
 
     @Transactional
     public ApiResponse<Map<String, Object>> qcSubmitSession(Long id, String sessionId, Long qcUserId) {
+        return qcSubmitSession(id, sessionId, qcUserId, false);
+    }
+
+    public ApiResponse<Map<String, Object>> qcSubmitSession(Long id, String sessionId, Long qcUserId, boolean isCoInspection) {
         ReceivingOrderEntity order = findOrder(id);
-        validateStatus(order, "qc-submit-session", "PENDING_COUNT", "PENDING_INCIDENT", "QC_RESCAN");
+        validateStatus(order, "qc-submit-session", "PENDING_COUNT", "PENDING_INCIDENT", "QC_RESCAN", "CO_INSPECT_READY");
 
         ScanSessionData session = sessionRedis.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
@@ -794,8 +798,10 @@ public class ReceivingOrderService {
         List<String> mismatchDetails = new ArrayList<>();
         java.util.Set<Long> mismatchedSkuIds = new java.util.HashSet<>();
         List<String> mismatchedSkuCodes = new ArrayList<>();
-        for (java.util.Map.Entry<Long, BigDecimal> entry : keeperQtyBySkuId.entrySet()) {
-            Long skuId = entry.getKey();
+        
+        if (!isCoInspection) {
+            for (java.util.Map.Entry<Long, BigDecimal> entry : keeperQtyBySkuId.entrySet()) {
+                Long skuId = entry.getKey();
             BigDecimal keeperQty = entry.getValue();
             Map<String, BigDecimal> skuScanData = scannedData.getOrDefault(skuId, Map.of());
             BigDecimal qcTotal = skuScanData.values().stream()
@@ -827,8 +833,9 @@ public class ReceivingOrderService {
                 mismatchedSkuCodes.add(skuCode);
             }
         }
+        } // End of !isCoInspection condition
 
-        if (!mismatchDetails.isEmpty()) {
+        if (!isCoInspection && !mismatchDetails.isEmpty()) {
             // Chênh lệch → lưu QC session → yêu cầu Keeper scan lại
             order.setStatus("KEEPER_RESCAN");
             order.setQcSessionId(sessionId);
@@ -1275,6 +1282,48 @@ public class ReceivingOrderService {
     }
 
     // ─── Generate GRN ──────────────────────────────────────────────────────────
+
+    // ─── Đồng Kiểm (Co-Inspection) Confirm ────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<ReceivingOrderResponse> confirmCoInspect(Long id, Long userId, String role) {
+        ReceivingOrderEntity order = findOrderForUpdate(id);
+
+        if ("KEEPER".equals(role)) {
+            if (!"CO_INSPECT_PENDING".equals(order.getStatus())) {
+                throw new org.example.sep26management.infrastructure.exception.BusinessException("Chỉ có thể xác nhận khi trạng thái là CO_INSPECT_PENDING (hiện tại: " + order.getStatus() + ")");
+            }
+            validateOwnership(order, userId, "xác nhận đồng kiểm");
+            order.setStatus("CO_INSPECT_WAIT_QC");
+            order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + "[Keeper " + userId + "] Đã đồng ý Đồng kiểm (" + LocalDateTime.now() + ")");
+            
+            // Notify QC
+            try {
+                notificationService.notifyRole("QC", "co_inspect_wait_qc",
+                        id, order.getReceivingCode(), "Keeper đã xác nhận, chờ QC đồng kiểm");
+            } catch (Exception ignored) {}
+        } else if ("QC".equals(role)) {
+            if (!"CO_INSPECT_WAIT_QC".equals(order.getStatus())) {
+                throw new org.example.sep26management.infrastructure.exception.BusinessException("Chỉ có thể xác nhận khi trạng thái là CO_INSPECT_WAIT_QC (hiện tại: " + order.getStatus() + ")");
+            }
+            order.setStatus("CO_INSPECT_READY");
+            order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + "[QC " + userId + "] Đã đồng ý Đồng kiểm (" + LocalDateTime.now() + ")");
+            order.setAssignedQcId(userId); // Lock to this QC explicitly
+            
+            // Notify Keeper
+            try {
+                userRepo.findById(order.getCreatedBy()).ifPresent(u ->
+                        notificationService.notifyUser(u.getEmail(), "co_inspect_ready",
+                                id, order.getReceivingCode(), "Đã sẵn sàng. Hai bên vui lòng gặp mặt để bắt đầu"));
+            } catch (Exception ignored) {}
+        } else {
+            throw new org.example.sep26management.infrastructure.exception.BusinessException("Vai trò không hợp lệ cho thao tác này: " + role);
+        }
+
+        order.setUpdatedAt(LocalDateTime.now());
+        receivingOrderRepo.save(order);
+        return getOrder(id);
+    }
 
     @Transactional
     public ApiResponse<org.example.sep26management.application.dto.response.GrnResponse> generateGrn(Long id,
