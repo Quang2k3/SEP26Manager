@@ -295,33 +295,49 @@ public interface InventorySnapshotJpaRepository
             WHERE warehouse_id = :warehouseId
               AND sku_id = :skuId
               AND location_id = :locationId
-              AND (
-                  (CAST(:lotId AS bigint) IS NOT NULL AND lot_id = CAST(:lotId AS bigint))
-                  OR 
-                  (CAST(:lotId AS bigint) IS NULL AND lot_id_safe = (
-                      SELECT s2.lot_id_safe
-                      FROM inventory_snapshot s2
-                      LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
-                      WHERE s2.warehouse_id = :warehouseId
-                        AND s2.sku_id       = :skuId
-                        AND s2.location_id  = :locationId
-                        AND s2.quantity     > 0
-                      ORDER BY il.expiry_date ASC NULLS LAST
-                      LIMIT 1
-                  ))
-              )
+              AND lot_id = :lotId
             """, nativeQuery = true)
-        void decrementQuantity(
+        void decrementQuantityByLot(
                 @Param("warehouseId") Long warehouseId,
                 @Param("skuId") Long skuId,
                 @Param("lotId") Long lotId,
                 @Param("locationId") Long locationId,
                 @Param("qty") BigDecimal qty);
 
-        /**
-         * Giảm reserved_qty theo locationId + skuId + lotId.
-         * Nếu lotId IS NULL: giảm ở lot có expiry_date sớm nhất (FEFO) — cùng logic với decrementQuantity.
-         */
+        @Modifying
+        @Transactional
+        @Query(value = """
+            UPDATE inventory_snapshot
+            SET quantity = quantity - :qty, last_updated = NOW()
+            WHERE warehouse_id = :warehouseId
+              AND sku_id = :skuId
+              AND location_id = :locationId
+              AND lot_id_safe = (
+                  SELECT s2.lot_id_safe
+                  FROM inventory_snapshot s2
+                  LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
+                  WHERE s2.warehouse_id = :warehouseId
+                    AND s2.sku_id       = :skuId
+                    AND s2.location_id  = :locationId
+                    AND s2.quantity     > 0
+                  ORDER BY il.expiry_date ASC NULLS LAST
+                  LIMIT 1
+              )
+            """, nativeQuery = true)
+        void decrementQuantityFefo(
+                @Param("warehouseId") Long warehouseId,
+                @Param("skuId") Long skuId,
+                @Param("locationId") Long locationId,
+                @Param("qty") BigDecimal qty);
+
+        default void decrementQuantity(Long warehouseId, Long skuId, Long lotId, Long locationId, BigDecimal qty) {
+            if (lotId != null) {
+                decrementQuantityByLot(warehouseId, skuId, lotId, locationId, qty);
+            } else {
+                decrementQuantityFefo(warehouseId, skuId, locationId, qty);
+            }
+        }
+
         @Modifying
         @Transactional
         @Query(value = """
@@ -330,24 +346,43 @@ public interface InventorySnapshotJpaRepository
                 last_updated  = NOW()
             WHERE location_id = :locationId
               AND sku_id       = :skuId
-              AND (
-                  (CAST(:lotId AS bigint) IS NOT NULL AND lot_id = CAST(:lotId AS bigint))
-                  OR 
-                  (CAST(:lotId AS bigint) IS NULL AND lot_id_safe = (
-                      SELECT s2.lot_id_safe
-                      FROM inventory_snapshot s2
-                      LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
-                      WHERE s2.location_id = :locationId
-                        AND s2.sku_id      = :skuId
-                        AND s2.quantity    > 0
-                      ORDER BY il.expiry_date ASC NULLS LAST
-                      LIMIT 1
-                  ))
-              )
+              AND lot_id = :lotId
             """, nativeQuery = true)
-        void decrementReservedByLocationSkuLot(
+        void decrementReservedByLot(
                 @Param("locationId") Long locationId,
                 @Param("skuId") Long skuId,
                 @Param("lotId") Long lotId,
                 @Param("qty") BigDecimal qty);
+
+        @Modifying
+        @Transactional
+        @Query(value = """
+            UPDATE inventory_snapshot
+            SET reserved_qty  = GREATEST(0, reserved_qty - :qty),
+                last_updated  = NOW()
+            WHERE location_id = :locationId
+              AND sku_id       = :skuId
+              AND lot_id_safe = (
+                  SELECT s2.lot_id_safe
+                  FROM inventory_snapshot s2
+                  LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
+                  WHERE s2.location_id = :locationId
+                    AND s2.sku_id      = :skuId
+                    AND s2.quantity    > 0
+                  ORDER BY il.expiry_date ASC NULLS LAST
+                  LIMIT 1
+              )
+            """, nativeQuery = true)
+        void decrementReservedFefo(
+                @Param("locationId") Long locationId,
+                @Param("skuId") Long skuId,
+                @Param("qty") BigDecimal qty);
+
+        default void decrementReservedByLocationSkuLot(Long locationId, Long skuId, Long lotId, BigDecimal qty) {
+            if (lotId != null) {
+                decrementReservedByLot(locationId, skuId, lotId, qty);
+            } else {
+                decrementReservedFefo(locationId, skuId, qty);
+            }
+        }
 }
