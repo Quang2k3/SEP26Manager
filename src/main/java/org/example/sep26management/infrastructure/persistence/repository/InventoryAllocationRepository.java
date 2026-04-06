@@ -34,9 +34,14 @@ public interface InventoryAllocationRepository
      * SKU phải có lot — dùng khi SKU được quản lý theo lô.
      */
     @Query("""
-            SELECT s.locationId, s.lotId, l.expiryDate, s.quantity, s.reservedQty,
+            SELECT s.locationId AS locationId,
+                   s.lotId AS lotId,
+                   l.expiryDate AS expiryDate,
+                   s.quantity AS quantity,
+                   s.reservedQty AS reservedQty,
                    (s.quantity - s.reservedQty) AS availableQty,
-                   loc.locationCode, z.zoneCode
+                   loc.locationCode AS locationCode,
+                   z.zoneCode AS zoneCode
             FROM InventorySnapshotEntity s
             LEFT JOIN InventoryLotEntity l ON l.lotId = s.lotId
             JOIN LocationEntity loc     ON loc.locationId = s.locationId
