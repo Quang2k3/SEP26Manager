@@ -3,6 +3,7 @@ package org.example.sep26management.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.sep26management.application.constants.MessageConstants;
+import org.example.sep26management.infrastructure.SseEmitterRegistry;
 import org.example.sep26management.application.dto.request.GeneratePickListRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.PickListResponse;
@@ -53,6 +54,7 @@ public class PickListService {
     private final InventoryTransactionJpaRepository txnRepository;
     private final ReservationJpaRepository reservationRepository;
     private final NotificationService notificationService;
+    private final SseEmitterRegistry sseRegistry;
 
     @Transactional
     public ApiResponse<PickListResponse> generatePickList(
@@ -442,7 +444,7 @@ public class PickListService {
      * PATCH /v1/outbound/pick-list/{taskId}/items/{itemId}/scan
      */
     @Transactional
-    public ApiResponse<Void> scanPickItem(Long taskId, Long itemId, java.math.BigDecimal pickedQty) {
+    public ApiResponse<Void> scanPickItem(Long taskId, Long itemId, java.math.BigDecimal pickedQty, String sessionId) {
         PickingTaskItemEntity item = pickingTaskItemRepository.findById(itemId)
                 .orElseThrow(() -> new ResourceNotFoundException("PickingTaskItem not found: " + itemId));
         if (!item.getPickingTaskId().equals(taskId)) {
@@ -453,6 +455,34 @@ public class PickListService {
         item.setPickedQty(capped);
         pickingTaskItemRepository.save(item);
         log.info("scanPickItem: taskId={} itemId={} pickedQty={}", taskId, itemId, capped);
+
+        // [FIX REALTIME] Push SSE snapshot toàn bộ pick items → web nhận ngay, không cần poll
+        if (sessionId != null && !sessionId.isBlank()) {
+            try {
+                var allItems = pickingTaskItemExtendedRepository.findByPickingTaskId(taskId);
+                java.util.List<java.util.Map<String, Object>> itemSnapshots = allItems.stream().map(it -> {
+                    java.util.Map<String, Object> m = new java.util.HashMap<>();
+                    m.put("pickingTaskItemId", it.getPickingTaskItemId());
+                    m.put("skuId",             it.getSkuId());
+                    m.put("requiredQty",       it.getRequiredQty());
+                    m.put("pickedQty",         it.getPickedQty() != null ? it.getPickedQty() : BigDecimal.ZERO);
+                    // skuCode từ sku repo
+                    skuRepository.findById(it.getSkuId()).ifPresent(s -> {
+                        m.put("skuCode", s.getSkuCode());
+                        m.put("skuName", s.getSkuName());
+                    });
+                    return m;
+                }).collect(java.util.stream.Collectors.toList());
+
+                java.util.Map<String, Object> payload = new java.util.HashMap<>();
+                payload.put("type",    "picking_scan");
+                payload.put("taskId",  taskId);
+                payload.put("items",   itemSnapshots);
+                sseRegistry.send(sessionId, payload);
+            } catch (Exception e) {
+                log.warn("scanPickItem SSE push failed: {}", e.getMessage());
+            }
+        }
         return ApiResponse.success("Picked qty updated", null);
     }
 
