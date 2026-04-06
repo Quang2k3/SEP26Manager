@@ -481,16 +481,16 @@ public class PickListService {
                 reservationRepository.save(existing);
             }
 
-            // Trả SO về APPROVED
+            // Trả SO về CANCELLED
             soRepository.findById(documentId).ifPresent(so -> {
-                so.setStatus("APPROVED");
+                so.setStatus("CANCELLED");
                 soRepository.save(so);
-                log.info("SO {} reverted to APPROVED and reservations cleared after pick task cancelled", so.getSoCode());
+                log.info("SO {} reverted to CANCELLED and reservations cleared after pick task cancelled", so.getSoCode());
             });
         }
 
         auditLogService.logAction(userId, "PICKING_CANCELLED", "picking_tasks", taskId,
-                "Pick task " + taskId + " cancelled. Reservations released and document reverted to APPROVED.", ip, ua);
+                "Pick task " + taskId + " cancelled. Reservations released and document reverted to CANCELLED.", ip, ua);
 
         // Giải phóng claim
         try { pickingTaskRepository.releaseKeeperAssignment(taskId, userId); } catch (Exception ignored) {}

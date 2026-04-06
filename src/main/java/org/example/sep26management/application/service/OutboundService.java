@@ -350,7 +350,12 @@ public class OutboundService {
                                     .toList())));
         }
 
-        // Đủ hàng → PENDING_APPROVAL chờ Manager duyệt như bình thường
+        // Đủ hàng → phân bổ tồn kho ngay trực tiếp để giam tồn kho (Tránh Manager duyệt cho 2 phiếu trùng nhau)
+        AllocateStockRequest allocReq = new AllocateStockRequest();
+        allocReq.setDocumentId(soId);
+        allocReq.setOrderType(OutboundType.SALES_ORDER);
+        allocateStockService.allocateStock(allocReq, userId, ip, ua);
+
         so.setStatus("PENDING_APPROVAL");
         soRepository.save(so);
 
@@ -432,7 +437,9 @@ public class OutboundService {
             }
         }
 
-        so.setStatus("APPROVED");
+        // [FIX] Vì Keeper đã cấp phát tồn kho (ALLOCATED) ngay từ bước SUBMIT, nên khi duyệt, 
+        // phiếu xuất sẽ nhảy thẳng qua trạng thái ALLOCATED (bỏ qua APPROVED)
+        so.setStatus("ALLOCATED");
         so.setApprovedBy(managerId);
         so.setApprovedAt(LocalDateTime.now());
         if (request != null && request.getNote() != null) so.setNote(request.getNote());
@@ -478,6 +485,9 @@ public class OutboundService {
         so.setApprovedBy(managerId);
         so.setApprovedAt(LocalDateTime.now());
         soRepository.save(so);
+
+        // [FIX] Giải phóng toàn bộ Tồn kho đang bị Giữ vì đơn này bị quản lý từ chối
+        allocateStockService.cancelReservations("sales_orders", soId);
 
         auditLogService.logAction(managerId, "OUTBOUND_REJECTED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " rejected. Reason: " + rejectionReason, ip, ua);

@@ -62,8 +62,8 @@ public class AllocateStockService {
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            // Allow re-allocate from APPROVED or WAITING_STOCK (after Manager resolves WAIT_BACKORDER)
-            if (!"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
+            // Allow allocate from DRAFT (during submit), APPROVED, or WAITING_STOCK
+            if (!"DRAFT".equals(so.getStatus()) && !"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
                 throw new BusinessException(MessageConstants.ALLOCATE_MUST_BE_APPROVED);
             }
 
@@ -221,12 +221,14 @@ public class AllocateStockService {
         if (fullyAllocated) {
             if (request.getOrderType() == OutboundType.SALES_ORDER) {
                 soRepository.findById(request.getDocumentId()).ifPresent(so -> {
-                    so.setStatus("ALLOCATED");
-                    soRepository.save(so);
-                    log.info("SO {} status → ALLOCATED", so.getSoCode());
-                    // ── Realtime: notify KEEPER đơn đã phân bổ, cần tạo pick list ──
-                    notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
-                            so.getSoId(), so.getSoCode(), "Đã phân bổ tồn kho — cần tạo Pick List");
+                    if ("APPROVED".equals(so.getStatus()) || "WAITING_STOCK".equals(so.getStatus())) {
+                        so.setStatus("ALLOCATED");
+                        soRepository.save(so);
+                        log.info("SO {} status → ALLOCATED", so.getSoCode());
+                        // ── Realtime: notify KEEPER đơn đã phân bổ, cần tạo pick list ──
+                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                                so.getSoId(), so.getSoCode(), "Đã phân bổ tồn kho — cần tạo Pick List");
+                    }
                 });
             } else {
                 transferRepository.findById(request.getDocumentId()).ifPresent(t -> {
@@ -252,6 +254,25 @@ public class AllocateStockService {
                 .status(allocStatus).fullyAllocated(fullyAllocated)
                 .totalSkus(required.size()).allocatedSkus(required.size() - shortages.size())
                 .allocations(allocations).shortages(shortages.isEmpty() ? null : shortages).build());
+    }
+
+    @Transactional
+    public void cancelReservations(String referenceTable, Long documentId) {
+        List<ReservationEntity> existingReservations = reservationRepository
+                .findByReferenceTableAndReferenceIdAndStatus(referenceTable, documentId, "OPEN");
+        for (ReservationEntity existing : existingReservations) {
+            if (existing.getLocationId() != null) {
+                snapshotRepository.incrementReservedByLocationAndSku(
+                        existing.getLocationId(), existing.getSkuId(), existing.getLotId(),
+                        existing.getQuantity().negate());
+            } else {
+                snapshotRepository.incrementReservedByWarehouseAndSku(
+                        existing.getWarehouseId(), existing.getSkuId(), existing.getQuantity().negate());
+            }
+            existing.setStatus("CANCELLED");
+            reservationRepository.save(existing);
+        }
+        log.info("Cancelled {} reservations for {} ID {}", existingReservations.size(), referenceTable, documentId);
     }
 
     /**

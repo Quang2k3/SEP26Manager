@@ -312,8 +312,8 @@ public interface InventorySnapshotJpaRepository
             WHERE warehouse_id = :warehouseId
               AND sku_id = :skuId
               AND location_id = :locationId
-              AND lot_id_safe = (
-                  SELECT s2.lot_id_safe
+              AND COALESCE(lot_id, -1) = (
+                  SELECT COALESCE(s2.lot_id, -1)
                   FROM inventory_snapshot s2
                   LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
                   WHERE s2.warehouse_id = :warehouseId
@@ -362,8 +362,8 @@ public interface InventorySnapshotJpaRepository
                 last_updated  = NOW()
             WHERE location_id = :locationId
               AND sku_id       = :skuId
-              AND lot_id_safe = (
-                  SELECT s2.lot_id_safe
+              AND COALESCE(lot_id, -1) = (
+                  SELECT COALESCE(s2.lot_id, -1)
                   FROM inventory_snapshot s2
                   LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
                   WHERE s2.location_id = :locationId
