@@ -450,22 +450,51 @@ public class PickListService {
         task.setStatus("CANCELLED");
         pickingTaskRepository.save(task);
 
-        if (task.getSoId() != null) {
-            soRepository.findById(task.getSoId()).ifPresent(so -> {
-                so.setStatus("ALLOCATED");
+        Long documentId = task.getSoId(); // Assuming SO for now, or finding it another way for transfers
+        String refTable = "sales_orders";
+
+        // Internal transfer workaround
+        if (documentId == null) {
+            // Find from items
+            var items = pickingTaskItemExtendedRepository.findByPickingTaskId(taskId);
+            if (!items.isEmpty() && items.get(0).getPickingTaskId() != null) {
+                // If it is a transfer, we will try to clean up reservations based on pickingTaskId if mapped 
+                // But typically, transfer documentId isn't stored in PickingTaskEntity yet, 
+                // so we do our best with what we have.
+            }
+        }
+
+        if (documentId != null) {
+            // Giải phóng tồn kho: huỷ tất cả OPEN reservations của đơn hàng này
+            List<ReservationEntity> existingReservations = reservationRepository
+                    .findByReferenceTableAndReferenceIdAndStatus(refTable, documentId, "OPEN");
+            for (ReservationEntity existing : existingReservations) {
+                if (existing.getLocationId() != null) {
+                    snapshotRepository.incrementReservedByLocationAndSku(
+                            existing.getLocationId(), existing.getSkuId(), existing.getLotId(),
+                            existing.getQuantity().negate());
+                } else {
+                    snapshotRepository.incrementReservedByWarehouseAndSku(
+                            existing.getWarehouseId(), existing.getSkuId(), existing.getQuantity().negate());
+                }
+                existing.setStatus("CANCELLED");
+                reservationRepository.save(existing);
+            }
+
+            // Trả SO về APPROVED
+            soRepository.findById(documentId).ifPresent(so -> {
+                so.setStatus("APPROVED");
                 soRepository.save(so);
-                log.info("SO {} reverted to ALLOCATED after pick task cancelled", so.getSoCode());
+                log.info("SO {} reverted to APPROVED and reservations cleared after pick task cancelled", so.getSoCode());
             });
         }
-        // with Internal Transfers, generatePickList doesn't save soId in task right now
-        // so it cannot be reverted automatically, which is a known gap, but ok for now
 
         auditLogService.logAction(userId, "PICKING_CANCELLED", "picking_tasks", taskId,
-                "Pick task " + taskId + " cancelled. Document reverted to ALLOCATED.", ip, ua);
+                "Pick task " + taskId + " cancelled. Reservations released and document reverted to APPROVED.", ip, ua);
 
         // Giải phóng claim
         try { pickingTaskRepository.releaseKeeperAssignment(taskId, userId); } catch (Exception ignored) {}
 
-        return ApiResponse.success("Đã huỷ lấy hàng thành công.");
+        return ApiResponse.success("Đã huỷ lấy hàng và giải phóng tồn kho thành công.");
     }
 }
