@@ -728,8 +728,9 @@ public class ReceivingOrderService {
         return qcSubmitSession(id, sessionId, qcUserId, false);
     }
 
+    @Transactional
     public ApiResponse<Map<String, Object>> qcSubmitSession(Long id, String sessionId, Long qcUserId, boolean isCoInspection) {
-        ReceivingOrderEntity order = findOrder(id);
+        ReceivingOrderEntity order = findOrderForUpdate(id);
         validateStatus(order, "qc-submit-session", "PENDING_COUNT", "PENDING_INCIDENT", "QC_RESCAN", "CO_INSPECT_READY");
 
         ScanSessionData session = sessionRedis.findById(sessionId)
