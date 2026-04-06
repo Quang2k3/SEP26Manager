@@ -178,9 +178,6 @@ public class AllocateStockService {
 
             List<InventoryAllocationRepository.FEFOAllocationProjection> stocks =
                     allocationRepository.findAvailableStockFEFO(warehouseId, pair.skuId);
-            if (stocks.isEmpty()) {
-                stocks = allocationRepository.findAvailableStockFEFONoLot(warehouseId, pair.skuId);
-            }
 
             for (InventoryAllocationRepository.FEFOAllocationProjection stock : stocks) {
                 if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;

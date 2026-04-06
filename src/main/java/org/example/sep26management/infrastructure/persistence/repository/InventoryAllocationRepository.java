@@ -38,7 +38,7 @@ public interface InventoryAllocationRepository
                    (s.quantity - s.reservedQty) AS availableQty,
                    loc.locationCode, z.zoneCode
             FROM InventorySnapshotEntity s
-            JOIN InventoryLotEntity l   ON l.lotId       = s.lotId
+            LEFT JOIN InventoryLotEntity l ON l.lotId = s.lotId
             JOIN LocationEntity loc     ON loc.locationId = s.locationId
             JOIN ZoneEntity z           ON z.zoneId       = loc.zoneId
             WHERE s.warehouseId = :warehouseId
@@ -55,36 +55,6 @@ public interface InventoryAllocationRepository
             """)
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     List<FEFOAllocationProjection> findAvailableStockFEFO(
-            @Param("warehouseId") Long warehouseId,
-            @Param("skuId") Long skuId);
-
-    /**
-     * Fallback khi SKU không có lot (LEFT JOIN lot).
-     * Chỉ xét BIN thực (locationType=BIN, isStaging=false, active=true).
-     * FIX: thêm zone_code exclusion để loại DEFEQ/DEFECT dù is_defect chưa được set.
-     */
-    @Query("""
-            SELECT s.locationId, s.lotId, null AS expiryDate, s.quantity, s.reservedQty,
-                   (s.quantity - s.reservedQty) AS availableQty,
-                   loc.locationCode, z.zoneCode
-            FROM InventorySnapshotEntity s
-            LEFT JOIN InventoryLotEntity l ON l.lotId      = s.lotId
-            JOIN LocationEntity loc        ON loc.locationId = s.locationId
-            JOIN ZoneEntity z              ON z.zoneId       = loc.zoneId
-            WHERE s.warehouseId = :warehouseId
-              AND s.skuId       = :skuId
-              AND (s.quantity - s.reservedQty) > 0
-              AND loc.active      = true
-              AND loc.isStaging   = false
-              AND loc.isDefect    = false
-              AND loc.locationType = org.example.sep26management.application.enums.LocationType.BIN
-              AND UPPER(z.zoneCode) NOT LIKE '%DEFECT%'
-              AND UPPER(z.zoneCode) NOT LIKE '%DEFEQ%'
-              AND UPPER(z.zoneCode) NOT LIKE '%DAMAGE%'
-            ORDER BY loc.locationCode ASC
-            """)
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    List<FEFOAllocationProjection> findAvailableStockFEFONoLot(
             @Param("warehouseId") Long warehouseId,
             @Param("skuId") Long skuId);
 
