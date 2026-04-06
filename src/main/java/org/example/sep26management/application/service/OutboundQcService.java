@@ -396,18 +396,31 @@ public class OutboundQcService {
                 .allScanned(pending == 0 && total > 0).build());
     }
 
-    /** Tạo Incident DAMAGE cho các FAIL/HOLD items trong task. */
+    /**
+     * Tạo Incident DAMAGE cho các FAIL items trong task.
+     *
+     * [FIX ROOT CAUSE] Bug cũ: 1 SKU có thể có nhiều PickingTaskItem (mỗi item = 1 reservation line).
+     * Ví dụ: SO yêu cầu 2 units SKU001 → AllocateStock tạo 2 reservation lines (1 unit/line)
+     * → 2 PickingTaskItem: item1(req=1,fail=1,pass=0), item2(req=1,fail=0,pass=1)
+     * → Bug cũ tạo IncidentItem với expectedQty=1 (chỉ item có fail)
+     * → FE hiển thị "SL Giấy tờ: 1" thay vì đúng là "2"
+     *
+     * Fix: Group theo skuId, cộng dồn toàn bộ qty → 1 IncidentItem/SKU với số liệu chính xác
+     */
     private void createDamageIncident(PickingTaskEntity task,
                                       List<PickingTaskItemEntity> allItems,
                                       Long soId, Long reportedBy) {
         SalesOrderEntity so = salesOrderRepository.findById(soId).orElse(null);
         if (so == null) return;
 
-        // Filter: chỉ lấy items có qcFailQty > 0 (thay vì filter theo qcResult string)
-        List<PickingTaskItemEntity> failItems = allItems.stream()
-                .filter(i -> safeBD(i.getQcFailQty()).compareTo(BigDecimal.ZERO) > 0)
-                .collect(Collectors.toList());
-        if (failItems.isEmpty()) return;
+        // [FIX] Group tất cả picking items theo skuId để cộng dồn qty đúng
+        java.util.Map<Long, java.util.List<PickingTaskItemEntity>> bySkuId = allItems.stream()
+                .collect(Collectors.groupingBy(PickingTaskItemEntity::getSkuId));
+
+        // Chỉ tạo incident nếu có ít nhất 1 SKU có failQty > 0
+        boolean hasAnyFail = bySkuId.values().stream().anyMatch(skuItems ->
+                skuItems.stream().anyMatch(i -> safeBD(i.getQcFailQty()).compareTo(BigDecimal.ZERO) > 0));
+        if (!hasAnyFail) return;
 
         String code = "INC-QC-" + soId + "-" + (System.currentTimeMillis() % 100_000);
         StringBuilder desc = new StringBuilder("QC FAIL khi xuất " + so.getSoCode() + ": ");
@@ -427,39 +440,62 @@ public class OutboundQcService {
                 .build();
         IncidentEntity saved = incidentRepository.save(incident);
 
-        for (PickingTaskItemEntity item : failItems) {
-            SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
-            String skuCode = sku != null ? sku.getSkuCode() : "SKU#" + item.getSkuId();
+        for (java.util.Map.Entry<Long, java.util.List<PickingTaskItemEntity>> entry : bySkuId.entrySet()) {
+            Long skuId = entry.getKey();
+            java.util.List<PickingTaskItemEntity> skuItems = entry.getValue();
 
-            // FIX: dùng qcFailQty làm damagedQty, qcPassQty làm actualQty
-            BigDecimal failQty = safeBD(item.getQcFailQty());
-            BigDecimal passQty = safeBD(item.getQcPassQty());
-            desc.append(skuCode)
-                    .append("[FAIL x").append(failQty.intValue())
-                    .append("/PASS x").append(passQty.intValue()).append("] ");
+            // [FIX] Cộng dồn toàn bộ qty của cùng SKU qua tất cả reservation lines
+            BigDecimal totalRequired = skuItems.stream()
+                    .map(i -> safeBD(i.getRequiredQty()))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal totalFailQty = skuItems.stream()
+                    .map(i -> safeBD(i.getQcFailQty()))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal totalPassQty = skuItems.stream()
+                    .map(i -> safeBD(i.getQcPassQty()))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            String fromLocCode = locationRepository.findById(item.getFromLocationId())
+            // Bỏ qua SKU hoàn toàn pass
+            if (totalFailQty.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            SkuEntity sku = skuRepository.findById(skuId).orElse(null);
+            String skuCode = sku != null ? sku.getSkuCode() : "SKU#" + skuId;
+
+            // Đại diện: item có failQty > 0 đầu tiên (để lấy ảnh, note, location)
+            PickingTaskItemEntity rep = skuItems.stream()
+                    .filter(i -> safeBD(i.getQcFailQty()).compareTo(BigDecimal.ZERO) > 0)
+                    .findFirst()
+                    .orElse(skuItems.get(0));
+            String fromLocCode = locationRepository.findById(rep.getFromLocationId())
                     .map(l -> l.getLocationCode()).orElse("N/A");
-            String noteStr = "FAIL x" + failQty.intValue() + " / PASS x" + passQty.intValue()
-                    + (item.getQcNote() != null ? " | " + item.getQcNote() : "")
+
+            desc.append(skuCode)
+                    .append("[FAIL x").append(totalFailQty.intValue())
+                    .append("/PASS x").append(totalPassQty.intValue()).append("] ");
+
+            String noteStr = "FAIL x" + totalFailQty.intValue() + " / PASS x" + totalPassQty.intValue()
+                    + (rep.getQcNote() != null ? " | " + rep.getQcNote() : "")
                     + " | from_bin: " + fromLocCode
-                    + (item.getQcAttachmentUrl() != null ? " | photo: " + item.getQcAttachmentUrl() : "");
+                    + (rep.getQcAttachmentUrl() != null ? " | photo: " + rep.getQcAttachmentUrl() : "");
 
             incidentItemRepository.save(IncidentItemEntity.builder()
                     .incident(saved)
-                    .skuId(item.getSkuId())
-                    .damagedQty(failQty)          // FIX: số unit thực FAIL
-                    .expectedQty(item.getRequiredQty())
-                    .actualQty(passQty.add(failQty))            // FIX: số unit PASS + FAIL (tất cả hàng đã quét)
+                    .skuId(skuId)
+                    // [FIX] expectedQty = TỔNG requiredQty (SL Giấy tờ đúng = 2, không phải 1)
+                    .expectedQty(totalRequired)
+                    // [FIX] actualQty = TỔNG pass + fail = tổng đã QC thực tế
+                    .actualQty(totalPassQty.add(totalFailQty))
+                    // damagedQty = TỔNG failQty
+                    .damagedQty(totalFailQty)
                     .reasonCode("DAMAGE")
                     .note(noteStr)
-                    .attachmentUrl(item.getQcAttachmentUrl())
+                    .attachmentUrl(rep.getQcAttachmentUrl())
                     .build());
         }
 
         saved.setDescription(desc.toString().trim());
         incidentRepository.save(saved);
-        log.info("Created DAMAGE Incident {} for SO {} ({} fail items)", code, so.getSoCode(), failItems.size());
+        log.info("Created DAMAGE Incident {} for SO {} (grouped by SKU)", code, so.getSoCode());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -668,6 +704,7 @@ public class OutboundQcService {
                 break;
             }
         }
+
         if (foundDefectZone != null) {
             Long zoneId = foundDefectZone.getZoneId();
             List<LocationEntity> binsInZone = locationRepository.findByZoneId(zoneId);
