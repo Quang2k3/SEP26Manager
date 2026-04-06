@@ -307,6 +307,10 @@ public class OutboundQcService {
                 .count();
 
         Long soId = task.getSoId();
+        // [FIX COMPILE] task bị reassign ở trên nên không effectively final.
+        // Capture snapshot effectively-final để dùng được bên trong lambda.
+        final PickingTaskEntity finalTask = task;
+        final List<PickingTaskItemEntity> finalAllItems = allItems;
 
         if ((fail > 0 || hold > 0) && soId != null) {
             salesOrderRepository.findById(soId).ifPresent(so -> {
@@ -322,7 +326,7 @@ public class OutboundQcService {
                     // Chỉ tạo incident nếu chưa có
                     if (incidentAlreadyExists) {
                         // incidentAlreadyExists = true nghĩa là KHÔNG có → cần tạo
-                        createDamageIncident(task, allItems, soId, userId);
+                        createDamageIncident(finalTask, finalAllItems, soId, userId);
                     }
                     so.setStatus("ON_HOLD");
                     so.setUpdatedAt(now);
