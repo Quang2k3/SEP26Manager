@@ -288,117 +288,123 @@ public class PickListService {
      */
     @Transactional
     public ApiResponse<PickListResponse> confirmPicked(Long taskId, Long userId, String ip, String ua) {
-        log.info("confirmPicked: taskId={}, userId={}", taskId, userId);
+        try {
+            log.info("confirmPicked: taskId={}, userId={}", taskId, userId);
 
-        PickingTaskEntity task = pickingTaskRepository.findById(taskId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        String.format(MessageConstants.PICKLIST_NOT_FOUND, taskId)));
+            PickingTaskEntity task = pickingTaskRepository.findById(taskId)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            String.format(MessageConstants.PICKLIST_NOT_FOUND, taskId)));
 
-        // ── Giải pháp 3: Validate Keeper ownership ────────────────────────────
-        if (task.getAssignedTo() != null && !task.getAssignedTo().equals(userId)) {
-            throw new BusinessException(
-                    "Bạn không có quyền xác nhận Pick List #" + taskId
-                            + ". Task này đang được Keeper khác thực hiện.");
-        }
-
-        if (!("OPEN".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()))) {
-            throw new BusinessException(
-                    "Không thể xác nhận: task phải ở OPEN hoặc IN_PROGRESS. Hiện: " + task.getStatus());
-        }
-
-        Long warehouseId = task.getWarehouseId();
-
-        // Set pickedQty = requiredQty cho item chưa được đánh dấu
-        List<PickingTaskItemEntity> items = pickingTaskItemExtendedRepository.findByPickingTaskId(taskId);
-        for (PickingTaskItemEntity item : items) {
-            if (item.getPickedQty() == null || item.getPickedQty().compareTo(BigDecimal.ZERO) == 0) {
-                item.setPickedQty(item.getRequiredQty());
-                pickingTaskItemRepository.save(item);
+            // ── Giải pháp 3: Validate Keeper ownership ────────────────────────────
+            if (task.getAssignedTo() != null && !task.getAssignedTo().equals(userId)) {
+                throw new BusinessException(
+                        "Bạn không có quyền xác nhận Pick List #" + taskId
+                                + ". Task này đang được Keeper khác thực hiện.");
             }
-        }
 
-        // Trừ tồn kho theo từng item
-        for (PickingTaskItemEntity item : items) {
-            BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
-                    ? item.getPickedQty() : item.getRequiredQty();
+            if (!("OPEN".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()))) {
+                throw new BusinessException(
+                        "Không thể xác nhận: task phải ở OPEN hoặc IN_PROGRESS. Hiện: " + task.getStatus());
+            }
 
-            Long locationId = item.getFromLocationId();
+            Long warehouseId = task.getWarehouseId();
 
-            // 1) Trừ quantity trong BIN
-            snapshotRepository.decrementQuantity(
-                    warehouseId, item.getSkuId(), item.getLotId(), locationId, qty);
-
-            // 2) Giải phóng reserved_qty
-            snapshotRepository.decrementReservedByLocationSkuLot(
-                    locationId, item.getSkuId(), item.getLotId(), qty);
-
-            // 3) Ghi inventory_transaction txnType = PICK
-            txnRepository.save(InventoryTransactionEntity.builder()
-                    .warehouseId(warehouseId)
-                    .skuId(item.getSkuId())
-                    .lotId(item.getLotId())
-                    .locationId(locationId)
-                    .quantity(qty.negate())
-                    .txnType("PICK")
-                    .referenceTable("picking_tasks")
-                    .referenceId(taskId)
-                    .createdBy(userId)
-                    .build());
-        }
-
-        // 4) Close OPEN reservations liên quan đến document của task này
-        //    Với SO: refTable=sales_orders, refId=soId
-        //    Với Transfer: tìm từ reservations theo items
-        if (task.getSoId() != null) {
-            List<ReservationEntity> openRes = reservationRepository
-                    .findByReferenceTableAndReferenceIdAndStatus("sales_orders", task.getSoId(), "OPEN");
-            openRes.forEach(r -> {
-                r.setStatus("CLOSED");
-                reservationRepository.save(r);
-            });
-        } else {
-            // Internal Transfer: close reservation bằng cách match sku + location từ items
+            // Set pickedQty = requiredQty cho item chưa được đánh dấu
+            List<PickingTaskItemEntity> items = pickingTaskItemExtendedRepository.findByPickingTaskId(taskId);
             for (PickingTaskItemEntity item : items) {
-                List<ReservationEntity> openRes = reservationRepository
-                        .findByReferenceTableAndReferenceIdAndStatus("transfers", item.getPickingTaskId(), "OPEN");
-                // fallback nếu không tìm được theo task: tìm theo sku+location+warehouse OPEN
-                if (openRes.isEmpty()) {
-                    openRes = reservationRepository.findOpenByWarehouseSkuLocation(
-                            warehouseId, item.getSkuId(), item.getFromLocationId());
+                if (item.getPickedQty() == null || item.getPickedQty().compareTo(BigDecimal.ZERO) == 0) {
+                    item.setPickedQty(item.getRequiredQty());
+                    pickingTaskItemRepository.save(item);
                 }
-                final Long locId = item.getFromLocationId();
-                final Long skuId = item.getSkuId();
-                openRes.stream()
-                        .filter(r -> r.getSkuId().equals(skuId)
-                                && (r.getLocationId() == null || r.getLocationId().equals(locId)))
-                        .forEach(r -> {
-                            r.setStatus("CLOSED");
-                            reservationRepository.save(r);
-                        });
             }
+
+            // Trừ tồn kho theo từng item
+            for (PickingTaskItemEntity item : items) {
+                BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
+                        ? item.getPickedQty() : item.getRequiredQty();
+
+                Long locationId = item.getFromLocationId();
+
+                // 1) Trừ quantity trong BIN
+                snapshotRepository.decrementQuantity(
+                        warehouseId, item.getSkuId(), item.getLotId(), locationId, qty);
+
+                // 2) Giải phóng reserved_qty
+                snapshotRepository.decrementReservedByLocationSkuLot(
+                        locationId, item.getSkuId(), item.getLotId(), qty);
+
+                // 3) Ghi inventory_transaction txnType = PICK
+                txnRepository.save(InventoryTransactionEntity.builder()
+                        .warehouseId(warehouseId)
+                        .skuId(item.getSkuId())
+                        .lotId(item.getLotId())
+                        .locationId(locationId)
+                        .quantity(qty.negate())
+                        .txnType("PICK")
+                        .referenceTable("picking_tasks")
+                        .referenceId(taskId)
+                        .createdBy(userId)
+                        .build());
+            }
+
+            // 4) Close OPEN reservations liên quan đến document của task này
+            //    Với SO: refTable=sales_orders, refId=soId
+            //    Với Transfer: tìm từ reservations theo items
+            if (task.getSoId() != null) {
+                List<ReservationEntity> openRes = reservationRepository
+                        .findByReferenceTableAndReferenceIdAndStatus("sales_orders", task.getSoId(), "OPEN");
+                openRes.forEach(r -> {
+                    r.setStatus("CLOSED");
+                    reservationRepository.save(r);
+                });
+            } else {
+                // Internal Transfer: close reservation bằng cách match sku + location từ items
+                for (PickingTaskItemEntity item : items) {
+                    List<ReservationEntity> openRes = reservationRepository
+                            .findByReferenceTableAndReferenceIdAndStatus("transfers", item.getPickingTaskId(), "OPEN");
+                    // fallback nếu không tìm được theo task: tìm theo sku+location+warehouse OPEN
+                    if (openRes.isEmpty()) {
+                        openRes = reservationRepository.findOpenByWarehouseSkuLocation(
+                                warehouseId, item.getSkuId(), item.getFromLocationId());
+                    }
+                    final Long locId = item.getFromLocationId();
+                    final Long skuId = item.getSkuId();
+                    openRes.stream()
+                            .filter(r -> r.getSkuId().equals(skuId)
+                                    && (r.getLocationId() == null || r.getLocationId().equals(locId)))
+                            .forEach(r -> {
+                                r.setStatus("CLOSED");
+                                reservationRepository.save(r);
+                            });
+                }
+            }
+
+            // 5) Task → PICKED
+            task.setStatus("PICKED");
+            if (task.getStartedAt() == null) task.setStartedAt(LocalDateTime.now());
+            pickingTaskRepository.save(task);
+
+            // 6) SO → QC_SCAN
+            if (task.getSoId() != null) {
+                soRepository.findById(task.getSoId()).ifPresent(so -> {
+                    so.setStatus("QC_SCAN");
+                    soRepository.save(so);
+                    log.info("SO {} → QC_SCAN after confirmPicked", so.getSoCode());
+                });
+            }
+
+            auditLogService.logAction(userId, "PICKING_CONFIRMED", "picking_tasks", taskId,
+                    "Pick task " + taskId + " confirmed PICKED — tồn kho đã trừ trực tiếp từ BIN", ip, ua);
+
+            // Release Keeper claim — task đã PICKED, Keeper khác có thể xem nhưng không nhận lại
+            try { pickingTaskRepository.releaseKeeperAssignment(taskId, userId); } catch (Exception ignored) {}
+            log.info("confirmPicked OK: taskId={} → PICKED, inventory deducted", taskId);
+            return getPickList(taskId);
+        } catch (Exception e) {
+            String trace = e.getStackTrace().length > 0 ? e.getStackTrace()[0].toString() : "No trace";
+            String rootCause = e.getCause() != null ? e.getCause().getMessage() : "No cause";
+            throw new BusinessException("ERROR 500 DEBUG: " + e.getClass().getSimpleName() + " | " + e.getMessage() + " | Cause: " + rootCause + " | Trace: " + trace);
         }
-
-        // 5) Task → PICKED
-        task.setStatus("PICKED");
-        if (task.getStartedAt() == null) task.setStartedAt(LocalDateTime.now());
-        pickingTaskRepository.save(task);
-
-        // 6) SO → QC_SCAN
-        if (task.getSoId() != null) {
-            soRepository.findById(task.getSoId()).ifPresent(so -> {
-                so.setStatus("QC_SCAN");
-                soRepository.save(so);
-                log.info("SO {} → QC_SCAN after confirmPicked", so.getSoCode());
-            });
-        }
-
-        auditLogService.logAction(userId, "PICKING_CONFIRMED", "picking_tasks", taskId,
-                "Pick task " + taskId + " confirmed PICKED — tồn kho đã trừ trực tiếp từ BIN", ip, ua);
-
-        // Release Keeper claim — task đã PICKED, Keeper khác có thể xem nhưng không nhận lại
-        try { pickingTaskRepository.releaseKeeperAssignment(taskId, userId); } catch (Exception ignored) {}
-        log.info("confirmPicked OK: taskId={} → PICKED, inventory deducted", taskId);
-        return getPickList(taskId);
     }
 
     @Transactional(readOnly = true)
