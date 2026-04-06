@@ -50,6 +50,7 @@ public class OutboundQcService {
     private final InventorySnapshotJpaRepository inventorySnapshotRepository;
     private final InventoryTransactionJpaRepository inventoryTransactionRepository;
     private final ReservationQueryRepository reservationRepository;
+    private final ReservationJpaRepository reservationJpaRepository; // [FIX] dùng để tạo mới Reservation sau RETURN_SCRAP
     private final IncidentJpaRepository incidentRepository;
     private final IncidentItemJpaRepository incidentItemRepository;
     private final InventoryLotJpaRepository inventoryLotRepository;
@@ -530,18 +531,39 @@ public class OutboundQcService {
         return ApiResponse.success("Incident resolved. SO updated.", buildSimpleResponse(incident));
     }
 
-    /** Trừ tồn kho hàng lỗi tại vị trí gốc, cộng vào khu hàng lỗi. */
     /**
      * RETURN_SCRAP: Sau confirmPicked, bin gốc đã trống (quantity=0).
-     * - Hàng FAIL (qcFailQty) → upsert vào Z-DEFECT
-     * - Hàng PASS (qcPassQty) → upsert trả lại bin gốc để Keeper re-pick
-     * Ghi inventory_transaction cho cả 2 chiều.
+     *
+     * Flow:
+     *   1. Hàng FAIL (qcFailQty) → upsert vào Z-DEFECT
+     *   2. Hàng PASS (qcPassQty) → upsert trả lại bin gốc + tạo lại Reservation OPEN
+     *      (bắt buộc — Keeper gen Pick List cần reservation OPEN mới pick được)
+     *   3. Giảm orderedQty của SO item xuống còn passQty
+     *   4. Ghi inventory_transaction cho cả 2 chiều
+     *
+     * [FIX ROOT CAUSE] Bug cũ: chỉ upsert tồn kho nhưng không tạo Reservation OPEN mới
+     * → PickListService.generatePickList() query reservation OPEN → empty → throw PICKLIST_NO_ALLOCATION
      */
     private void returnFailToDefectAndRestorePass(Long soId, Long userId, Long warehouseId) {
         List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
-        if (allItems.isEmpty()) return;
+        if (allItems.isEmpty()) {
+            log.warn("RETURN_SCRAP: soId={} — no active picking task items found", soId);
+            return;
+        }
 
         LocationEntity defectBin = getOrCreateDefectBin(warehouseId);
+        Long actorId = userId != null ? userId : getSystemUserId();
+
+        // Huỷ toàn bộ reservation cũ (nếu còn sót) trước khi tạo lại
+        reservationRepository.findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN")
+                .forEach(r -> {
+                    if (r.getLocationId() != null) {
+                        inventorySnapshotRepository.incrementReservedByLocationAndSku(
+                                r.getLocationId(), r.getSkuId(), r.getLotId(), r.getQuantity().negate());
+                    }
+                    r.setStatus("CANCELLED");
+                    reservationRepository.save(r);
+                });
 
         for (PickingTaskItemEntity item : allItems) {
             Long fromLocationId = item.getFromLocationId();
@@ -550,41 +572,63 @@ public class OutboundQcService {
             BigDecimal failQty = safeBD(item.getQcFailQty());
             BigDecimal passQty = safeBD(item.getQcPassQty());
 
-            // 1. Hàng FAIL → cộng vào Z-DEFECT (không trừ bin gốc — đã trừ lúc confirmPicked)
+            // ── 1. Hàng FAIL → cộng vào Z-DEFECT ─────────────────────────────────
+            // (không trừ bin gốc — đã trừ lúc confirmPicked)
             if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                 inventorySnapshotRepository.upsertInventory(
-                        warehouseId, item.getSkuId(), item.getLotId(), defectBin.getLocationId(), failQty);
+                        warehouseId, item.getSkuId(), item.getLotId(),
+                        defectBin.getLocationId(), failQty);
                 inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
                         .warehouseId(warehouseId).locationId(defectBin.getLocationId())
                         .skuId(item.getSkuId()).lotId(item.getLotId()).quantity(failQty)
                         .txnType("DAMAGE_TRANSFER").referenceTable("sales_orders").referenceId(soId)
-                        .reasonCode("QC_FAIL_TO_DEFECT").createdBy(userId != null ? userId : getSystemUserId())
+                        .reasonCode("QC_FAIL_TO_DEFECT").createdBy(actorId)
                         .build());
-                log.info("RETURN_SCRAP: skuId={} failQty={} → defect bin={}", item.getSkuId(), failQty, defectBin.getLocationId());
+                log.info("RETURN_SCRAP: skuId={} failQty={} → defect bin={}",
+                        item.getSkuId(), failQty, defectBin.getLocationId());
             }
 
-            // 2. Hàng PASS → cộng lại vào bin gốc (trả về để Keeper re-pick)
+            // ── 2. Hàng PASS → cộng lại vào bin gốc + tạo Reservation OPEN mới ──
             if (passQty.compareTo(BigDecimal.ZERO) > 0) {
+                // 2a. Cộng tồn kho về bin gốc
                 inventorySnapshotRepository.upsertInventory(
                         warehouseId, item.getSkuId(), item.getLotId(), fromLocationId, passQty);
+
+                // 2b. [FIX] Lock reserved_qty trên snapshot ngay
+                inventorySnapshotRepository.incrementReservedByLocationAndSku(
+                        fromLocationId, item.getSkuId(), item.getLotId(), passQty);
+
+                // 2c. [FIX] Tạo Reservation OPEN mới → PickListService mới gen được Pick List
+                reservationJpaRepository.save(ReservationEntity.builder()
+                        .warehouseId(warehouseId)
+                        .skuId(item.getSkuId())
+                        .lotId(item.getLotId())
+                        .locationId(fromLocationId)
+                        .quantity(passQty)
+                        .referenceTable("sales_orders")
+                        .referenceId(soId)
+                        .status("OPEN")
+                        .build());
+
                 inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
                         .warehouseId(warehouseId).locationId(fromLocationId)
                         .skuId(item.getSkuId()).lotId(item.getLotId()).quantity(passQty)
                         .txnType("RETURN_TO_BIN").referenceTable("sales_orders").referenceId(soId)
-                        .reasonCode("QC_PASS_RESTORE").createdBy(userId != null ? userId : getSystemUserId())
+                        .reasonCode("QC_PASS_RESTORE").createdBy(actorId)
                         .build());
-                log.info("RETURN_SCRAP: skuId={} passQty={} → restored to bin={}", item.getSkuId(), passQty, fromLocationId);
+                log.info("RETURN_SCRAP: skuId={} passQty={} → restored to bin={} + reservation OPEN created",
+                        item.getSkuId(), passQty, fromLocationId);
             }
 
-            // 3. Cập nhật orderedQty trong SO item xuống còn passQty (loại bỏ phần lỗi)
-            // Tìm SO item tương ứng và giảm ordered qty
+            // ── 3. Giảm orderedQty về passQty (loại bỏ phần lỗi khỏi đơn) ─────────
             salesOrderItemRepository.findBySoId(soId).stream()
                     .filter(si -> si.getSkuId().equals(item.getSkuId()))
                     .findFirst()
                     .ifPresent(si -> {
                         BigDecimal newQty = passQty.max(BigDecimal.ZERO);
                         if (newQty.compareTo(si.getOrderedQty()) < 0) {
-                            log.info("RETURN_SCRAP: reduce orderedQty sku={} {} → {}", item.getSkuId(), si.getOrderedQty(), newQty);
+                            log.info("RETURN_SCRAP: reduce orderedQty sku={} {} → {}",
+                                    item.getSkuId(), si.getOrderedQty(), newQty);
                             si.setOrderedQty(newQty);
                             salesOrderItemRepository.save(si);
                         }
