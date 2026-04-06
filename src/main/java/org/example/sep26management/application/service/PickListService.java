@@ -327,13 +327,15 @@ public class PickListService {
 
                 Long locationId = item.getFromLocationId();
 
-                // 1) Trừ quantity trong BIN
-                snapshotRepository.decrementQuantity(
-                        warehouseId, item.getSkuId(), item.getLotId(), locationId, qty);
-
-                // 2) Giải phóng reserved_qty
+                // 1) Giải phóng reserved_qty TRƯỚC — constraint chk_reserved_lte_quantity
+                //    yêu cầu reserved_qty <= quantity tại mọi thời điểm.
+                //    Nếu trừ quantity trước → quantity=0 nhưng reserved>0 → vi phạm constraint → JDBC error.
                 snapshotRepository.decrementReservedByLocationSkuLot(
                         locationId, item.getSkuId(), item.getLotId(), qty);
+
+                // 2) Trừ quantity trong BIN sau khi reserved đã về 0
+                snapshotRepository.decrementQuantity(
+                        warehouseId, item.getSkuId(), item.getLotId(), locationId, qty);
 
                 // 3) Ghi inventory_transaction txnType = PICK
                 txnRepository.save(InventoryTransactionEntity.builder()
@@ -508,8 +510,8 @@ public class PickListService {
             // Find from items
             var items = pickingTaskItemExtendedRepository.findByPickingTaskId(taskId);
             if (!items.isEmpty() && items.get(0).getPickingTaskId() != null) {
-                // If it is a transfer, we will try to clean up reservations based on pickingTaskId if mapped 
-                // But typically, transfer documentId isn't stored in PickingTaskEntity yet, 
+                // If it is a transfer, we will try to clean up reservations based on pickingTaskId if mapped
+                // But typically, transfer documentId isn't stored in PickingTaskEntity yet,
                 // so we do our best with what we have.
             }
         }
