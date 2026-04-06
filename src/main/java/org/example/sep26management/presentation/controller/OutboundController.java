@@ -370,7 +370,8 @@ public class OutboundController {
                                 + " vừa được Keeper khác nhận. Vui lòng thử lại."));
             }
             try {
-                notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"},
+                // [FIX] Thêm QC vào picking_claimed — QC cần biết Keeper đã nhận task
+                notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER", "QC"},
                         "picking_claimed", taskId, "Task #" + taskId,
                         "Keeper userId=" + userId + " bắt đầu picking");
             } catch (Exception ignored) {}
