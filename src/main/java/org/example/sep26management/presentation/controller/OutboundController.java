@@ -213,7 +213,7 @@ public class OutboundController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Thống kê lệnh xuất kho")
     public ResponseEntity<ApiResponse<OutboundSummaryResponse>> getSummary() {
-        return ResponseEntity.ok(outboundListService.getSummary(getWarehouseId()));
+        return ResponseEntity.ok(outboundListService.getSummary(getWarehouseId(), getUserId(), getCurrentRole()));
     }
 
     // ─────────────────────────────────────────────────────────────
