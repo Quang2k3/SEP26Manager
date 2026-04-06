@@ -776,10 +776,10 @@ public class OutboundQcService {
         salesOrderRepository.save(so);
         log.info("SO {} → DISPATCHED", so.getSoCode());
 
-        // ── Realtime: notify MANAGER + KEEPER đơn đã xuất kho thành công ─────
+        // ── Realtime: notify MANAGER + QC + KEEPER đơn đã xuất kho thành công ─
         String customerName = customerRepository.findById(so.getCustomerId())
                 .map(c -> c.getCustomerName()).orElse("—");
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_dispatched",
                 so.getSoId(), so.getSoCode(), customerName + " — Đã xuất kho");
 
         return ApiResponse.success("Order dispatched. Status: DISPATCHED", null);

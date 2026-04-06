@@ -86,14 +86,18 @@ public class GrnService {
             receivingOrderRepo.save(order);
         });
 
-        // ── Realtime: notify KEEPER (người tạo GRN) rằng GRN vừa được Manager duyệt ─────────
+        // ── Realtime: notify KEEPER (người tạo GRN) và broadcast tới role KEEPER ─────────────
         String supplierName = grn.getSupplierId() != null
                 ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
         final String supplierNameFinal = supplierName;
+        // 1. Notify user cụ thể (creator)
         userRepo.findById(grn.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "grn_approved",
                         grn.getGrnId(), grn.getGrnCode(), supplierNameFinal));
+        // 2. Broadcast tới toàn bộ KEEPER và MANAGER để list tự refresh
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "grn_approved",
+                grn.getGrnId(), grn.getGrnCode(), supplierNameFinal);
 
         return ApiResponse.success("GRN approved.", toSummaryResponse(grn));
     }
@@ -116,14 +120,18 @@ public class GrnService {
             receivingOrderRepo.save(order);
         });
 
-        // ── Realtime: notify KEEPER (người tạo GRN) rằng GRN bị Manager từ chối ─────────────
+        // ── Realtime: notify KEEPER (người tạo GRN) và broadcast tới role KEEPER ─────────────
         String supplierName = grn.getSupplierId() != null
                 ? supplierRepo.findById(grn.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
         final String rejectSubtitle = supplierName + " — " + reason;
+        // 1. Notify user cụ thể (creator)
         userRepo.findById(grn.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "grn_rejected",
                         grn.getGrnId(), grn.getGrnCode(), rejectSubtitle));
+        // 2. Broadcast tới toàn bộ KEEPER để list tự refresh
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "grn_rejected",
+                grn.getGrnId(), grn.getGrnCode(), rejectSubtitle);
 
         return ApiResponse.success("GRN rejected", toSummaryResponse(grn));
     }
@@ -247,12 +255,16 @@ public class GrnService {
             receivingOrderRepo.save(order);
         });
 
-        // ── Realtime: notify KEEPER (người tạo GRN) rằng có putaway task mới ────────────────
+        // ── Realtime: notify KEEPER (người tạo GRN) + broadcast tới role KEEPER ────────────────
         final Long putawayTaskId = task.getPutawayTaskId();
         final String putawaySubtitle = "GRN " + grn.getGrnCode() + " — cần putaway";
+        // 1. Notify user cụ thể (creator)
         userRepo.findById(grn.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "putaway_pending",
                         putawayTaskId, "Task #" + putawayTaskId, putawaySubtitle));
+        // 2. Broadcast tới toàn bộ KEEPER để task list tự refresh
+        notificationService.notifyRole("KEEPER", "putaway_pending",
+                putawayTaskId, "Task #" + putawayTaskId, putawaySubtitle);
 
         return ApiResponse.success("GRN posted, Putaway task created successfully.", toSummaryResponse(grn));
     }
