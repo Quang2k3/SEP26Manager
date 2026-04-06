@@ -460,6 +460,9 @@ public class OutboundService {
         // 2. Broadcast tới toàn bộ KEEPER để list tự refresh
         notificationService.notifyRole("KEEPER", "outbound_approved",
                 approvedSoId, approvedSoCode, approveSubtitle);
+        // 3. [FIX] Broadcast tới QC để danh sách xuất hiển thị realtime
+        notificationService.notifyRole("QC", "outbound_approved",
+                approvedSoId, approvedSoCode, approveSubtitle + " — đã duyệt, chờ lấy hàng");
 
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_APPROVED_SUCCESS,

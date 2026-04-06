@@ -194,9 +194,14 @@ public class PickListService {
                 so.setStatus("PICKING");
                 soRepository.save(so);
                 log.info("SO {} → PICKING", so.getSoCode());
+
                 // ── Realtime: notify KEEPER có pick task mới cần thực hiện ──────
                 notificationService.notifyRole("KEEPER", "outbound_pick_pending",
                         so.getSoId(), so.getSoCode(), documentCode + " — cần lấy hàng");
+
+                // ── [FIX] Realtime: notify QC đơn xuất vào PICKING, sẵn sàng cần QC ──
+                notificationService.notifyRole("QC", "qc_outbound_pending",
+                        so.getSoId(), so.getSoCode(), documentCode + " — cần QC kiểm định");
             });
         } else {
             transferRepository.findById(request.getDocumentId()).ifPresent(t -> {
@@ -502,17 +507,14 @@ public class PickListService {
         task.setStatus("CANCELLED");
         pickingTaskRepository.save(task);
 
-        Long documentId = task.getSoId(); // Assuming SO for now, or finding it another way for transfers
+        Long documentId = task.getSoId();
         String refTable = "sales_orders";
 
         // Internal transfer workaround
         if (documentId == null) {
-            // Find from items
             var items = pickingTaskItemExtendedRepository.findByPickingTaskId(taskId);
             if (!items.isEmpty() && items.get(0).getPickingTaskId() != null) {
                 // If it is a transfer, we will try to clean up reservations based on pickingTaskId if mapped
-                // But typically, transfer documentId isn't stored in PickingTaskEntity yet,
-                // so we do our best with what we have.
             }
         }
 
