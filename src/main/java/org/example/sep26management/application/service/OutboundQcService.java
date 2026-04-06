@@ -485,22 +485,26 @@ public class OutboundQcService {
         String action = request.getAction().toUpperCase();
         switch (action) {
             case "RETURN_SCRAP" -> {
-                // [FIX] Trừ tồn kho hàng hỏng tại vị trí gốc
-                // và chuyển sang khu hàng lỗi (defect zone) để theo dõi
-                deductFailItems(incident.getSoId(), managerId, so.getWarehouseId());
-                // Reset picking items FAIL/HOLD để không tính vào pick list cũ
-                resetFailItemsForRepick(incident.getSoId());
-                // [FIX] SO → APPROVED (không phải PICKING) để Keeper re-allocate từ đầu.
-                // Hàng lỗi đã bị trừ khỏi kho → allocate lại sẽ lấy hàng thay thế từ bin khác.
-                // Cancel reservations cũ trước khi đổi status
-                cancelOpenReservationsForSo(incident.getSoId());
-                so.setStatus("APPROVED");
+                // ─── FLOW ĐÚNG sau confirmPicked ──────────────────────────────────────────
+                // Sau confirmPicked: tồn kho đã bị trừ hết tại bin gốc (quantity=0).
+                // RETURN_SCRAP cần:
+                //   1. Hàng FAIL (qcFailQty) → cộng vào Z-DEFECT (hàng lỗi)
+                //   2. Hàng PASS (qcPassQty) → cộng lại vào bin gốc (trả về kho để re-pick)
+                //   3. Giảm orderedQty của SO xuống còn passQty (bỏ phần lỗi)
+                //   4. SO → PICKING lại (task mới) — không cần qua APPROVED→Allocate vì hàng đã sẵn sàng
+                // ─────────────────────────────────────────────────────────────────────────
+                returnFailToDefectAndRestorePass(incident.getSoId(), managerId, so.getWarehouseId());
+                // Reset QC kết quả để task mới có thể scan lại
+                resetQcForRepick(incident.getSoId());
+                // Hủy picking task cũ (đã PICKED/QC_IN_PROGRESS) để tạo task mới
+                cancelOldPickingTask(incident.getSoId(), so.getWarehouseId());
+                // SO → ALLOCATED: hàng PASS đã về bin gốc, Keeper chỉ cần tạo Pick List mới
+                so.setStatus("ALLOCATED");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → APPROVED (re-allocate after DAMAGE RETURN_SCRAP)", so.getSoCode());
-                // ── Realtime: notify KEEPER cần phân bổ lại ─────────────────
+                log.info("SO {} → ALLOCATED (RETURN_SCRAP: fail→defect, pass→bin gốc)", so.getSoCode());
                 notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
-                        so.getSoId(), so.getSoCode(), "Hàng lỗi đã xử lý — cần phân bổ lại");
+                        so.getSoId(), so.getSoCode(), "Hàng lỗi về Z-DEFECT, hàng tốt trả bin — Keeper tạo Pick List mới");
             }
             case "ACCEPT" -> {
                 // Xuất luôn hàng lỗi → QC_PASSED để cho phép dispatch
@@ -527,73 +531,76 @@ public class OutboundQcService {
     }
 
     /** Trừ tồn kho hàng lỗi tại vị trí gốc, cộng vào khu hàng lỗi. */
-    private void deductFailItems(Long soId, Long userId, Long warehouseId) {
-        List<PickingTaskItemEntity> failItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId)
-                .stream()
-                .filter(i -> "FAIL".equals(i.getQcResult()) || "HOLD".equals(i.getQcResult()))
-                .collect(Collectors.toList());
+    /**
+     * RETURN_SCRAP: Sau confirmPicked, bin gốc đã trống (quantity=0).
+     * - Hàng FAIL (qcFailQty) → upsert vào Z-DEFECT
+     * - Hàng PASS (qcPassQty) → upsert trả lại bin gốc để Keeper re-pick
+     * Ghi inventory_transaction cho cả 2 chiều.
+     */
+    private void returnFailToDefectAndRestorePass(Long soId, Long userId, Long warehouseId) {
+        List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
+        if (allItems.isEmpty()) return;
 
-        if (failItems.isEmpty()) return;
-
-        // Tìm hoặc tạo khu hàng lỗi (defect bin)
         LocationEntity defectBin = getOrCreateDefectBin(warehouseId);
 
-        for (PickingTaskItemEntity item : failItems) {
-            BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
-                    ? item.getPickedQty() : item.getRequiredQty();
-            if (qty.compareTo(BigDecimal.ZERO) <= 0) continue;
-
+        for (PickingTaskItemEntity item : allItems) {
             Long fromLocationId = item.getFromLocationId();
-            // [BUG-FIX] Guard: fromLocationId KHONG duoc la defect bin
-            if (fromLocationId == null || fromLocationId.equals(defectBin.getLocationId())) {
-                fromLocationId = inventorySnapshotRepository
-                        .findLocationIdByWarehouseSkuLot(warehouseId, item.getSkuId(), item.getLotId());
-                log.warn("deductFailItems: fromLocationId null/defect skuId={}, fallback={}", item.getSkuId(), fromLocationId);
+            if (fromLocationId == null) continue;
+
+            BigDecimal failQty = safeBD(item.getQcFailQty());
+            BigDecimal passQty = safeBD(item.getQcPassQty());
+
+            // 1. Hàng FAIL → cộng vào Z-DEFECT (không trừ bin gốc — đã trừ lúc confirmPicked)
+            if (failQty.compareTo(BigDecimal.ZERO) > 0) {
+                inventorySnapshotRepository.upsertInventory(
+                        warehouseId, item.getSkuId(), item.getLotId(), defectBin.getLocationId(), failQty);
+                inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                        .warehouseId(warehouseId).locationId(defectBin.getLocationId())
+                        .skuId(item.getSkuId()).lotId(item.getLotId()).quantity(failQty)
+                        .txnType("DAMAGE_TRANSFER").referenceTable("sales_orders").referenceId(soId)
+                        .reasonCode("QC_FAIL_TO_DEFECT").createdBy(userId != null ? userId : getSystemUserId())
+                        .build());
+                log.info("RETURN_SCRAP: skuId={} failQty={} → defect bin={}", item.getSkuId(), failQty, defectBin.getLocationId());
             }
-            if (fromLocationId == null) {
-                log.error("deductFailItems: no usable location skuId={} warehouseId={} — skip", item.getSkuId(), warehouseId);
-                continue;
+
+            // 2. Hàng PASS → cộng lại vào bin gốc (trả về để Keeper re-pick)
+            if (passQty.compareTo(BigDecimal.ZERO) > 0) {
+                inventorySnapshotRepository.upsertInventory(
+                        warehouseId, item.getSkuId(), item.getLotId(), fromLocationId, passQty);
+                inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                        .warehouseId(warehouseId).locationId(fromLocationId)
+                        .skuId(item.getSkuId()).lotId(item.getLotId()).quantity(passQty)
+                        .txnType("RETURN_TO_BIN").referenceTable("sales_orders").referenceId(soId)
+                        .reasonCode("QC_PASS_RESTORE").createdBy(userId != null ? userId : getSystemUserId())
+                        .build());
+                log.info("RETURN_SCRAP: skuId={} passQty={} → restored to bin={}", item.getSkuId(), passQty, fromLocationId);
             }
 
-            // 1. Trừ quantity tại vị trí gốc
-            inventorySnapshotRepository.decrementQuantity(
-                    warehouseId, item.getSkuId(), item.getLotId(), fromLocationId, qty);
-
-            // 2. Cộng quantity vào khu hàng lỗi
-            inventorySnapshotRepository.upsertInventory(
-                    warehouseId, item.getSkuId(), item.getLotId(), defectBin.getLocationId(), qty);
-
-            // 3. Ghi txn DAMAGE_WRITE_OFF (xuất khỏi bin gốc)
-            inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
-                    .warehouseId(warehouseId)
-                    .locationId(fromLocationId)
-                    .skuId(item.getSkuId())
-                    .lotId(item.getLotId())
-                    .quantity(qty.negate())
-                    .txnType("DAMAGE_WRITE_OFF")
-                    .referenceTable("sales_orders")
-                    .referenceId(soId)
-                    .reasonCode("QC_FAIL")
-                    .createdBy(userId != null ? userId : getSystemUserId())
-                    .build());
-
-            // 4. Ghi txn DAMAGE_TRANSFER (nhập vào khu hàng lỗi)
-            inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
-                    .warehouseId(warehouseId)
-                    .locationId(defectBin.getLocationId())
-                    .skuId(item.getSkuId())
-                    .lotId(item.getLotId())
-                    .quantity(qty)
-                    .txnType("DAMAGE_TRANSFER")
-                    .referenceTable("sales_orders")
-                    .referenceId(soId)
-                    .reasonCode("QC_FAIL_MOVE_TO_DEFECT")
-                    .createdBy(userId != null ? userId : getSystemUserId())
-                    .build());
-
-            log.info("DAMAGE: skuId={} qty={} moved from loc={} to defect bin={}",
-                    item.getSkuId(), qty, fromLocationId, defectBin.getLocationId());
+            // 3. Cập nhật orderedQty trong SO item xuống còn passQty (loại bỏ phần lỗi)
+            // Tìm SO item tương ứng và giảm ordered qty
+            salesOrderItemRepository.findBySoId(soId).stream()
+                    .filter(si -> si.getSkuId().equals(item.getSkuId()))
+                    .findFirst()
+                    .ifPresent(si -> {
+                        BigDecimal newQty = passQty.max(BigDecimal.ZERO);
+                        if (newQty.compareTo(si.getOrderedQty()) < 0) {
+                            log.info("RETURN_SCRAP: reduce orderedQty sku={} {} → {}", item.getSkuId(), si.getOrderedQty(), newQty);
+                            si.setOrderedQty(newQty);
+                            salesOrderItemRepository.save(si);
+                        }
+                    });
         }
+    }
+
+    /** Hủy picking task cũ (đã PICKED/QC_IN_PROGRESS) để Keeper tạo task mới. */
+    private void cancelOldPickingTask(Long soId, Long warehouseId) {
+        pickingTaskRepository.findByWarehouseIdAndSoId(warehouseId, soId).stream()
+                .filter(t -> !"CANCELLED".equals(t.getStatus()) && !"COMPLETED".equals(t.getStatus()))
+                .forEach(t -> {
+                    t.setStatus("CANCELLED");
+                    pickingTaskRepository.save(t);
+                    log.info("RETURN_SCRAP: cancelled old picking task #{}", t.getPickingTaskId());
+                });
     }
 
     /**
@@ -682,19 +689,19 @@ public class OutboundQcService {
                 });
     }
 
-    /** Reset qc_result → null cho FAIL/HOLD items để Keeper re-pick. */
-    private void resetFailItemsForRepick(Long soId) {
-        List<PickingTaskItemEntity> failItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId)
-                .stream()
-                .filter(i -> "FAIL".equals(i.getQcResult()) || "HOLD".equals(i.getQcResult()))
-                .collect(Collectors.toList());
-        for (PickingTaskItemEntity item : failItems) {
+    /** Reset toàn bộ QC state của task items để task mới có thể scan sạch. */
+    private void resetQcForRepick(Long soId) {
+        List<PickingTaskItemEntity> items = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
+        for (PickingTaskItemEntity item : items) {
             item.setQcResult(null);
             item.setQcScannedAt(null);
-            item.setQcNote("[Reset — re-pick required after DAMAGE RETURN_SCRAP]");
+            item.setQcPassQty(BigDecimal.ZERO);
+            item.setQcFailQty(BigDecimal.ZERO);
+            item.setQcNote("[Reset after RETURN_SCRAP — re-pick required]");
+            item.setPickedQty(BigDecimal.ZERO);
             pickingTaskItemRepository.save(item);
         }
-        log.info("Reset {} FAIL/HOLD items for re-pick, soId={}", failItems.size(), soId);
+        log.info("resetQcForRepick: reset {} items for soId={}", items.size(), soId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
