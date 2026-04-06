@@ -300,6 +300,19 @@ public class OutboundController {
         return ResponseEntity.ok(pickListService.getPickListByDocument(documentId, getWarehouseId()));
     }
 
+    /**
+     * [FIX REALTIME] Keeper scan 1 item picking → cập nhật pickedQty realtime.
+     * Web poll fetchPickList mỗi 2s sẽ thấy ngay số lượng đã quét.
+     */
+    @PatchMapping("/pick-list/{taskId}/items/{itemId}/scan")
+    public ResponseEntity<ApiResponse<Void>> scanPickItem(
+            @PathVariable Long taskId,
+            @PathVariable Long itemId,
+            @RequestBody java.util.Map<String, Object> body) {
+        java.math.BigDecimal qty = new java.math.BigDecimal(body.getOrDefault("pickedQty", "1").toString());
+        return ResponseEntity.ok(pickListService.scanPickItem(taskId, itemId, qty));
+    }
+
     @PatchMapping("/pick-list/{taskId}/confirm-picked")
     @PreAuthorize("hasRole('KEEPER')")
     @Operation(summary = "Keeper xác nhận đã lấy đủ hàng",
