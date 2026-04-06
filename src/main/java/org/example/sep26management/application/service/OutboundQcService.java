@@ -668,7 +668,6 @@ public class OutboundQcService {
                 break;
             }
         }
-
         if (foundDefectZone != null) {
             Long zoneId = foundDefectZone.getZoneId();
             List<LocationEntity> binsInZone = locationRepository.findByZoneId(zoneId);
