@@ -59,7 +59,7 @@ public class OutboundListService {
             List<SalesOrderEntity> soList = fetchSalesOrders(warehouseId, status, keyword, hasStatus, hasKeyword);
             for (SalesOrderEntity so : soList) {
                 try {
-                    if (!isManager(currentUserRole) && so.getCreatedBy() != null && !so.getCreatedBy().equals(currentUserId)) {
+                    if (!(isManager(currentUserRole) || isQc(currentUserRole)) && so.getCreatedBy() != null && !so.getCreatedBy().equals(currentUserId)) {
                         continue;
                     }
                     combined.add(buildSoResponse(so, currentUserId, currentUserRole));
@@ -74,7 +74,7 @@ public class OutboundListService {
             List<TransferEntity> transfers = fetchTransfers(warehouseId, status, hasStatus);
             for (TransferEntity t : transfers) {
                 try {
-                    if (!isManager(currentUserRole) && t.getCreatedBy() != null && !t.getCreatedBy().equals(currentUserId)) {
+                    if (!(isManager(currentUserRole) || isQc(currentUserRole)) && t.getCreatedBy() != null && !t.getCreatedBy().equals(currentUserId)) {
                         continue;
                     }
                     if (hasKeyword && !t.getTransferCode().toLowerCase().contains(keyword.toLowerCase())) continue;
@@ -234,7 +234,7 @@ public class OutboundListService {
 
     private long safeCount(Long warehouseId, String status, Long currentUserId, String currentUserRole) {
         try {
-            if (!isManager(currentUserRole)) {
+            if (!(isManager(currentUserRole) || isQc(currentUserRole))) {
                 return soQueryRepository.countByWarehouseIdAndStatusAndCreatedBy(warehouseId, status, currentUserId);
             }
             return soQueryRepository.countByWarehouseIdAndStatus(warehouseId, status);
@@ -256,6 +256,7 @@ public class OutboundListService {
     private boolean owns(Long c, Long u) { return c != null && c.equals(u); }
     private boolean isManager(String r)  { return "MANAGER".equals(r) || "ROLE_MANAGER".equals(r); }
     private boolean isKeeper(String r)   { return "KEEPER".equals(r)  || "ROLE_KEEPER".equals(r); }
+    private boolean isQc(String r)       { return "QC".equals(r)      || "ROLE_QC".equals(r); }
 
     // [FIX TC-1A] true if any item in DRAFT SO has available < requested
     private boolean checkDraftShortage(Long warehouseId, Long soId) {
