@@ -309,6 +309,15 @@ public class OutboundController {
         return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http)));
     }
 
+    @DeleteMapping("/pick-list/{taskId}")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @Operation(summary = "Huỷ Pick List",
+            description = "Huỷ bỏ phiên lấy hàng đang OPEN/IN_PROGRESS. Đưa đơn xuất kho quay về trạng thái ALLOCATED để chỉnh sửa phân bổ.")
+    public ResponseEntity<ApiResponse<Void>> cancelPickTask(
+            @PathVariable Long taskId, HttpServletRequest http) {
+        return ResponseEntity.ok(pickListService.cancelPickTask(taskId, getUserId(), getIp(http), ua(http)));
+    }
+
     @PostMapping("/pick-list/{taskId}/scan-url")
     @PreAuthorize("hasRole('KEEPER')")
     @Operation(summary = "Tạo scan URL cho Picking (KEEPER)",

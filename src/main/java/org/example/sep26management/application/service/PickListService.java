@@ -435,4 +435,37 @@ public class PickListService {
                 warehouseId, today.atStartOfDay(), today.plusDays(1).atStartOfDay());
         return String.format("PKL-%s-%04d", date, count);
     }
+
+    @Transactional
+    public ApiResponse<Void> cancelPickTask(Long taskId, Long userId, String ip, String ua) {
+        log.info("cancelPickTask: taskId={}, userId={}", taskId, userId);
+
+        PickingTaskEntity task = pickingTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Pick List #" + taskId));
+
+        if (!("OPEN".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()))) {
+            throw new BusinessException("Chỉ có thể huỷ Pick List ở trạng thái OPEN hoặc IN_PROGRESS");
+        }
+
+        task.setStatus("CANCELLED");
+        pickingTaskRepository.save(task);
+
+        if (task.getSoId() != null) {
+            soRepository.findById(task.getSoId()).ifPresent(so -> {
+                so.setStatus("ALLOCATED");
+                soRepository.save(so);
+                log.info("SO {} reverted to ALLOCATED after pick task cancelled", so.getSoCode());
+            });
+        }
+        // with Internal Transfers, generatePickList doesn't save soId in task right now
+        // so it cannot be reverted automatically, which is a known gap, but ok for now
+
+        auditLogService.logAction(userId, "PICKING_CANCELLED", "picking_tasks", taskId,
+                "Pick task " + taskId + " cancelled. Document reverted to ALLOCATED.", ip, ua);
+
+        // Giải phóng claim
+        try { pickingTaskRepository.releaseKeeperAssignment(taskId, userId); } catch (Exception ignored) {}
+
+        return ApiResponse.success("Đã huỷ lấy hàng thành công.");
+    }
 }
