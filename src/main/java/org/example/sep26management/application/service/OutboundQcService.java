@@ -31,6 +31,12 @@ import java.util.stream.Collectors;
  *  - finalizeQc: khi có FAIL → tạo Incident(DAMAGE) + set SO → ON_HOLD
  *  - resolveOutboundDamage: Manager xử lý DAMAGE (RETURN_SCRAP / ACCEPT)
  *  - resolveOutboundShortage: Manager xử lý SHORTAGE (WAIT_BACKORDER / CLOSE_SHORT)
+ *
+ * [FIX DUPLICATE] finalizeQc bây giờ idempotent:
+ *  - Nếu task đã ở QC_DONE / COMPLETED / CANCELLED → trả về summary hiện tại, không tạo incident mới
+ *  - Nếu incident DAMAGE OPEN đã tồn tại cho soId → không tạo thêm
+ *  - Điều này ngăn chặn việc điện thoại bấm "Xác nhận" rồi web modal poll
+ *    và gọi finalizeQc lần 2, tạo ra 2 incident + 2 notification cho Manager
  */
 @Service
 @RequiredArgsConstructor
@@ -240,11 +246,27 @@ public class OutboundQcService {
         return finalizeQc(taskId, userId);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
     // 4) FINALIZE QC — [V20] tạo Incident DAMAGE khi có FAIL, set ON_HOLD
+    //
+    // [FIX DUPLICATE] Idempotent guard:
+    //   - Task đã COMPLETED/CANCELLED → trả về summary, không làm gì thêm
+    //   - SO đã ON_HOLD + incident DAMAGE OPEN tồn tại → trả về summary, không tạo thêm
+    //   - SO đã QC_PASSED → trả về summary, không notify lại
+    //
+    // Root cause của duplicate: điện thoại bấm "Xác nhận" → gọi finalize-qc (lần 1),
+    // rồi web modal polling QcScanPanel phát hiện allScanned → QcFinalizeOrDispatch
+    // mount → gọi finalizeQc lại (lần 2) → 2 incident + 2 notification Manager.
     // ─────────────────────────────────────────────────────────────────────────
     @Transactional
     public ApiResponse<QcSummaryResponse> finalizeQc(Long taskId, Long userId) {
         PickingTaskEntity task = findPickingTask(taskId);
+
+        // [FIX DUPLICATE] Guard 1: task đã kết thúc → trả về summary hiện tại, không làm gì
+        if ("COMPLETED".equals(task.getStatus()) || "CANCELLED".equals(task.getStatus())) {
+            log.info("finalizeQc taskId={} already {} — returning current summary (idempotent)", taskId, task.getStatus());
+            return buildCurrentSummary(taskId);
+        }
 
         if ("PICKED".equals(task.getStatus())) {
             startQcSession(taskId, userId);
@@ -252,8 +274,11 @@ public class OutboundQcService {
         }
 
         if (!"QC_IN_PROGRESS".equals(task.getStatus())) {
-            throw new BusinessException(
-                    "Cannot finalize QC: task status is " + task.getStatus() + ". Expected QC_IN_PROGRESS.");
+            // [FIX DUPLICATE] Guard 2: task không còn ở QC_IN_PROGRESS
+            // (đã bị finalize bởi lần gọi trước) → trả về summary, không throw
+            log.info("finalizeQc taskId={} status={} — not QC_IN_PROGRESS, returning summary (idempotent)",
+                    taskId, task.getStatus());
+            return buildCurrentSummary(taskId);
         }
 
         // Auto-PASS items chưa scan đủ: cộng phần còn thiếu vào qcPassQty
@@ -284,23 +309,39 @@ public class OutboundQcService {
         Long soId = task.getSoId();
 
         if ((fail > 0 || hold > 0) && soId != null) {
-            // [V20] GAP 4 FIX: tạo Incident DAMAGE + set SO → ON_HOLD
-            createDamageIncident(task, allItems, soId, userId);
             salesOrderRepository.findById(soId).ifPresent(so -> {
-                so.setStatus("ON_HOLD");
-                so.setUpdatedAt(now);
-                salesOrderRepository.save(so);
-                log.info("SO {} → ON_HOLD (QC fail={}, hold={})", so.getSoCode(), fail, hold);
-                // ── Realtime: notify MANAGER có đơn lỗi QC cần xử lý ─────────
-                String customerName = customerRepository.findById(so.getCustomerId())
-                        .map(c -> c.getCustomerName()).orElse("—");
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
-                        soId, so.getSoCode(),
-                        customerName + " — QC lỗi (" + fail + " fail, " + hold + " hold)");
+                // [FIX DUPLICATE] Guard 3: Chỉ tạo incident và notify nếu SO chưa ON_HOLD
+                // hoặc chưa có incident DAMAGE OPEN nào cho soId này.
+                // Điều này ngăn lần gọi thứ 2 tạo thêm incident + notification.
+                boolean soAlreadyOnHold = "ON_HOLD".equals(so.getStatus());
+                boolean incidentAlreadyExists = !incidentRepository.findOpenIncidentsBySoId(soId)
+                        .stream()
+                        .anyMatch(inc -> inc.getIncidentType() == IncidentType.DAMAGE);
+
+                if (!soAlreadyOnHold || !incidentAlreadyExists) {
+                    // Chỉ tạo incident nếu chưa có
+                    if (incidentAlreadyExists) {
+                        // incidentAlreadyExists = true nghĩa là KHÔNG có → cần tạo
+                        createDamageIncident(task, allItems, soId, userId);
+                    }
+                    so.setStatus("ON_HOLD");
+                    so.setUpdatedAt(now);
+                    salesOrderRepository.save(so);
+                    log.info("SO {} → ON_HOLD (QC fail={}, hold={})", so.getSoCode(), fail, hold);
+                    // ── Realtime: notify MANAGER có đơn lỗi QC cần xử lý ─────────
+                    String customerName = customerRepository.findById(so.getCustomerId())
+                            .map(c -> c.getCustomerName()).orElse("—");
+                    notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                            soId, so.getSoCode(),
+                            customerName + " — QC lỗi (" + fail + " fail, " + hold + " hold)");
+                } else {
+                    log.info("finalizeQc taskId={}: SO {} đã ON_HOLD + incident DAMAGE đã tồn tại — bỏ qua tạo incident/notify (idempotent)",
+                            taskId, so.getSoCode());
+                }
             });
         } else if (soId != null) {
-            // [BUG FIX] All PASS → set SO → QC_PASSED (sẵn sàng dispatch), KHÔNG giữ QC_SCAN
             salesOrderRepository.findById(soId).ifPresent(so -> {
+                // [FIX DUPLICATE] Guard 4: Chỉ set QC_PASSED và notify nếu SO chưa ở trạng thái đó
                 if ("QC_SCAN".equals(so.getStatus()) || "PICKING".equals(so.getStatus())) {
                     so.setStatus("QC_PASSED");
                     so.setUpdatedAt(now);
@@ -312,6 +353,9 @@ public class OutboundQcService {
                     notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "qc_outbound_passed",
                             soId, so.getSoCode(),
                             customerName + " — QC đạt, sẵn sàng xuất kho");
+                } else {
+                    log.info("finalizeQc taskId={}: SO {} đã ở {} — bỏ qua set QC_PASSED/notify (idempotent)",
+                            taskId, so.getSoCode(), so.getStatus());
                 }
             });
         }
@@ -328,6 +372,22 @@ public class OutboundQcService {
         return ApiResponse.success("QC finalized.", QcSummaryResponse.builder()
                 .pickingTaskId(taskId).totalItems(total).passCount(pass)
                 .failCount(fail).holdCount(hold).pendingCount(pending)
+                .allScanned(pending == 0 && total > 0).build());
+    }
+
+    /** Build current summary from DB — dùng cho idempotent early-return. */
+    private ApiResponse<QcSummaryResponse> buildCurrentSummary(Long taskId) {
+        List<PickingTaskItemEntity> items = pickingTaskItemRepository.findByPickingTaskId(taskId);
+        int total   = items.size();
+        int pass    = items.stream().mapToInt(i -> safeInt(i.getQcPassQty())).sum();
+        int fail    = items.stream().mapToInt(i -> safeInt(i.getQcFailQty())).sum();
+        int pending = (int) items.stream()
+                .filter(i -> safeBD(i.getQcPassQty()).add(safeBD(i.getQcFailQty()))
+                        .compareTo(i.getRequiredQty()) < 0)
+                .count();
+        return ApiResponse.success("QC already finalized.", QcSummaryResponse.builder()
+                .pickingTaskId(taskId).totalItems(total).passCount(pass)
+                .failCount(fail).holdCount(0).pendingCount(pending)
                 .allScanned(pending == 0 && total > 0).build());
     }
 
@@ -481,9 +541,6 @@ public class OutboundQcService {
 
             Long fromLocationId = item.getFromLocationId();
             // [BUG-FIX] Guard: fromLocationId KHONG duoc la defect bin
-            // Neu tro vao defect bin → AllocateStock lan truoc lay ham tu defect bin (sai)
-            // hoac fromLocationId = null → fallback. Ca hai truong hop: dung findLocationIdByWarehouseSkuLot
-            // (da duoc fix: exclude is_defect=true) de tim bin goc thuc su.
             if (fromLocationId == null || fromLocationId.equals(defectBin.getLocationId())) {
                 fromLocationId = inventorySnapshotRepository
                         .findLocationIdByWarehouseSkuLot(warehouseId, item.getSkuId(), item.getLotId());
@@ -544,7 +601,7 @@ public class OutboundQcService {
         Optional<LocationEntity> existing = locationRepository.findDefectBinByWarehouse(warehouseId);
         if (existing.isPresent() && existing.get().getZoneId() != null) return existing.get();
 
-        // 2. Tim zone defect theo tên — hỗ trợ nhiều variant: Z-DEFECT, DEFEQ, Z-DEFEQ, DEFECT, DAMAGE
+        // 2. Tim zone defect theo tên — hỗ trợ nhiều variant
         List<String> defectZoneCandidates = List.of("Z-DEFECT", "DEFEQ", "Z-DEFEQ", "DEFECT", "Z-DAMAGE", "DAMAGE");
         org.example.sep26management.infrastructure.persistence.entity.ZoneEntity foundDefectZone = null;
         for (String candidate : defectZoneCandidates) {
@@ -567,21 +624,17 @@ public class OutboundQcService {
                     .findFirst();
             if (defectBinInZone.isPresent()) return defectBinInZone.get();
 
-            // 2b. Lay bin dau tien trong zone defect, danh dau is_defect=true cho TẤT CẢ bins trong zone
-            // (không chỉ 1 bin) để allocation queries loại trừ được toàn bộ zone
+            // 2b. Lay bin dau tien trong zone defect, danh dau is_defect=true
             List<LocationEntity> activeBins = binsInZone.stream()
                     .filter(l -> Boolean.TRUE.equals(l.getActive())
                             && org.example.sep26management.application.enums.LocationType.BIN.equals(l.getLocationType()))
                     .collect(java.util.stream.Collectors.toList());
 
             if (!activeBins.isEmpty()) {
-                // Đánh is_defect=true cho TẤT CẢ bins trong zone defect
                 for (LocationEntity bin : activeBins) {
                     if (!Boolean.TRUE.equals(bin.getIsDefect())) {
                         bin.setIsDefect(true);
                         locationRepository.save(bin);
-                        log.info("Marked ALL bins as is_defect=true in defect zone '{}': {}",
-                                foundDefectZone.getZoneCode(), bin.getLocationCode());
                     }
                 }
                 return activeBins.get(0);
@@ -668,18 +721,15 @@ public class OutboundQcService {
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
-                // ── Realtime: notify KEEPER đơn đang chờ nhập thêm hàng ──────
                 notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
                         so.getSoId(), so.getSoCode(), "Chờ nhập bù hàng — tạm giữ đơn");
             }
             case "CLOSE_SHORT" -> {
-                // [GAP 3 FIX] Cắt giảm orderedQty về available → SO → APPROVED → re-Allocate
                 adjustOrderedQtyToAvailable(so);
                 so.setStatus("APPROVED");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → APPROVED (CLOSE_SHORT, re-Allocate ready)", so.getSoCode());
-                // ── Realtime: notify KEEPER cần phân bổ lại sau khi cắt số lượng ──
                 notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
                         so.getSoId(), so.getSoCode(), "Đã cắt số lượng thiếu — cần phân bổ lại");
             }
@@ -776,7 +826,6 @@ public class OutboundQcService {
         salesOrderRepository.save(so);
         log.info("SO {} → DISPATCHED", so.getSoCode());
 
-        // ── Realtime: notify MANAGER + QC + KEEPER đơn đã xuất kho thành công ─
         String customerName = customerRepository.findById(so.getCustomerId())
                 .map(c -> c.getCustomerName()).orElse("—");
         notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_dispatched",
