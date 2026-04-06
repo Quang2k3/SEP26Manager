@@ -295,18 +295,19 @@ public interface InventorySnapshotJpaRepository
             WHERE warehouse_id = :warehouseId
               AND sku_id = :skuId
               AND location_id = :locationId
-              AND (:lotId IS NOT NULL AND lot_id = :lotId
-                   OR :lotId IS NULL AND lot_id_safe = (
-                       SELECT s2.lot_id_safe
-                       FROM inventory_snapshot s2
-                       LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
-                       WHERE s2.warehouse_id = :warehouseId
-                         AND s2.sku_id       = :skuId
-                         AND s2.location_id  = :locationId
-                         AND s2.quantity     > 0
-                       ORDER BY il.expiry_date ASC NULLS LAST
-                       LIMIT 1
-                   ))
+              AND (CASE WHEN CAST(:lotId AS bigint) IS NOT NULL THEN lot_id = CAST(:lotId AS bigint)
+                        ELSE lot_id_safe = (
+                            SELECT s2.lot_id_safe
+                            FROM inventory_snapshot s2
+                            LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
+                            WHERE s2.warehouse_id = :warehouseId
+                              AND s2.sku_id       = :skuId
+                              AND s2.location_id  = :locationId
+                              AND s2.quantity     > 0
+                            ORDER BY il.expiry_date ASC NULLS LAST
+                            LIMIT 1
+                        )
+                   END)
             """, nativeQuery = true)
         void decrementQuantity(
                 @Param("warehouseId") Long warehouseId,
@@ -327,17 +328,18 @@ public interface InventorySnapshotJpaRepository
                 last_updated  = NOW()
             WHERE location_id = :locationId
               AND sku_id       = :skuId
-              AND (:lotId IS NOT NULL AND lot_id = :lotId
-                   OR :lotId IS NULL AND lot_id_safe = (
-                       SELECT s2.lot_id_safe
-                       FROM inventory_snapshot s2
-                       LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
-                       WHERE s2.location_id = :locationId
-                         AND s2.sku_id      = :skuId
-                         AND s2.quantity    > 0
-                       ORDER BY il.expiry_date ASC NULLS LAST
-                       LIMIT 1
-                   ))
+              AND (CASE WHEN CAST(:lotId AS bigint) IS NOT NULL THEN lot_id = CAST(:lotId AS bigint)
+                        ELSE lot_id_safe = (
+                            SELECT s2.lot_id_safe
+                            FROM inventory_snapshot s2
+                            LEFT JOIN inventory_lots il ON il.lot_id = s2.lot_id
+                            WHERE s2.location_id = :locationId
+                              AND s2.sku_id      = :skuId
+                              AND s2.quantity    > 0
+                            ORDER BY il.expiry_date ASC NULLS LAST
+                            LIMIT 1
+                        )
+                   END)
             """, nativeQuery = true)
         void decrementReservedByLocationSkuLot(
                 @Param("locationId") Long locationId,
