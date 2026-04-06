@@ -436,6 +436,26 @@ public class PickListService {
         return String.format("PKL-%s-%04d", date, count);
     }
 
+    /**
+     * [FIX REALTIME] Keeper scan 1 item → cập nhật pickedQty lên DB ngay lập tức.
+     * Web poll fetchPickList mỗi 2s sẽ thấy số lượng đã quét realtime.
+     * PATCH /v1/outbound/pick-list/{taskId}/items/{itemId}/scan
+     */
+    @Transactional
+    public ApiResponse<Void> scanPickItem(Long taskId, Long itemId, java.math.BigDecimal pickedQty) {
+        PickingTaskItemEntity item = pickingTaskItemRepository.findById(itemId)
+                .orElseThrow(() -> new ResourceNotFoundException("PickingTaskItem not found: " + itemId));
+        if (!item.getPickingTaskId().equals(taskId)) {
+            throw new BusinessException("Item " + itemId + " không thuộc task " + taskId);
+        }
+        // Cập nhật pickedQty — không vượt quá requiredQty
+        java.math.BigDecimal capped = pickedQty.min(item.getRequiredQty());
+        item.setPickedQty(capped);
+        pickingTaskItemRepository.save(item);
+        log.info("scanPickItem: taskId={} itemId={} pickedQty={}", taskId, itemId, capped);
+        return ApiResponse.success("Picked qty updated", null);
+    }
+
     @Transactional
     public ApiResponse<Void> cancelPickTask(Long taskId, Long userId, String ip, String ua) {
         log.info("cancelPickTask: taskId={}, userId={}", taskId, userId);
