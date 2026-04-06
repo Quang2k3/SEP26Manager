@@ -448,14 +448,18 @@ public class OutboundService {
         auditLogService.logAction(managerId, "OUTBOUND_APPROVED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " approved", ip, ua);
 
-        // ── Realtime: notify KEEPER (người tạo đơn) lệnh xuất vừa được duyệt ──
+        // ── Realtime: notify KEEPER (người tạo đơn) + broadcast tới role KEEPER ──
         CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
         final String approveSubtitle = custForNotif != null ? custForNotif.getCustomerName() : "—";
         final Long approvedSoId = soId;
         final String approvedSoCode = so.getSoCode();
+        // 1. Notify user cụ thể (creator)
         userRepository.findById(so.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "outbound_approved",
                         approvedSoId, approvedSoCode, approveSubtitle));
+        // 2. Broadcast tới toàn bộ KEEPER để list tự refresh
+        notificationService.notifyRole("KEEPER", "outbound_approved",
+                approvedSoId, approvedSoCode, approveSubtitle);
 
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_APPROVED_SUCCESS,
@@ -491,6 +495,18 @@ public class OutboundService {
 
         auditLogService.logAction(managerId, "OUTBOUND_REJECTED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " rejected. Reason: " + rejectionReason, ip, ua);
+
+        // ── Realtime: notify KEEPER (người tạo) + broadcast tới role KEEPER ──────────────────
+        CustomerEntity custForReject = customerRepository.findById(so.getCustomerId()).orElse(null);
+        final String rejectSubtitle = (custForReject != null ? custForReject.getCustomerName() : "—")
+                + " — " + rejectionReason;
+        final Long rejectedSoId = soId;
+        final String rejectedSoCode = so.getSoCode();
+        userRepository.findById(so.getCreatedBy()).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "outbound_rejected",
+                        rejectedSoId, rejectedSoCode, rejectSubtitle));
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "outbound_rejected",
+                rejectedSoId, rejectedSoCode, rejectSubtitle);
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);

@@ -342,7 +342,7 @@ public class ReceivingOrderService {
         java.util.Map<Long, BigDecimal> aggExpectedQty = new java.util.LinkedHashMap<>();
         java.util.Map<Long, BigDecimal> aggReceivedQty = new java.util.LinkedHashMap<>();
         java.util.Map<Long, ReceivingItemEntity> aggBestItem = new java.util.LinkedHashMap<>();
-        
+
         java.util.Map<Long, String> bestLotBySku = new java.util.HashMap<>();
         java.util.Map<Long, java.time.LocalDate> bestMfgBySku = new java.util.HashMap<>();
         java.util.Map<Long, java.time.LocalDate> bestExpBySku = new java.util.HashMap<>();
@@ -353,7 +353,7 @@ public class ReceivingOrderService {
             BigDecimal rcv = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
             aggExpectedQty.merge(skuId, exp, BigDecimal::add);
             aggReceivedQty.merge(skuId, rcv, BigDecimal::add);
-            
+
             // Collect the best available metadata instead of replacing the entire row
             if (item.getLotNumber() != null) bestLotBySku.put(skuId, item.getLotNumber());
             if (item.getManufactureDate() != null) bestMfgBySku.put(skuId, item.getManufactureDate());
@@ -367,50 +367,50 @@ public class ReceivingOrderService {
         // Map aggregated items
         List<ReceivingItemResponse> itemResponses = new ArrayList<>();
         for (java.util.Map.Entry<Long, ReceivingItemEntity> entry : aggBestItem.entrySet()) {
-             Long skuId = entry.getKey();
-             ReceivingItemEntity bestItem = entry.getValue();
-             BigDecimal totalExpected = aggExpectedQty.getOrDefault(skuId, BigDecimal.ZERO);
-             BigDecimal totalQty = aggReceivedQty.getOrDefault(skuId, BigDecimal.ZERO);
-             
-             // [FIX] Tính damagedQty từ incident data thay vì dùng condition trên DB row
-             BigDecimal failQty = allIncidentItems.stream()
-                  .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
-                  .map(IncidentItemEntity::getDamagedQty)
-                  .filter(java.util.Objects::nonNull)
-                  .reduce(BigDecimal.ZERO, BigDecimal::add);
-             
-             // Lấy attachmentUrl từ incident DAMAGE items
-             String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0
-                  ? allIncidentItems.stream()
-                       .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
-                       .map(IncidentItemEntity::getAttachmentUrl)
-                       .filter(u -> u != null && !u.isBlank())
-                       .findFirst().orElse(null)
-                  : null;
-             
-             ReceivingItemResponse resp = toItemResponse(bestItem, skuMap);
-             resp.setExpectedQty(totalExpected);
-             resp.setReceivedQty(totalQty);
-             resp.setDamagedQty(failQty);
-             resp.setAttachmentUrl(attachmentUrl);
-             // Apply merged meta
-             resp.setLotNumber(bestLotBySku.get(skuId));
-             resp.setManufactureDate(bestMfgBySku.get(skuId));
-             resp.setExpiryDate(bestExpBySku.get(skuId));
-             
-             // [FIX] Set condition chính xác: chỉ FAIL nếu toàn bộ là hỏng
-             if (failQty.compareTo(BigDecimal.ZERO) > 0) {
-                  BigDecimal passQty = totalQty.subtract(failQty);
-                  if (passQty.compareTo(BigDecimal.ZERO) <= 0) {
-                       resp.setCondition("FAIL");   // Toàn bộ hỏng
-                  } else {
-                       resp.setCondition("PASS");   // Có cả pass lẫn fail → để PASS, frontend dùng damagedQty để tách
-                  }
-             } else {
-                  resp.setCondition("PASS");
-             }
-             
-             itemResponses.add(resp);
+            Long skuId = entry.getKey();
+            ReceivingItemEntity bestItem = entry.getValue();
+            BigDecimal totalExpected = aggExpectedQty.getOrDefault(skuId, BigDecimal.ZERO);
+            BigDecimal totalQty = aggReceivedQty.getOrDefault(skuId, BigDecimal.ZERO);
+
+            // [FIX] Tính damagedQty từ incident data thay vì dùng condition trên DB row
+            BigDecimal failQty = allIncidentItems.stream()
+                    .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
+                    .map(IncidentItemEntity::getDamagedQty)
+                    .filter(java.util.Objects::nonNull)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Lấy attachmentUrl từ incident DAMAGE items
+            String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0
+                    ? allIncidentItems.stream()
+                    .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
+                    .map(IncidentItemEntity::getAttachmentUrl)
+                    .filter(u -> u != null && !u.isBlank())
+                    .findFirst().orElse(null)
+                    : null;
+
+            ReceivingItemResponse resp = toItemResponse(bestItem, skuMap);
+            resp.setExpectedQty(totalExpected);
+            resp.setReceivedQty(totalQty);
+            resp.setDamagedQty(failQty);
+            resp.setAttachmentUrl(attachmentUrl);
+            // Apply merged meta
+            resp.setLotNumber(bestLotBySku.get(skuId));
+            resp.setManufactureDate(bestMfgBySku.get(skuId));
+            resp.setExpiryDate(bestExpBySku.get(skuId));
+
+            // [FIX] Set condition chính xác: chỉ FAIL nếu toàn bộ là hỏng
+            if (failQty.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal passQty = totalQty.subtract(failQty);
+                if (passQty.compareTo(BigDecimal.ZERO) <= 0) {
+                    resp.setCondition("FAIL");   // Toàn bộ hỏng
+                } else {
+                    resp.setCondition("PASS");   // Có cả pass lẫn fail → để PASS, frontend dùng damagedQty để tách
+                }
+            } else {
+                resp.setCondition("PASS");
+            }
+
+            itemResponses.add(resp);
         }
 
         int totalLines = itemResponses.size();
@@ -708,15 +708,19 @@ public class ReceivingOrderService {
 
         log.info("Receiving Order {} QC approved by userId={}", order.getReceivingCode(), qcUserId);
 
-        // ── Realtime: notify KEEPER (người tạo đơn) rằng QC xong, cần tạo GRN ──────────────
+        // ── Realtime: notify KEEPER (người tạo đơn) + broadcast tới role KEEPER ──────────────
         String supplierName = order.getSupplierId() != null
                 ? supplierRepo.findById(order.getSupplierId())
                 .map(s -> s.getSupplierName()).orElse("—")
                 : "—";
         final String grnReadySubtitle1 = supplierName + " — QC đã kiểm đếm xong";
+        // 1. Notify user cụ thể (creator)
         userRepo.findById(order.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "grn_create_ready",
                         order.getReceivingId(), order.getReceivingCode(), grnReadySubtitle1));
+        // 2. Broadcast tới toàn bộ KEEPER để gate-check list tự refresh
+        notificationService.notifyRole("KEEPER", "grn_create_ready",
+                order.getReceivingId(), order.getReceivingCode(), grnReadySubtitle1);
 
         return ApiResponse.success("QC approved successfully", getOrder(id).getData());
     }
@@ -800,41 +804,41 @@ public class ReceivingOrderService {
         List<String> mismatchDetails = new ArrayList<>();
         java.util.Set<Long> mismatchedSkuIds = new java.util.HashSet<>();
         List<String> mismatchedSkuCodes = new ArrayList<>();
-        
+
         if (!isCoInspection) {
             for (java.util.Map.Entry<Long, BigDecimal> entry : keeperQtyBySkuId.entrySet()) {
                 Long skuId = entry.getKey();
-            BigDecimal keeperQty = entry.getValue();
-            Map<String, BigDecimal> skuScanData = scannedData.getOrDefault(skuId, Map.of());
-            BigDecimal qcTotal = skuScanData.values().stream()
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal keeperQty = entry.getValue();
+                Map<String, BigDecimal> skuScanData = scannedData.getOrDefault(skuId, Map.of());
+                BigDecimal qcTotal = skuScanData.values().stream()
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            if (qcTotal.compareTo(keeperQty) != 0) {
-                String skuCode = skuRepo.findById(skuId)
-                        .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
-                mismatchDetails.add(skuCode + " (Keeper=" + keeperQty
-                        + ", QC=" + qcTotal + ")");
-                mismatchedSkuIds.add(skuId);
-                mismatchedSkuCodes.add(skuCode);
+                if (qcTotal.compareTo(keeperQty) != 0) {
+                    String skuCode = skuRepo.findById(skuId)
+                            .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
+                    mismatchDetails.add(skuCode + " (Keeper=" + keeperQty
+                            + ", QC=" + qcTotal + ")");
+                    mismatchedSkuIds.add(skuId);
+                    mismatchedSkuCodes.add(skuCode);
+                }
             }
-        }
 
-        // ── STEP 0b: QC quét SKU mà Keeper chưa quét (thùng lạc) ────────────
-        java.util.Set<Long> dbSkuIds = allDbSkuIds;
-        for (Map.Entry<Long, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
-            Long skuId = entry.getKey();
-            if (dbSkuIds.contains(skuId)) continue; // Đã check trong Step 0a
+            // ── STEP 0b: QC quét SKU mà Keeper chưa quét (thùng lạc) ────────────
+            java.util.Set<Long> dbSkuIds = allDbSkuIds;
+            for (Map.Entry<Long, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
+                Long skuId = entry.getKey();
+                if (dbSkuIds.contains(skuId)) continue; // Đã check trong Step 0a
 
-            BigDecimal qcTotal = entry.getValue().values().stream()
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            if (qcTotal.compareTo(BigDecimal.ZERO) > 0) {
-                String skuCode = skuRepo.findById(skuId)
-                        .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
-                mismatchDetails.add(skuCode + " (Keeper=0, QC=" + qcTotal + ") [ngoài phiếu]");
-                mismatchedSkuIds.add(skuId);
-                mismatchedSkuCodes.add(skuCode);
+                BigDecimal qcTotal = entry.getValue().values().stream()
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                if (qcTotal.compareTo(BigDecimal.ZERO) > 0) {
+                    String skuCode = skuRepo.findById(skuId)
+                            .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
+                    mismatchDetails.add(skuCode + " (Keeper=0, QC=" + qcTotal + ") [ngoài phiếu]");
+                    mismatchedSkuIds.add(skuId);
+                    mismatchedSkuCodes.add(skuCode);
+                }
             }
-        }
         } // End of !isCoInspection condition
 
         if (!isCoInspection && !mismatchDetails.isEmpty()) {
@@ -1219,7 +1223,7 @@ public class ReceivingOrderService {
             order.setUpdatedAt(LocalDateTime.now());
             receivingOrderRepo.save(order);
 
-            // ── Realtime: notify KEEPER (người tạo đơn) QC xong 100% pass → cần tạo GRN ──
+            // ── Realtime: notify KEEPER (người tạo đơn) + broadcast KEEPER QC xong 100% pass → cần tạo GRN ──
             String supNameQc = order.getSupplierId() != null
                     ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                     : "—";
@@ -1227,6 +1231,8 @@ public class ReceivingOrderService {
             userRepo.findById(order.getCreatedBy()).ifPresent(u ->
                     notificationService.notifyUser(u.getEmail(), "grn_create_ready",
                             order.getReceivingId(), order.getReceivingCode(), grnReadySubtitle2));
+            notificationService.notifyRole("KEEPER", "grn_create_ready",
+                    order.getReceivingId(), order.getReceivingCode(), grnReadySubtitle2);
 
             // Audit log: QC approved (100% pass)
             auditLogService.logAction(
@@ -1298,7 +1304,7 @@ public class ReceivingOrderService {
             validateOwnership(order, userId, "xác nhận đồng kiểm");
             order.setStatus("CO_INSPECT_WAIT_QC");
             order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + "[Keeper " + userId + "] Đã đồng ý Đồng kiểm (" + LocalDateTime.now() + ")");
-            
+
             // Notify QC
             try {
                 notificationService.notifyRole("QC", "co_inspect_wait_qc",
@@ -1311,7 +1317,7 @@ public class ReceivingOrderService {
             order.setStatus("CO_INSPECT_READY");
             order.setNote((order.getNote() != null ? order.getNote() + "\n" : "") + "[QC " + userId + "] Đã đồng ý Đồng kiểm (" + LocalDateTime.now() + ")");
             order.setAssignedQcId(userId); // Lock to this QC explicitly
-            
+
             // Notify Keeper
             try {
                 userRepo.findById(order.getCreatedBy()).ifPresent(u ->
@@ -1493,7 +1499,7 @@ public class ReceivingOrderService {
         order.setStatus("GRN_CREATED");
         receivingOrderRepo.save(order);
 
-        // ── Realtime: notify KEEPER (người tạo đơn) GRN đã tạo xong, cần gửi Manager ─
+        // ── Realtime: notify KEEPER (người tạo đơn) + broadcast KEEPER GRN đã tạo xong, cần gửi Manager ─
         String supGrn = order.getSupplierId() != null
                 ? supplierRepo.findById(order.getSupplierId()).map(s -> s.getSupplierName()).orElse("—")
                 : "—";
@@ -1501,6 +1507,8 @@ public class ReceivingOrderService {
         userRepo.findById(order.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "grn_create_ready",
                         order.getReceivingId(), order.getReceivingCode(), generateGrnSubtitle));
+        notificationService.notifyRole("KEEPER", "grn_create_ready",
+                order.getReceivingId(), order.getReceivingCode(), generateGrnSubtitle);
 
         // DTO mapping for response
         List<org.example.sep26management.application.dto.response.GrnItemResponse> itemResponses = validGrnItems
