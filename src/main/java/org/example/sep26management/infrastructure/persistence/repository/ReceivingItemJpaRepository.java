@@ -36,8 +36,8 @@ public interface ReceivingItemJpaRepository extends JpaRepository<ReceivingItemE
     /** Tất cả items của 1 receiving order. */
     List<ReceivingItemEntity> findByReceivingOrderReceivingId(Long receivingId);
 
-    /** Tìm 1 item theo receivingId + skuId — dùng để đọc/ghi thông thường. */
-    Optional<ReceivingItemEntity> findByReceivingOrderReceivingIdAndSkuId(
+    /** Tìm items theo receivingId + skuId (có thể trả về nhiều dòng vì khác LOT). */
+    List<ReceivingItemEntity> findByReceivingOrderReceivingIdAndSkuId(
             Long receivingId, Long skuId);
 
     // ─── Pessimistic lock ──────────────────────────────────────────────────────
@@ -80,18 +80,14 @@ public interface ReceivingItemJpaRepository extends JpaRepository<ReceivingItemE
             SET i.receivedQty = i.receivedQty + :delta
             WHERE i.receivingOrder.receivingId = :receivingId
               AND i.skuId = :skuId
+              AND ((:lotNumber IS NULL AND i.lotNumber IS NULL) OR i.lotNumber = :lotNumber)
             """)
     int incrementReceivedQty(
             @Param("receivingId") Long       receivingId,
             @Param("skuId")       Long       skuId,
-            @Param("delta")       BigDecimal delta);
+            @Param("delta")       BigDecimal delta,
+            @Param("lotNumber")   String     lotNumber);
 
-    /**
-     * Giảm receivedQty bằng atomic UPDATE — dùng khi Keeper xóa/giảm item đã scan.
-     * Không cho xuống dưới 0: nếu receivedQty - delta < 0 thì set = 0.
-     *
-     * Trả về số row bị ảnh hưởng (0 = không tìm thấy item).
-     */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             UPDATE ReceivingItemEntity i
@@ -101,9 +97,11 @@ public interface ReceivingItemJpaRepository extends JpaRepository<ReceivingItemE
             END
             WHERE i.receivingOrder.receivingId = :receivingId
               AND i.skuId = :skuId
+              AND ((:lotNumber IS NULL AND i.lotNumber IS NULL) OR i.lotNumber = :lotNumber)
             """)
     int decrementReceivedQty(
             @Param("receivingId") Long       receivingId,
             @Param("skuId")       Long       skuId,
-            @Param("delta")       BigDecimal delta);
+            @Param("delta")       BigDecimal delta,
+            @Param("lotNumber")   String     lotNumber);
 }

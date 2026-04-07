@@ -107,7 +107,8 @@ public class ScanEventService {
 
         // 7. Cập nhật session Redis — dùng Lua atomic để tránh lost-update khi 2 scan đồng thời
         BigDecimal inc = request.getQty() != null ? request.getQty() : BigDecimal.ONE;
-        String luaResult = sessionRedis.atomicUpdateLine(sessionId, sku.getSkuId(), condition, inc, sku.getSkuCode(), sku.getSkuName(), sku.getBarcode());
+        String luaResult = sessionRedis.atomicUpdateLine(
+                sessionId, sku.getSkuId(), condition, inc, sku.getSkuCode(), sku.getSkuName(), sku.getBarcode(), request.getLotNumber());
         BigDecimal newQty = luaResult != null ? new BigDecimal(luaResult) : inc;
 
         // 7b. Reload session từ Redis để push SSE (Lua đã save rồi) và gán ảnh nếu có
@@ -147,7 +148,7 @@ public class ScanEventService {
 
     @Transactional
     public ApiResponse<Map<String, Object>> removeScanItem(
-            String sessionId, Long skuId, String condition, BigDecimal qtyToRemove, Long receivingId) {
+            String sessionId, Long skuId, String condition, BigDecimal qtyToRemove, Long receivingId, String lotNumber) {
 
         ScanSessionData session = sessionRedis.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("Scan session hết hạn: " + sessionId));
@@ -156,11 +157,12 @@ public class ScanEventService {
         List<ScanLineItem> lines = session.getLines();
 
         Optional<ScanLineItem> target = lines.stream()
-                .filter(l -> l.getSkuId().equals(skuId) && norm.equals(l.getCondition()))
+                .filter(l -> l.getSkuId().equals(skuId) && norm.equals(l.getCondition()) &&
+                             (lotNumber == null || lotNumber.equals(l.getLotNumber())))
                 .findFirst();
 
         if (target.isEmpty()) {
-            return ApiResponse.error("Không tìm thấy item: skuId=" + skuId + " condition=" + norm);
+            return ApiResponse.error("Không tìm thấy item: skuId=" + skuId + " lot=" + lotNumber + " condition=" + norm);
         }
         ScanLineItem line = target.get();
 
@@ -179,7 +181,7 @@ public class ScanEventService {
             try {
                 BigDecimal dec = (qtyToRemove != null && qtyToRemove.compareTo(BigDecimal.ZERO) > 0)
                         ? qtyToRemove : line.getQty();
-                int affected = receivingItemRepo.decrementReceivedQty(receivingId, skuId, dec);
+                int affected = receivingItemRepo.decrementReceivedQty(receivingId, skuId, dec, lotNumber);
                 if (affected > 0) {
                     log.info("[ATOMIC] -{} receivedQty receivingId={} skuId={}", dec, receivingId, skuId);
                 }
@@ -332,12 +334,15 @@ public class ScanEventService {
                     || "CANCELLED".equals(status) || "REJECTED".equals(status)) return;
 
             BigDecimal inc = request.getQty() != null ? request.getQty() : BigDecimal.ONE;
-            int affected = receivingItemRepo.incrementReceivedQty(receivingId, sku.getSkuId(), inc);
+            int affected = receivingItemRepo.incrementReceivedQty(receivingId, sku.getSkuId(), inc, request.getLotNumber());
 
             if (affected > 0) {
                 log.info("[ATOMIC] +{} receivedQty receivingId={} SKU={}", inc, receivingId, sku.getSkuCode());
                 if ("FAIL".equals(condition)) {
                     receivingItemRepo.findByReceivingOrderReceivingIdAndSkuId(receivingId, sku.getSkuId())
+                            .stream().filter(item -> 
+                                (request.getLotNumber() == null ? item.getLotNumber() == null : request.getLotNumber().equals(item.getLotNumber()))
+                            ).findFirst()
                             .ifPresent(item -> {
                                 item.setCondition("FAIL");
                                 item.setQcRequired(true);

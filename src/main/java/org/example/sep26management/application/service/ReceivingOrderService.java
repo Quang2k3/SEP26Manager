@@ -512,34 +512,47 @@ public class ReceivingOrderService {
                     log.info("Syncing {} lines from session {} into order {} before finalize",
                             sessionLines.size(), activeSessionId.get(), id);
 
-                    // Aggregate total qty per skuId
-                    Map<Long, BigDecimal> skuTotalQty = new java.util.HashMap<>();
+                    // Aggregate total qty per (skuId, lotNumber)
+                    Map<String, BigDecimal> skuLotTotalQty = new java.util.HashMap<>();
+                    Map<String, Long> keyToSkuId = new java.util.HashMap<>();
+                    Map<String, String> keyToLot = new java.util.HashMap<>();
+
                     for (ScanLineItem sLine : sessionLines) {
                         if (sLine.getSkuId() != null && sLine.getQty() != null) {
-                            skuTotalQty.merge(sLine.getSkuId(), sLine.getQty(),
-                                    BigDecimal::add);
+                            String key = sLine.getSkuId() + "_" + (sLine.getLotNumber() == null ? "" : sLine.getLotNumber());
+                            skuLotTotalQty.merge(key, sLine.getQty(), BigDecimal::add);
+                            keyToSkuId.putIfAbsent(key, sLine.getSkuId());
+                            keyToLot.putIfAbsent(key, sLine.getLotNumber());
                         }
                     }
 
-                    for (Map.Entry<Long, BigDecimal> entry : skuTotalQty.entrySet()) {
-                        Long skuId = entry.getKey();
+                    for (Map.Entry<String, BigDecimal> entry : skuLotTotalQty.entrySet()) {
+                        String key = entry.getKey();
+                        Long skuId = keyToSkuId.get(key);
+                        String lot = keyToLot.get(key);
                         BigDecimal qty = entry.getValue();
+
                         java.util.Optional<ReceivingItemEntity> opt = receivingItemRepo
-                                .findByReceivingOrderReceivingIdAndSkuId(id, skuId);
+                                .findByReceivingOrderReceivingIdAndSkuId(id, skuId)
+                                .stream().filter(item ->
+                                        (lot == null ? item.getLotNumber() == null : lot.equals(item.getLotNumber()))
+                                ).findFirst();
+
                         if (opt.isPresent()) {
                             ReceivingItemEntity ri = opt.get();
                             ri.setReceivedQty(qty);
                             receivingItemRepo.save(ri);
-                            log.info("Session sync: SKU {} → receivedQty={}", skuId, qty);
+                            log.info("Session sync: SKU {} Lot {} → receivedQty={}", skuId, lot, qty);
                         } else {
                             ReceivingItemEntity newRi = ReceivingItemEntity.builder()
                                     .receivingOrder(order)
                                     .skuId(skuId)
+                                    .lotNumber(lot)
                                     .expectedQty(BigDecimal.ZERO)
                                     .receivedQty(qty)
                                     .build();
                             receivingItemRepo.save(newRi);
-                            log.info("Session sync (extra item): SKU {} → receivedQty={}", skuId, qty);
+                            log.info("Session sync (extra item): SKU {} Lot {} → receivedQty={}", skuId, lot, qty);
                         }
                     }
                 }
@@ -771,9 +784,10 @@ public class ReceivingOrderService {
             order.setQcSessionId(null);
         }
 
-        // Map để gộp số lượng scan theo (skuId, condition)
-        Map<Long, Map<String, BigDecimal>> scannedData = lines.stream()
-                .collect(Collectors.groupingBy(ScanLineItem::getSkuId,
+        // Map để gộp số lượng scan theo (key, condition) với key = skuId_lotNumber
+        Map<String, Map<String, BigDecimal>> scannedData = lines.stream()
+                .collect(Collectors.groupingBy(
+                        item -> item.getSkuId() + "_" + (item.getLotNumber() == null ? "" : item.getLotNumber()),
                         Collectors.groupingBy(
                                 item -> item.getCondition() != null
                                         ? item.getCondition()
@@ -791,64 +805,75 @@ public class ReceivingOrderService {
         // Cùng 1 SKU có thể có nhiều rows (Keeper tạo extra, placeholder...)
         // Nếu không gộp: (1) so sánh sai, (2) set receivedQty trùng, (3) tạo thêm row.
         // ══════════════════════════════════════════════════════════════════════
-        // Tổng receivedQty theo skuId (= Keeper qty)
-        java.util.Map<Long, BigDecimal> keeperQtyBySkuId = new java.util.LinkedHashMap<>();
+        // Tổng receivedQty theo key (= Keeper qty)
+        java.util.Map<String, BigDecimal> keeperQtyByKey = new java.util.LinkedHashMap<>();
         for (ReceivingItemEntity item : dbItems) {
             BigDecimal rcv = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
-            keeperQtyBySkuId.merge(item.getSkuId(), rcv, BigDecimal::add);
+            String key = item.getSkuId() + "_" + (item.getLotNumber() == null ? "" : item.getLotNumber());
+            keeperQtyByKey.merge(key, rcv, BigDecimal::add);
         }
-        // Tập hợp TẤT CẢ skuId đã tồn tại trong DB (kể cả expectedQty=0)
-        java.util.Set<Long> allDbSkuIds = keeperQtyBySkuId.keySet();
+        // Tập hợp TẤT CẢ key đã tồn tại trong DB (kể cả expectedQty=0)
+        java.util.Set<String> allDbKeys = keeperQtyByKey.keySet();
 
-        // ── STEP 0: So sánh QC total vs Keeper receivedQty (GỘP theo SKU) ────
+        // ── STEP 0: So sánh QC total vs Keeper receivedQty (GỘP theo Key) ────
         List<String> mismatchDetails = new ArrayList<>();
-        java.util.Set<Long> mismatchedSkuIds = new java.util.HashSet<>();
+        java.util.Set<String> mismatchedKeys = new java.util.HashSet<>();
         List<String> mismatchedSkuCodes = new ArrayList<>();
 
         if (!isCoInspection) {
-            for (java.util.Map.Entry<Long, BigDecimal> entry : keeperQtyBySkuId.entrySet()) {
-                Long skuId = entry.getKey();
+            for (java.util.Map.Entry<String, BigDecimal> entry : keeperQtyByKey.entrySet()) {
+                String key = entry.getKey();
+                Long skuId = Long.parseLong(key.split("_")[0]);
+                String lot = key.substring(key.indexOf("_") + 1);
+                
                 BigDecimal keeperQty = entry.getValue();
-                Map<String, BigDecimal> skuScanData = scannedData.getOrDefault(skuId, Map.of());
-                BigDecimal qcTotal = skuScanData.values().stream()
+                Map<String, BigDecimal> scanDataMap = scannedData.getOrDefault(key, Map.of());
+                BigDecimal qcTotal = scanDataMap.values().stream()
                         .reduce(BigDecimal.ZERO, BigDecimal::add);
 
                 if (qcTotal.compareTo(keeperQty) != 0) {
                     String skuCode = skuRepo.findById(skuId)
                             .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
-                    mismatchDetails.add(skuCode + " (Keeper=" + keeperQty
-                            + ", QC=" + qcTotal + ")");
-                    mismatchedSkuIds.add(skuId);
+                    String suffix = lot.isEmpty() ? "" : " (Lot: " + lot + ")";
+                    mismatchDetails.add(skuCode + suffix + " (Keeper=" + keeperQty + ", QC=" + qcTotal + ")");
+                    mismatchedKeys.add(key);
                     mismatchedSkuCodes.add(skuCode);
                 } else {
                     // [GUARD] Bắt lỗi nếu KEEPER & QC đều quét 0 nhưng đây là hàng ngoài phiếu đã cắm cờ
                     ReceivingItemEntity item = dbItems.stream()
-                            .filter(i -> i.getSkuId().equals(skuId))
+                            .filter(i -> {
+                                String iKey = i.getSkuId() + "_" + (i.getLotNumber() == null ? "" : i.getLotNumber());
+                                return iKey.equals(key);
+                            })
                             .findFirst().orElse(null);
                     if (item != null && Boolean.TRUE.equals(item.getQcRequired())
                             && (item.getExpectedQty() == null || item.getExpectedQty().compareTo(BigDecimal.ZERO) == 0)
                             && qcTotal.compareTo(BigDecimal.ZERO) == 0) {
                         String skuCode = skuRepo.findById(skuId).map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
-                        mismatchDetails.add(skuCode + " (Kho phát hiện ngoài phiếu nhưng bị bỏ sót: Keeper=0, QC=0)");
-                        mismatchedSkuIds.add(skuId);
+                        String suffix = lot.isEmpty() ? "" : " (Lot: " + lot + ")";
+                        mismatchDetails.add(skuCode + suffix + " (Kho phát hiện ngoài lô nhưng bị bỏ sót: Keeper=0, QC=0)");
+                        mismatchedKeys.add(key);
                         mismatchedSkuCodes.add(skuCode);
                     }
                 }
             }
 
-            // ── STEP 0b: QC quét SKU mà Keeper chưa quét (thùng lạc) ────────────
-            java.util.Set<Long> dbSkuIds = allDbSkuIds;
-            for (Map.Entry<Long, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
-                Long skuId = entry.getKey();
-                if (dbSkuIds.contains(skuId)) continue; // Đã check trong Step 0a
+            // ── STEP 0b: QC quét Key mà Keeper chưa quét (thùng lạc/lô lạ) ────────────
+            java.util.Set<String> dbKeys = allDbKeys;
+            for (Map.Entry<String, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
+                String key = entry.getKey();
+                if (dbKeys.contains(key)) continue; // Đã check trong Step 0a
 
                 BigDecimal qcTotal = entry.getValue().values().stream()
                         .reduce(BigDecimal.ZERO, BigDecimal::add);
                 if (qcTotal.compareTo(BigDecimal.ZERO) > 0) {
+                    Long skuId = Long.parseLong(key.split("_")[0]);
+                    String lot = key.substring(key.indexOf("_") + 1);
                     String skuCode = skuRepo.findById(skuId)
                             .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
-                    mismatchDetails.add(skuCode + " (Keeper=0, QC=" + qcTotal + ") [ngoài phiếu]");
-                    mismatchedSkuIds.add(skuId);
+                    String suffix = lot.isEmpty() ? "" : " (Lot: " + lot + ")";
+                    mismatchDetails.add(skuCode + suffix + " (Keeper=0, QC=" + qcTotal + ") [ngoài phiếu/lạc lô]");
+                    mismatchedKeys.add(key);
                     mismatchedSkuCodes.add(skuCode);
                 }
             }
@@ -870,53 +895,65 @@ public class ReceivingOrderService {
             // [FIX] CHỈ xóa extra items (expectedQty=0) CỦA SKU BỊ MISMATCH
             // Trước đây xóa TẤT CẢ extra items → Keeper rescan thấy lệch dù QC đã khớp
             List<ReceivingItemEntity> extraItems = dbItems.stream()
-                    .filter(i -> (i.getExpectedQty() == null
-                            || i.getExpectedQty().compareTo(BigDecimal.ZERO) == 0)
-                            && mismatchedSkuIds.contains(i.getSkuId()))
+                    .filter(i -> {
+                        String iKey = i.getSkuId() + "_" + (i.getLotNumber() == null ? "" : i.getLotNumber());
+                        return (i.getExpectedQty() == null || i.getExpectedQty().compareTo(BigDecimal.ZERO) == 0)
+                            && mismatchedKeys.contains(iKey);
+                    })
                     .collect(Collectors.toList());
             if (!extraItems.isEmpty()) {
                 receivingItemRepo.deleteAll(extraItems);
             }
             for (ReceivingItemEntity dbItem : dbItems) {
                 if (extraItems.contains(dbItem)) continue;
-
-                if (mismatchedSkuIds.contains(dbItem.getSkuId())) {
+                String iKey = dbItem.getSkuId() + "_" + (dbItem.getLotNumber() == null ? "" : dbItem.getLotNumber());
+                if (mismatchedKeys.contains(iKey)) {
                     dbItem.setReceivedQty(BigDecimal.ZERO);
                     dbItem.setCondition(null);
                     dbItem.setReasonCode(null);
                     receivingItemRepo.save(dbItem);
                 }
-                // SKU khớp: giữ nguyên receivedQty
+                // Key khớp: giữ nguyên receivedQty
             }
 
-            // Tạo placeholder ReceivingItemEntity cho extra SKU (QC quét nhưng Keeper miss)
-            for (Long mismatchSkuId : mismatchedSkuIds) {
+            // Tạo placeholder ReceivingItemEntity cho extra Key (QC quét nhưng Keeper miss)
+            for (String mismatchKey : mismatchedKeys) {
+                Long mismatchSkuId = Long.parseLong(mismatchKey.split("_")[0]);
+                String mismatchLot = mismatchKey.substring(mismatchKey.indexOf("_") + 1);
+                
                 boolean existsInDb = dbItems.stream()
-                        .anyMatch(i -> i.getSkuId().equals(mismatchSkuId));
+                        .anyMatch(i -> {
+                            String iKey = i.getSkuId() + "_" + (i.getLotNumber() == null ? "" : i.getLotNumber());
+                            return iKey.equals(mismatchKey);
+                        });
                 if (!existsInDb) {
-                    BigDecimal qcQty = scannedData.containsKey(mismatchSkuId) 
-                            ? scannedData.get(mismatchSkuId).values().stream().reduce(BigDecimal.ZERO, BigDecimal::add)
+                    BigDecimal qcQty = scannedData.containsKey(mismatchKey) 
+                            ? scannedData.get(mismatchKey).values().stream().reduce(BigDecimal.ZERO, BigDecimal::add)
                             : BigDecimal.ZERO;
 
                     ReceivingItemEntity placeholder = ReceivingItemEntity.builder()
                             .receivingOrder(order)
                             .skuId(mismatchSkuId)
+                            .lotNumber(mismatchLot.isEmpty() ? null : mismatchLot)
                             .expectedQty(BigDecimal.ZERO)
                             .receivedQty(BigDecimal.ZERO)
                             .qcRequired(true)
-                            .note("[QC Flagged] QC phát hiện " + qcQty + " thùng ngoài phiếu. Yêu cầu Keeper bắt buộc scan xác nhận!")
+                            .note("[QC Flagged] QC phát hiện " + qcQty + " thùng ngoài phiếu rác lô. Yêu cầu Keeper bắt buộc scan xác nhận!")
                             .build();
                     receivingItemRepo.save(placeholder);
-                    log.info("Created flagged placeholder ReceivingItem for extra SKU {} on order {}",
-                            mismatchSkuId, order.getReceivingCode());
+                    log.info("Created flagged placeholder ReceivingItem for extra Key {} on order {}",
+                            mismatchKey, order.getReceivingCode());
                 } else {
                     // Update existing item nếu cần thiết (phòng hờ)
                     dbItems.stream()
-                        .filter(i -> i.getSkuId().equals(mismatchSkuId))
+                        .filter(i -> {
+                            String iKey = i.getSkuId() + "_" + (i.getLotNumber() == null ? "" : i.getLotNumber());
+                            return iKey.equals(mismatchKey);
+                        })
                         .forEach(item -> {
                             if (item.getExpectedQty() == null || item.getExpectedQty().compareTo(BigDecimal.ZERO) == 0) {
                                 item.setQcRequired(true);
-                                item.setNote("[QC Flagged] Hàng ngoài phiếu. Bắt buộc scan xác nhận!");
+                                item.setNote("[QC Flagged] Hàng ngoài phiếu/lô. Bắt buộc scan xác nhận!");
                                 receivingItemRepo.save(item);
                             }
                         });
@@ -951,165 +988,199 @@ public class ReceivingOrderService {
         boolean hasIssues = false;
         List<IncidentItemEntity> incidentItems = new ArrayList<>();
 
-        // [FIX] Dùng allDbSkuIds (bao gồm cả expectedQty=0) thay vì chỉ expectedQty > 0
-        // Trước đây: orderSkuIds = chỉ items có expectedQty > 0
-        //   → SKU mà Keeper tạo thêm (expectedQty=0) bị coi là "hàng ngoài phiếu" ở STEP 2
-        //   → tạo thêm row mới → DUPLICATE!
-        java.util.Set<Long> orderSkuIds = new java.util.HashSet<>(allDbSkuIds);
+        java.util.Set<String> orderKeys = new java.util.HashSet<>(allDbKeys);
 
-        // Tổng expectedQty theo skuId (gộp nếu có duplicate rows)
+        // Tổng expectedQty theo SkuId (bỏ qua lot vì PO không có lot)
         java.util.Map<Long, BigDecimal> aggExpectedBySkuId = new java.util.LinkedHashMap<>();
         for (ReceivingItemEntity item : dbItems) {
             BigDecimal exp = item.getExpectedQty() != null ? item.getExpectedQty() : BigDecimal.ZERO;
             aggExpectedBySkuId.merge(item.getSkuId(), exp, BigDecimal::add);
         }
 
-        // [FIX] Xử lý theo UNIQUE skuId thay vì từng row
-        // Tránh set receivedQty=totalScanned trên NHIỀU row cùng SKU → dữ liệu bị inflate
-        java.util.Set<Long> processedSkuIds = new java.util.HashSet<>();
-        for (ReceivingItemEntity dbItem : dbItems) {
-            Long skuId = dbItem.getSkuId();
+        // Tổng scannedQty theo SkuId
+        java.util.Map<Long, BigDecimal> aggScannedBySkuId = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
+            Long skuId = Long.parseLong(entry.getKey().split("_")[0]);
+            BigDecimal qcTotal = entry.getValue().values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+            aggScannedBySkuId.merge(skuId, qcTotal, BigDecimal::add);
+        }
 
-            // Chỉ xử lý 1 lần cho mỗi SKU — row đầu tiên là primary
-            if (processedSkuIds.contains(skuId)) {
-                // Row duplicate → set receivedQty=0 để không bị đếm trùng
+        // Xử lý nhận hàng và phân loại Damage cho TỪNG LOT (Key)
+        java.util.Set<String> processedKeys = new java.util.HashSet<>();
+        for (ReceivingItemEntity dbItem : dbItems) {
+            String key = dbItem.getSkuId() + "_" + (dbItem.getLotNumber() == null ? "" : dbItem.getLotNumber());
+
+            // Chỉ xử lý 1 lần cho mỗi Lot
+            if (processedKeys.contains(key)) {
                 dbItem.setReceivedQty(BigDecimal.ZERO);
                 receivingItemRepo.save(dbItem);
                 continue;
             }
-            processedSkuIds.add(skuId);
+            processedKeys.add(key);
 
-            Map<String, BigDecimal> skuScanData = scannedData.getOrDefault(skuId, Map.of());
+            Map<String, BigDecimal> scanDataMap = scannedData.getOrDefault(key, Map.of());
 
-            BigDecimal passQty = skuScanData.getOrDefault("PASS", BigDecimal.ZERO);
-            BigDecimal failQty = skuScanData.getOrDefault("FAIL", BigDecimal.ZERO);
+            BigDecimal passQty = scanDataMap.getOrDefault("PASS", BigDecimal.ZERO);
+            BigDecimal failQty = scanDataMap.getOrDefault("FAIL", BigDecimal.ZERO);
 
-            // Cập nhật receivedQty = Tổng QC quét (CHỈ trên row primary)
             BigDecimal totalScanned = passQty.add(failQty);
             dbItem.setReceivedQty(totalScanned);
 
-            // expectedQty gộp từ tất cả rows của SKU này
-            BigDecimal expectedQty = aggExpectedBySkuId.getOrDefault(skuId, BigDecimal.ZERO);
-            dbItem.setExpectedQty(expectedQty);
-
-            // Retrieve attachmentUrl if there are any failures
+            // Fetch attachmentUrl
+            Long skuId = dbItem.getSkuId();
+            String lotNumber = dbItem.getLotNumber();
             String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0 ? lines.stream()
-                    .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId) && "FAIL".equals(l.getCondition()))
+                    .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId)
+                            && "FAIL".equals(l.getCondition())
+                            && (lotNumber == null ? l.getLotNumber() == null : lotNumber.equals(l.getLotNumber())))
                     .map(ScanLineItem::getAttachmentUrl)
                     .filter(u -> u != null && !u.isBlank())
                     .findFirst()
                     .orElse(null) : null;
 
-            // 1. Kiểm tra hàng hỏng (DAMAGE)
+            // Xử lý hàng hỏng (Tính riêng theo từng Lot)
             if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                 hasIssues = true;
-
-                IncidentItemEntity incidentItem = IncidentItemEntity.builder()
+                dbItem.setCondition("FAIL");
+                IncidentItemEntity dmgItem = IncidentItemEntity.builder()
                         .skuId(skuId)
-                        .damagedQty(failQty)              // Hàng hỏng
-                        .expectedQty(expectedQty)          // SL giấy tờ gốc (gộp)
-                        .actualQty(totalScanned)           // SL QC thực tế
-                        .reasonCode("DAMAGE")
-                        .note("Báo cáo từ QC Scanner")
+                        .damagedQty(failQty)
+                        .expectedQty(BigDecimal.ZERO) // Sẽ gộp sau nếu cần, Damage report theo thực tế
+                        .actualQty(totalScanned)
+                        .reasonCode("DAMAGE") // simplified
+                        .note("Hàng hỏng phát hiện khi QC (Lot: " + (lotNumber == null ? "" : lotNumber) + ")")
                         .attachmentUrl(attachmentUrl)
                         .actionPassQty(BigDecimal.ZERO)
                         .actionReturnQty(BigDecimal.ZERO)
                         .actionScrapQty(BigDecimal.ZERO)
                         .build();
-                incidentItems.add(incidentItem);
-
-                dbItem.setCondition("FAIL");
-                dbItem.setQcRequired(true);
+                incidentItems.add(dmgItem);
             } else {
                 dbItem.setCondition("PASS");
-            }
-
-            // 2. Kiểm tra hàng thừa/thiếu (OVERAGE / SHORTAGE) - Độc lập với DAMAGE
-            if (expectedQty.compareTo(BigDecimal.ZERO) > 0) {
-                if (totalScanned.compareTo(expectedQty) > 0) {
-                    // OVERAGE
-                    hasIssues = true;
-                    BigDecimal overageQty = totalScanned.subtract(expectedQty);
-                    log.info("OVERAGE detected for SKU {} on order {}: expected={}, scanned={}, overage={}",
-                            skuId, order.getReceivingCode(), expectedQty, totalScanned, overageQty);
-
-                    IncidentItemEntity overageItem = IncidentItemEntity.builder()
-                            .skuId(skuId)
-                            .damagedQty(failQty)
-                            .expectedQty(expectedQty)
-                            .actualQty(totalScanned)
-                            .reasonCode("OVERAGE")
-                            .note("Hàng thừa so với phiếu — QC quét " + totalScanned
-                                    + " nhưng phiếu chỉ có " + expectedQty
-                                    + " (thừa " + overageQty + " thùng)")
-                            .attachmentUrl(attachmentUrl)
-                            .actionPassQty(BigDecimal.ZERO)
-                            .actionReturnQty(BigDecimal.ZERO)
-                            .actionScrapQty(BigDecimal.ZERO)
-                            .build();
-                    incidentItems.add(overageItem);
-                    dbItem.setQcRequired(true);
-                } else if (totalScanned.compareTo(expectedQty) < 0) {
-                    // SHORTAGE
-                    hasIssues = true;
-                    BigDecimal shortageQty = expectedQty.subtract(totalScanned);
-                    log.info("SHORTAGE detected for SKU {} on order {}: expected={}, scanned={}, shortage={}",
-                            skuId, order.getReceivingCode(), expectedQty, totalScanned, shortageQty);
-
-                    IncidentItemEntity shortageItem = IncidentItemEntity.builder()
-                            .skuId(skuId)
-                            .damagedQty(failQty)
-                            .expectedQty(expectedQty)
-                            .actualQty(totalScanned)
-                            .reasonCode("SHORTAGE")
-                            .note("Hàng thiếu so với phiếu — dự kiến " + expectedQty
-                                    + " nhưng QC chỉ quét " + totalScanned
-                                    + " (thiếu " + shortageQty + " thùng)")
-                            .attachmentUrl(attachmentUrl)
-                            .actionPassQty(BigDecimal.ZERO)
-                            .actionReturnQty(BigDecimal.ZERO)
-                            .actionScrapQty(BigDecimal.ZERO)
-                            .build();
-                    incidentItems.add(shortageItem);
-                    dbItem.setQcRequired(true);
-                }
             }
             receivingItemRepo.save(dbItem);
         }
 
-        // ── STEP 2: Phát hiện hàng ngoài phiếu (QC quét SKU không có trên đơn) ──
-        for (Map.Entry<Long, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
-            Long skuId = entry.getKey();
-            if (orderSkuIds.contains(skuId)) continue; // SKU đã trên phiếu → skip
+        // Xử lý lệch số lượng thuật toán "Tiêu thụ (Consumption)" thông minh
+        java.util.Map<String, BigDecimal> expectedMap = new java.util.LinkedHashMap<>();
+        for (ReceivingItemEntity item : dbItems) {
+            if (item.getExpectedQty() != null && item.getExpectedQty().compareTo(BigDecimal.ZERO) > 0) {
+                String key = item.getSkuId() + "_" + (item.getLotNumber() == null ? "" : item.getLotNumber());
+                expectedMap.merge(key, item.getExpectedQty(), BigDecimal::add);
+            }
+        }
 
-            Map<String, BigDecimal> skuScanData = entry.getValue();
-            BigDecimal passQty = skuScanData.getOrDefault("PASS", BigDecimal.ZERO);
-            BigDecimal failQty = skuScanData.getOrDefault("FAIL", BigDecimal.ZERO);
+        java.util.Map<String, BigDecimal> scannedMap = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
+            BigDecimal totalForLot = entry.getValue().values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+            scannedMap.put(entry.getKey(), totalForLot);
+        }
+
+        // Bước 1: Tiêu thụ ưu tiên Lô chính xác (Exact Lot Match)
+        for (String scanKey : new ArrayList<>(scannedMap.keySet())) {
+            BigDecimal scanQty = scannedMap.get(scanKey);
+            BigDecimal expQty = expectedMap.getOrDefault(scanKey, BigDecimal.ZERO);
+            if (expQty.compareTo(BigDecimal.ZERO) > 0 && scanQty.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal consume = scanQty.min(expQty);
+                scannedMap.put(scanKey, scanQty.subtract(consume));
+                expectedMap.put(scanKey, expQty.subtract(consume));
+            }
+        }
+
+        // Bước 2: Tiêu thụ linh hoạt vào các phiếu không định Lô (PO without specific Lots)
+        for (String scanKey : new ArrayList<>(scannedMap.keySet())) {
+            BigDecimal scanQty = scannedMap.get(scanKey);
+            if (scanQty.compareTo(BigDecimal.ZERO) > 0) {
+                Long skuId = Long.parseLong(scanKey.split("_")[0]);
+                String nullKey = skuId + "_"; // Phiếu yêu cầu skuId nhưng không chỉ định Lô
+                BigDecimal nullExpQty = expectedMap.getOrDefault(nullKey, BigDecimal.ZERO);
+                if (nullExpQty.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal consume = scanQty.min(nullExpQty);
+                    scannedMap.put(scanKey, scanQty.subtract(consume));
+                    expectedMap.put(nullKey, nullExpQty.subtract(consume));
+                }
+            }
+        }
+
+        // Bước 3: Phần còn dư trong expectedMap là SHORTAGE
+        for (Map.Entry<String, BigDecimal> entry : expectedMap.entrySet()) {
+            BigDecimal shortageQty = entry.getValue();
+            if (shortageQty.compareTo(BigDecimal.ZERO) > 0) {
+                hasIssues = true;
+                Long skuId = Long.parseLong(entry.getKey().split("_")[0]);
+                String lot = entry.getKey().substring(entry.getKey().indexOf("_") + 1);
+                IncidentItemEntity discItem = IncidentItemEntity.builder()
+                        .skuId(skuId)
+                        .damagedQty(BigDecimal.ZERO)
+                        .expectedQty(shortageQty)
+                        .actualQty(BigDecimal.ZERO)
+                        .reasonCode("SHORTAGE")
+                        .note("Lệch thiếu so với phiếu " + (lot.isEmpty() ? "" : "(Lô mục tiêu: " + lot + ")") + ". Lệch: -" + shortageQty.longValue())
+                        .actionPassQty(BigDecimal.ZERO)
+                        .actionReturnQty(BigDecimal.ZERO)
+                        .actionScrapQty(BigDecimal.ZERO)
+                        .build();
+                incidentItems.add(discItem);
+            }
+        }
+
+        // Bước 4: Phần còn dư trong scannedMap là OVERAGE
+        for (Map.Entry<String, BigDecimal> entry : scannedMap.entrySet()) {
+            BigDecimal overageQty = entry.getValue();
+            if (overageQty.compareTo(BigDecimal.ZERO) > 0) {
+                hasIssues = true;
+                Long skuId = Long.parseLong(entry.getKey().split("_")[0]);
+                String lot = entry.getKey().substring(entry.getKey().indexOf("_") + 1);
+                IncidentItemEntity discItem = IncidentItemEntity.builder()
+                        .skuId(skuId)
+                        .damagedQty(BigDecimal.ZERO)
+                        .expectedQty(BigDecimal.ZERO)
+                        .actualQty(overageQty)
+                        .reasonCode("OVERAGE")
+                        .note("Thừa hàng " + (lot.isEmpty() ? "" : "(Thừa Lô: " + lot + ")") + ". Lệch: +" + overageQty.longValue())
+                        .actionPassQty(BigDecimal.ZERO)
+                        .actionReturnQty(BigDecimal.ZERO)
+                        .actionScrapQty(BigDecimal.ZERO)
+                        .build();
+                incidentItems.add(discItem);
+            }
+        }
+
+        // ── STEP 2: Phát hiện hàng ngoài lô (QC quét Key không có trên đơn) ──
+        for (Map.Entry<String, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
+            String key = entry.getKey();
+            if (orderKeys.contains(key)) continue;
+
+            Long skuId = Long.parseLong(key.split("_")[0]);
+            String mismatchLot = key.substring(key.indexOf("_") + 1);
+
+            Map<String, BigDecimal> scanDataMap = entry.getValue();
+            BigDecimal passQty = scanDataMap.getOrDefault("PASS", BigDecimal.ZERO);
+            BigDecimal failQty = scanDataMap.getOrDefault("FAIL", BigDecimal.ZERO);
             BigDecimal totalExtra = passQty.add(failQty);
 
             if (totalExtra.compareTo(BigDecimal.ZERO) <= 0) continue;
 
             hasIssues = true;
 
-            // 1. Tạo Incident Item cho lỗi Hàng ngoài phiếu
             IncidentItemEntity extraItem = IncidentItemEntity.builder()
                     .skuId(skuId)
-                    .damagedQty(failQty)          // Hàng hỏng (nếu có)
-                    .expectedQty(BigDecimal.ZERO)  // Không có trên phiếu
-                    .actualQty(totalExtra)         // Tổng QC quét
+                    .damagedQty(failQty)          
+                    .expectedQty(BigDecimal.ZERO)  
+                    .actualQty(totalExtra)         
                     .reasonCode("UNEXPECTED_ITEM")
-                    .note("Hàng ngoài phiếu — QC quét được " + totalExtra + " (pass=" + passQty + ", fail=" + failQty + ")")
+                    .note("Hàng lạ lô/ngoài phiếu (Lot: " + mismatchLot + ") — QC quét được " + totalExtra)
                     .actionPassQty(BigDecimal.ZERO)
                     .actionReturnQty(BigDecimal.ZERO)
                     .actionScrapQty(BigDecimal.ZERO)
                     .build();
             incidentItems.add(extraItem);
 
-            // 2. Cập nhật hoặc tạo Receiving Item để hiển thị trên web
             java.util.Optional<ReceivingItemEntity> existingItem =
-                    receivingItemRepo.findByReceivingOrderReceivingIdAndSkuId(id, skuId);
+                    receivingItemRepo.findByReceivingOrderReceivingIdAndSkuId(id, skuId).stream()
+                            .filter(i -> (mismatchLot.isEmpty() ? i.getLotNumber() == null : mismatchLot.equals(i.getLotNumber())))
+                            .findFirst();
             if (existingItem.isPresent()) {
-                // Placeholder đã tồn tại (từ KEEPER_RESCAN) → update
                 ReceivingItemEntity rcItem = existingItem.get();
                 rcItem.setReceivedQty(totalExtra);
                 rcItem.setQcRequired(true);
@@ -1117,10 +1188,10 @@ public class ReceivingOrderService {
                 rcItem.setReasonCode(failQty.compareTo(BigDecimal.ZERO) > 0 ? "DAMAGE" : null);
                 receivingItemRepo.save(rcItem);
             } else {
-                // Tạo mới
                 ReceivingItemEntity newRcItem = ReceivingItemEntity.builder()
                         .receivingOrder(order)
                         .skuId(skuId)
+                        .lotNumber(mismatchLot.isEmpty() ? null : mismatchLot)
                         .expectedQty(BigDecimal.ZERO)
                         .receivedQty(totalExtra)
                         .qcRequired(true)
@@ -1130,7 +1201,7 @@ public class ReceivingOrderService {
                 receivingItemRepo.save(newRcItem);
             }
 
-            log.info("Extra SKU detected in QC scan and added to receiving items: skuId={}, qty={}", skuId, totalExtra);
+            log.info("Extra SKU/Lot detected in QC scan: key={}, qty={}", key, totalExtra);
         }
 
         if (hasIssues) {
@@ -1431,16 +1502,9 @@ public class ReceivingOrderService {
         GrnEntity savedGrn = grnRepo.save(grn);
 
         // ═══════════════════════════════════════════════════════════════════════
-        // [FIX] Gộp receiving items theo skuId trước khi tạo GRN items.
-        // Cùng 1 SKU có thể xuất hiện nhiều lần trong receiving_items do:
-        //   - KEEPER_RESCAN tạo placeholder (expectedQty=0, receivedQty=0)
-        //   - QC phát hiện extra item → tạo thêm row
-        //   - Keeper tạo đơn trùng SKU code
-        // Nếu không gộp → GRN hiển thị nhiều dòng riêng biệt cho cùng 1 SKU.
-        // ═══════════════════════════════════════════════════════════════════════
-        // Bước 1: Gộp theo skuId — tổng qty + lấy lot/date từ row có thông tin đầy đủ nhất
-        java.util.Map<Long, BigDecimal> skuQtyMap = new java.util.LinkedHashMap<>();
-        java.util.Map<Long, ReceivingItemEntity> skuBestItemMap = new java.util.LinkedHashMap<>();
+        // Bước 1: Gộp theo (skuId, lotNumber) — tổng qty
+        java.util.Map<String, BigDecimal> skuLotQtyMap = new java.util.LinkedHashMap<>();
+        java.util.Map<String, ReceivingItemEntity> skuLotBestItemMap = new java.util.LinkedHashMap<>();
 
         for (ReceivingItemEntity item : items) {
             if ("RETURNED".equals(item.getCondition())) {
@@ -1448,33 +1512,37 @@ public class ReceivingOrderService {
                 continue;
             }
             Long skuId = item.getSkuId();
+            String lot = item.getLotNumber();
             BigDecimal receivedQty = item.getReceivedQty() != null ? item.getReceivedQty()
                     : BigDecimal.ZERO;
             if (receivedQty.compareTo(BigDecimal.ZERO) <= 0) {
-                log.info("generateGrn: skipping zero-qty item skuId={}", skuId);
+                log.info("generateGrn: skipping zero-qty item skuId={}, lot={}", skuId, lot);
                 continue;
             }
 
-            // Cộng dồn quantity
-            skuQtyMap.merge(skuId, receivedQty, BigDecimal::add);
+            // Key = skuId_lotNumber (lot có thể null/blank)
+            String key = skuId + "_" + (lot == null ? "" : lot.trim());
 
-            // Giữ row có thông tin lot/date đầy đủ nhất (ưu tiên row có lotNumber)
-            ReceivingItemEntity current = skuBestItemMap.get(skuId);
+            // Cộng dồn quantity
+            skuLotQtyMap.merge(key, receivedQty, BigDecimal::add);
+
+            // Giữ row đầu tiên để lấy expiryDate/manufactureDate nếu có
+            ReceivingItemEntity current = skuLotBestItemMap.get(key);
             if (current == null
-                    || (current.getLotNumber() == null && item.getLotNumber() != null)
                     || (current.getExpiryDate() == null && item.getExpiryDate() != null)) {
-                skuBestItemMap.put(skuId, item);
+                skuLotBestItemMap.put(key, item);
             }
         }
 
-        // Bước 2: Tạo 1 GRN item duy nhất cho mỗi SKU
-        for (java.util.Map.Entry<Long, BigDecimal> entry : skuQtyMap.entrySet()) {
-            Long skuId = entry.getKey();
+        // Bước 2: Tạo GRN item riêng cho mỗi (SKU + Lot)
+        for (java.util.Map.Entry<String, BigDecimal> entry : skuLotQtyMap.entrySet()) {
+            String key = entry.getKey();
+            Long skuId = Long.parseLong(key.split("_")[0]);
             BigDecimal finalPassQty = entry.getValue();
-            if (finalPassQty.compareTo(BigDecimal.ZERO) < 0) finalPassQty = BigDecimal.ZERO;
+
             if (finalPassQty.compareTo(BigDecimal.ZERO) <= 0) continue;
 
-            ReceivingItemEntity bestItem = skuBestItemMap.get(skuId);
+            ReceivingItemEntity bestItem = skuLotBestItemMap.get(key);
 
             // Auto-calculate lot/date if missing
             String lotNumber = bestItem.getLotNumber();
@@ -1497,12 +1565,17 @@ public class ReceivingOrderService {
                 expiryDate = manufactureDate.plusDays(sku.getShelfLifeDays());
             }
 
-            // Cập nhật tất cả receiving items của SKU này với lot/date (record-keeping)
+            // Cập nhật tất cả receiving items của (SKU + Lot) này với lot/date (record-keeping)
             final String finalLotNumber = lotNumber;
             final LocalDate finalMfgDate = manufactureDate;
             final LocalDate finalExpDate = expiryDate;
+            
+            String originalLot = bestItem.getLotNumber();
+            
             items.stream()
-                    .filter(i -> i.getSkuId().equals(skuId) && !"RETURNED".equals(i.getCondition()))
+                    .filter(i -> i.getSkuId().equals(skuId) 
+                            && (originalLot == null ? i.getLotNumber() == null : originalLot.equals(i.getLotNumber()))
+                            && !"RETURNED".equals(i.getCondition()))
                     .forEach(i -> {
                         if (i.getLotNumber() == null || i.getLotNumber().isBlank()) i.setLotNumber(finalLotNumber);
                         if (i.getManufactureDate() == null) i.setManufactureDate(finalMfgDate);
@@ -1521,9 +1594,7 @@ public class ReceivingOrderService {
             grnItemRepo.save(grnItem);
             validGrnItems.add(grnItem);
 
-            log.info("generateGrn: SKU {} → qty={} (aggregated from {} receiving items)",
-                    skuId, finalPassQty,
-                    items.stream().filter(i -> i.getSkuId().equals(skuId)).count());
+            log.info("generateGrn: SKU {} Lot {} → qty={}", skuId, lotNumber, finalPassQty);
         }
 
         order.setStatus("GRN_CREATED");
