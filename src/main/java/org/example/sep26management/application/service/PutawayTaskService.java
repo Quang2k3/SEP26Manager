@@ -23,6 +23,7 @@ import org.example.sep26management.infrastructure.persistence.repository.SkuJpaR
 import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.GrnJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ReceivingOrderJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.ReceivingItemJpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -57,6 +58,7 @@ public class PutawayTaskService {
     private final ReceivingOrderJpaRepository receivingOrderRepo;
     private final PutawayEventPublisher putawayEventPublisher;
     private final InventoryLotJpaRepository inventoryLotRepo;
+    private final ReceivingItemJpaRepository receivingItemRepo;
 
     // ─── List tasks ────────────────────────────────────────────────────────────
 
@@ -155,25 +157,18 @@ public class PutawayTaskService {
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Task Item " + alloc.getPutawayTaskItemId() + " not found in putaway task " + taskId));
 
-            BigDecimal totalTaskQty = taskItems.stream()
-                    .filter(ti -> ti.getSkuId().equals(taskItem.getSkuId()) && java.util.Objects.equals(ti.getLotId(), taskItem.getLotId()))
-                    .map(PutawayTaskItemEntity::getQuantity)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            BigDecimal totalPutawayQty = taskItems.stream()
-                    .filter(ti -> ti.getSkuId().equals(taskItem.getSkuId()) && java.util.Objects.equals(ti.getLotId(), taskItem.getLotId()))
-                    .map(PutawayTaskItemEntity::getPutawayQty)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            // [FIX] Validate theo putawayTaskItemId — KHÔNG gộp theo skuId+lotId
+            BigDecimal itemTaskQty = taskItem.getQuantity();
+            BigDecimal itemPutawayQty = taskItem.getPutawayQty();
 
             BigDecimal alreadyAllocated = allocationRepo.findByPutawayTaskIdAndStatus(taskId, "RESERVED").stream()
-                    .filter(a -> a.getSkuId().equals(taskItem.getSkuId()))
-                    .filter(a -> taskItem.getLotId() == null ? a.getLotId() == null : taskItem.getLotId().equals(a.getLotId()))
+                    .filter(a -> alloc.getPutawayTaskItemId().equals(a.getPutawayTaskItemId()))
                     .map(PutawayAllocationEntity::getAllocatedQty)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            BigDecimal totalUsed = totalPutawayQty.add(alreadyAllocated).add(alloc.getQty());
-            if (totalUsed.compareTo(totalTaskQty) > 0) {
-                BigDecimal remaining = totalTaskQty.subtract(totalPutawayQty).subtract(alreadyAllocated);
+            BigDecimal totalUsed = itemPutawayQty.add(alreadyAllocated).add(alloc.getQty());
+            if (totalUsed.compareTo(itemTaskQty) > 0) {
+                BigDecimal remaining = itemTaskQty.subtract(itemPutawayQty).subtract(alreadyAllocated);
                 throw new RuntimeException("Cannot allocate " + alloc.getQty() + " units of Task Item " + alloc.getPutawayTaskItemId()
                         + ". Remaining to allocate: " + remaining);
             }
@@ -194,6 +189,7 @@ public class PutawayTaskService {
 
             PutawayAllocationEntity allocation = PutawayAllocationEntity.builder()
                     .putawayTaskId(taskId)
+                    .putawayTaskItemId(alloc.getPutawayTaskItemId())
                     .skuId(alloc.getSkuId())
                     .lotId(taskItem.getLotId())
                     .locationId(alloc.getLocationId())
@@ -236,34 +232,55 @@ public class PutawayTaskService {
         }
 
         List<PutawayTaskItemEntity> rawTaskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
-        List<PutawayTaskItemEntity> groupedItems = groupItems(rawTaskItems);
 
-        for (PutawayTaskItemEntity item : groupedItems) {
-            BigDecimal allocated = allocationRepo.findByPutawayTaskIdAndStatus(taskId, "RESERVED").stream()
-                    .filter(a -> a.getSkuId().equals(item.getSkuId()))
-                    .filter(a -> item.getLotId() == null ? a.getLotId() == null : item.getLotId().equals(a.getLotId()))
+        // [FIX] Validate theo từng item riêng biệt (putawayTaskItemId), KHÔNG groupItems
+        for (PutawayTaskItemEntity item : rawTaskItems) {
+            BigDecimal allocated = reservations.stream()
+                    .filter(a -> item.getPutawayTaskItemId().equals(a.getPutawayTaskItemId()))
                     .map(PutawayAllocationEntity::getAllocatedQty)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
             BigDecimal remaining = item.getQuantity().subtract(item.getPutawayQty()).subtract(allocated);
             if (remaining.compareTo(BigDecimal.ZERO) > 0) {
-                String skuInfo = "SKU " + item.getSkuId();
-                skuRepo.findById(item.getSkuId()).ifPresent(sku -> {
-                    throw new RuntimeException("Chưa phân bổ hết hàng! " + sku.getSkuCode()
-                            + " còn " + remaining + " units chưa được allocate. Hãy allocate hết rồi mới confirm.");
-                });
-                throw new RuntimeException("Chưa phân bổ hết hàng! " + skuInfo
-                        + " còn " + remaining + " units chưa được allocate.");
+                String skuCode = skuRepo.findById(item.getSkuId())
+                        .map(sku -> sku.getSkuCode()).orElse("SKU " + item.getSkuId());
+                String lotInfo = "";
+                if (item.getLotId() != null) {
+                    lotInfo = inventoryLotRepo.findById(item.getLotId())
+                            .map(lot -> " (Lô: " + lot.getLotNumber() + ")")
+                            .orElse(" (Lot #" + item.getLotId() + ")");
+                } else if (item.getReceivingItemId() != null) {
+                    lotInfo = receivingItemRepo.findById(item.getReceivingItemId())
+                            .filter(rcv -> rcv.getLotNumber() != null && !rcv.getLotNumber().isBlank())
+                            .map(rcv -> " (Lô: " + rcv.getLotNumber() + ")")
+                            .orElse("");
+                }
+                throw new RuntimeException("Chưa phân bổ hết hàng! " + skuCode + lotInfo
+                        + " còn " + remaining + " units chưa được allocate. Hãy allocate hết rồi mới confirm.");
             }
         }
 
         for (PutawayAllocationEntity alloc : reservations) {
-            List<PutawayTaskItemEntity> matchingItems = rawTaskItems.stream()
-                    .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()) &&
-                            (alloc.getLotId() == null ? ti.getLotId() == null : alloc.getLotId().equals(ti.getLotId())))
-                    .collect(Collectors.toList());
+            // [FIX] Match theo putawayTaskItemId — chính xác tới từng item
+            PutawayTaskItemEntity matchedItem = alloc.getPutawayTaskItemId() != null
+                    ? rawTaskItems.stream()
+                        .filter(ti -> ti.getPutawayTaskItemId().equals(alloc.getPutawayTaskItemId()))
+                        .findFirst().orElse(null)
+                    : null;
 
-            if (matchingItems.isEmpty()) {
+            // Fallback cho allocations cũ chưa có putawayTaskItemId
+            if (matchedItem == null) {
+                matchedItem = rawTaskItems.stream()
+                        .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()) &&
+                                (alloc.getLotId() == null ? ti.getLotId() == null : alloc.getLotId().equals(ti.getLotId())))
+                        .filter(ti -> ti.getQuantity().subtract(ti.getPutawayQty()).compareTo(BigDecimal.ZERO) > 0)
+                        .findFirst()
+                        .orElse(rawTaskItems.stream()
+                                .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()))
+                                .findFirst().orElse(null));
+            }
+
+            if (matchedItem == null) {
                 throw new RuntimeException("Task item not found for SKU: " + alloc.getSkuId() + " Lot: " + alloc.getLotId());
             }
 
@@ -277,23 +294,12 @@ public class PutawayTaskService {
                             + "VALUES (?, ?, ?, ?, ?, 'PUTAWAY', 'putaway_tasks', ?, ?)",
                     task.getWarehouseId(), alloc.getSkuId(), alloc.getLotId(), alloc.getLocationId(), qtyToDistribute, taskId, userId);
 
-            for (PutawayTaskItemEntity item : matchingItems) {
-                if (qtyToDistribute.compareTo(BigDecimal.ZERO) <= 0) break;
-
-                BigDecimal itemRemainingCap = item.getQuantity().subtract(item.getPutawayQty());
-                if (itemRemainingCap.compareTo(BigDecimal.ZERO) > 0) {
-                    BigDecimal toAdd = itemRemainingCap.min(qtyToDistribute);
-                    item.setPutawayQty(item.getPutawayQty().add(toAdd));
-                    item.setActualLocationId(alloc.getLocationId());
-                    putawayTaskItemRepo.save(item);
-                    qtyToDistribute = qtyToDistribute.subtract(toAdd);
-                }
-            }
-            if (qtyToDistribute.compareTo(BigDecimal.ZERO) > 0) {
-                PutawayTaskItemEntity firstItem = matchingItems.get(0);
-                firstItem.setPutawayQty(firstItem.getPutawayQty().add(qtyToDistribute));
-                putawayTaskItemRepo.save(firstItem);
-            }
+            // Cộng putawayQty cho chính item được match
+            BigDecimal itemRemainingCap = matchedItem.getQuantity().subtract(matchedItem.getPutawayQty());
+            BigDecimal toAdd = itemRemainingCap.min(qtyToDistribute);
+            matchedItem.setPutawayQty(matchedItem.getPutawayQty().add(toAdd));
+            matchedItem.setActualLocationId(alloc.getLocationId());
+            putawayTaskItemRepo.save(matchedItem);
 
             alloc.setStatus("CONFIRMED");
             allocationRepo.save(alloc);
@@ -434,12 +440,23 @@ public class PutawayTaskService {
     }
 
     private PutawayTaskResponse.PutawayTaskItemDto toItemDtoEnriched(PutawayTaskItemEntity i) {
+        // [FIX] Tính allocatedQty theo putawayTaskItemId — KHÔNG gộp theo skuId+lotId
         BigDecimal allocatedQty = allocationRepo.findByPutawayTaskId(i.getPutawayTask().getPutawayTaskId()).stream()
-                .filter(a -> a.getSkuId().equals(i.getSkuId()))
-                .filter(a -> i.getLotId() == null ? a.getLotId() == null : i.getLotId().equals(a.getLotId()))
+                .filter(a -> i.getPutawayTaskItemId().equals(a.getPutawayTaskItemId()))
                 .filter(a -> "RESERVED".equals(a.getStatus()))
                 .map(PutawayAllocationEntity::getAllocatedQty)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // Fallback: allocations cũ chưa có putawayTaskItemId → match theo skuId+lotId
+        if (allocatedQty.compareTo(BigDecimal.ZERO) == 0) {
+            allocatedQty = allocationRepo.findByPutawayTaskId(i.getPutawayTask().getPutawayTaskId()).stream()
+                    .filter(a -> a.getPutawayTaskItemId() == null) // chỉ fallback cho records cũ
+                    .filter(a -> a.getSkuId().equals(i.getSkuId()))
+                    .filter(a -> i.getLotId() == null ? a.getLotId() == null : i.getLotId().equals(a.getLotId()))
+                    .filter(a -> "RESERVED".equals(a.getStatus()))
+                    .map(PutawayAllocationEntity::getAllocatedQty)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+        }
 
         BigDecimal remainingQty = i.getQuantity().subtract(i.getPutawayQty()).subtract(allocatedQty);
         if (remainingQty.compareTo(BigDecimal.ZERO) < 0) remainingQty = BigDecimal.ZERO;
@@ -456,10 +473,20 @@ public class PutawayTaskService {
                 .suggestedLocationId(i.getSuggestedLocationId())
                 .actualLocationId(i.getActualLocationId());
 
+        // Enrich lot info: ưu tiên inventoryLot, fallback receivingItem
         if (i.getLotId() != null) {
             inventoryLotRepo.findById(i.getLotId()).ifPresent(lot -> {
                 builder.lotNumber(lot.getLotNumber());
                 if (lot.getExpiryDate() != null) builder.expiryDate(lot.getExpiryDate().toString());
+            });
+        } else if (i.getReceivingItemId() != null) {
+            receivingItemRepo.findById(i.getReceivingItemId()).ifPresent(rcv -> {
+                if (rcv.getLotNumber() != null && !rcv.getLotNumber().isBlank()) {
+                    builder.lotNumber(rcv.getLotNumber());
+                }
+                if (rcv.getExpiryDate() != null) {
+                    builder.expiryDate(rcv.getExpiryDate().toString());
+                }
             });
         }
 
@@ -475,6 +502,7 @@ public class PutawayTaskService {
         PutawayAllocationResponse.PutawayAllocationResponseBuilder builder = PutawayAllocationResponse.builder()
                 .allocationId(a.getAllocationId())
                 .putawayTaskId(a.getPutawayTaskId())
+                .putawayTaskItemId(a.getPutawayTaskItemId())
                 .skuId(a.getSkuId())
                 .lotId(a.getLotId())
                 .locationId(a.getLocationId())
@@ -491,31 +519,24 @@ public class PutawayTaskService {
             builder.locationCode(loc.getLocationCode());
         });
 
+        // Enrich lot info
+        if (a.getLotId() != null) {
+            inventoryLotRepo.findById(a.getLotId()).ifPresent(lot -> {
+                builder.lotNumber(lot.getLotNumber());
+                if (lot.getExpiryDate() != null) builder.expiryDate(lot.getExpiryDate().toString());
+            });
+        }
+
         return builder.build();
     }
 
+    /**
+     * Group items theo putawayTaskItemId (mỗi item là unique).
+     * Giữ lại method này cho backward compatibility với getTask() và getSuggestions().
+     * Không gộp items nữa — mỗi PutawayTaskItem là riêng biệt.
+     */
     private List<PutawayTaskItemEntity> groupItems(List<PutawayTaskItemEntity> rawItems) {
-        java.util.Map<String, PutawayTaskItemEntity> grouped = new java.util.LinkedHashMap<>();
-        for (PutawayTaskItemEntity item : rawItems) {
-            String key = item.getSkuId() + "_" + item.getLotId();
-            if (grouped.containsKey(key)) {
-                PutawayTaskItemEntity exist = grouped.get(key);
-                exist.setQuantity(exist.getQuantity().add(item.getQuantity()));
-                exist.setPutawayQty(exist.getPutawayQty().add(item.getPutawayQty()));
-            } else {
-                PutawayTaskItemEntity clone = PutawayTaskItemEntity.builder()
-                        .putawayTaskItemId(item.getPutawayTaskItemId())
-                        .putawayTask(item.getPutawayTask())
-                        .skuId(item.getSkuId())
-                        .lotId(item.getLotId())
-                        .quantity(item.getQuantity())
-                        .putawayQty(item.getPutawayQty())
-                        .suggestedLocationId(item.getSuggestedLocationId())
-                        .actualLocationId(item.getActualLocationId())
-                        .build();
-                grouped.put(key, clone);
-            }
-        }
-        return new ArrayList<>(grouped.values());
+        // [FIX] Không gộp nữa — mỗi putawayTaskItemId là unique (1 SKU + 1 Lot)
+        return new ArrayList<>(rawItems);
     }
 }

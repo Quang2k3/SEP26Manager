@@ -29,6 +29,9 @@ public class PutawayAllocationEntity {
     @Column(name = "lot_id")
     private Long lotId;
 
+    @Column(name = "putaway_task_item_id")
+    private Long putawayTaskItemId;
+
     @Column(name = "location_id", nullable = false)
     private Long locationId;
 

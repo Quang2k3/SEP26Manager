@@ -31,6 +31,15 @@ public class PutawayAllocationResponse {
     @Schema(description = "ID Lot")
     private Long lotId;
 
+    @Schema(description = "ID dòng yêu cầu cất (unique per SKU+Lot)")
+    private Long putawayTaskItemId;
+
+    @Schema(description = "Số Lô")
+    private String lotNumber;
+
+    @Schema(description = "Hạn sử dụng")
+    private String expiryDate;
+
     @Schema(description = "ID Bin đích")
     private Long locationId;
 
