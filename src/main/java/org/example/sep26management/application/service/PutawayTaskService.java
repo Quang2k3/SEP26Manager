@@ -147,15 +147,20 @@ public class PutawayTaskService {
 
         for (PutawayAllocateRequest.AllocateItem alloc : request.getItems()) {
             PutawayTaskItemEntity taskItem = taskItems.stream()
-                    .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()))
+                    .filter(ti -> ti.getPutawayTaskItemId().equals(alloc.getPutawayTaskItemId()))
                     .findFirst()
-                    .orElseThrow(() -> new RuntimeException("SKU " + alloc.getSkuId() + " not found in putaway task " + taskId));
+                    .orElseThrow(() -> new RuntimeException("Task Item " + alloc.getPutawayTaskItemId() + " not found in putaway task " + taskId));
 
-            BigDecimal alreadyAllocated = allocationRepo.sumReservedQtyByTaskAndSku(taskId, alloc.getSkuId());
+            BigDecimal alreadyAllocated = allocationRepo.findByPutawayTaskIdAndStatus(taskId, "RESERVED").stream()
+                    .filter(a -> a.getSkuId().equals(taskItem.getSkuId()))
+                    .filter(a -> taskItem.getLotId() == null ? a.getLotId() == null : taskItem.getLotId().equals(a.getLotId()))
+                    .map(PutawayAllocationEntity::getAllocatedQty)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
             BigDecimal totalUsed = taskItem.getPutawayQty().add(alreadyAllocated).add(alloc.getQty());
             if (totalUsed.compareTo(taskItem.getQuantity()) > 0) {
                 BigDecimal remaining = taskItem.getQuantity().subtract(taskItem.getPutawayQty()).subtract(alreadyAllocated);
-                throw new RuntimeException("Cannot allocate " + alloc.getQty() + " units of SKU " + alloc.getSkuId()
+                throw new RuntimeException("Cannot allocate " + alloc.getQty() + " units of Task Item " + alloc.getPutawayTaskItemId()
                         + ". Remaining to allocate: " + remaining);
             }
 
@@ -219,7 +224,12 @@ public class PutawayTaskService {
         List<PutawayTaskItemEntity> taskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
 
         for (PutawayTaskItemEntity item : taskItems) {
-            BigDecimal allocated = allocationRepo.sumReservedQtyByTaskAndSku(taskId, item.getSkuId());
+            BigDecimal allocated = allocationRepo.findByPutawayTaskIdAndStatus(taskId, "RESERVED").stream()
+                    .filter(a -> a.getSkuId().equals(item.getSkuId()))
+                    .filter(a -> item.getLotId() == null ? a.getLotId() == null : item.getLotId().equals(a.getLotId()))
+                    .map(PutawayAllocationEntity::getAllocatedQty)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
             BigDecimal remaining = item.getQuantity().subtract(item.getPutawayQty()).subtract(allocated);
             if (remaining.compareTo(BigDecimal.ZERO) > 0) {
                 String skuInfo = "SKU " + item.getSkuId();
@@ -234,9 +244,10 @@ public class PutawayTaskService {
 
         for (PutawayAllocationEntity alloc : reservations) {
             PutawayTaskItemEntity item = taskItems.stream()
-                    .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()))
+                    .filter(ti -> ti.getSkuId().equals(alloc.getSkuId()) &&
+                            (alloc.getLotId() == null ? ti.getLotId() == null : alloc.getLotId().equals(ti.getLotId())))
                     .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Task item not found for SKU: " + alloc.getSkuId()));
+                    .orElseThrow(() -> new RuntimeException("Task item not found for SKU: " + alloc.getSkuId() + " Lot: " + alloc.getLotId()));
 
             BigDecimal qty = alloc.getAllocatedQty();
 
@@ -390,8 +401,13 @@ public class PutawayTaskService {
     }
 
     private PutawayTaskResponse.PutawayTaskItemDto toItemDtoEnriched(PutawayTaskItemEntity i) {
-        BigDecimal allocatedQty = allocationRepo.sumReservedQtyByTaskAndSku(
-                i.getPutawayTask().getPutawayTaskId(), i.getSkuId());
+        BigDecimal allocatedQty = allocationRepo.findByPutawayTaskId(i.getPutawayTask().getPutawayTaskId()).stream()
+                .filter(a -> a.getSkuId().equals(i.getSkuId()))
+                .filter(a -> i.getLotId() == null ? a.getLotId() == null : i.getLotId().equals(a.getLotId()))
+                .filter(a -> "RESERVED".equals(a.getStatus()))
+                .map(PutawayAllocationEntity::getAllocatedQty)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
         BigDecimal remainingQty = i.getQuantity().subtract(i.getPutawayQty()).subtract(allocatedQty);
         if (remainingQty.compareTo(BigDecimal.ZERO) < 0) remainingQty = BigDecimal.ZERO;
 
