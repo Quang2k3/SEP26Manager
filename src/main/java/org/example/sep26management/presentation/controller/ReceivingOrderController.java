@@ -191,7 +191,6 @@ public class ReceivingOrderController {
         return receivingOrderService.confirmCoInspect(id, extractUserId(auth), role);
     }
 
-    /** POST /v1/receiving-orders/{id}/generate-grn — Keeper */
     @PostMapping("/{id}/generate-grn")
     @Operation(summary = "Tạo phiếu nhập kho GRN (Keeper)", description = "Keeper tạo GRN sau khi QC đã xác nhận chất lượng (status = QC_APPROVED). Chuyển từ QC_APPROVED thành GRN_CREATED. \n\n"
             + "**Data yêu cầu:** \n"
@@ -199,8 +198,9 @@ public class ReceivingOrderController {
             + "👉 **Điều kiện:** Status phải là `QC_APPROVED`. Các Incident (nếu có) phải được Manager resolve xong.")
     public ApiResponse<GrnResponse> generateGrn(
             @PathVariable Long id,
+            @RequestBody(required = false) org.example.sep26management.application.dto.request.GrnGenerateRequest request,
             Authentication auth) {
-        return receivingOrderService.generateGrn(id, extractUserId(auth));
+        return receivingOrderService.generateGrn(id, request, extractUserId(auth));
     }
 
     @SuppressWarnings("unchecked")

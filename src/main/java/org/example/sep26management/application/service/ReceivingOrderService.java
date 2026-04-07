@@ -1436,8 +1436,22 @@ public class ReceivingOrderService {
 
     @Transactional
     public ApiResponse<org.example.sep26management.application.dto.response.GrnResponse> generateGrn(Long id,
+                                                                                                     org.example.sep26management.application.dto.request.GrnGenerateRequest request,
                                                                                                      Long userId) {
         ReceivingOrderEntity order = findOrderForUpdate(id); // SELECT FOR UPDATE
+
+        // Update dates if provided in request
+        if (request != null && request.getItemDates() != null) {
+            for (org.example.sep26management.application.dto.request.GrnGenerateRequest.ItemDateSync dateSync : request.getItemDates()) {
+                order.getItems().stream()
+                        .filter(item -> item.getReceivingItemId().equals(dateSync.getReceivingItemId()))
+                        .findFirst()
+                        .ifPresent(item -> {
+                            item.setManufactureDate(dateSync.getManufactureDate());
+                            item.setExpiryDate(dateSync.getExpiryDate());
+                        });
+            }
+        }
 
         if (!"QC_APPROVED".equals(order.getStatus())) {
             throw new org.example.sep26management.infrastructure.exception.BusinessException(
