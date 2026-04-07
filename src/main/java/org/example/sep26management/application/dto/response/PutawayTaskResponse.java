@@ -75,6 +75,12 @@ public class PutawayTaskResponse {
         @Schema(description = "ID Lô (Nếu quản lý lô)", example = "3")
         private Long lotId;
 
+        @Schema(description = "Số Lô", example = "LOT-2026-A")
+        private String lotNumber;
+
+        @Schema(description = "Hạn sử dụng", example = "2026-12-31")
+        private String expiryDate;
+
         @Schema(description = "SỐ LƯỢNG YÊU CẦU CẤT", example = "10.0")
         private BigDecimal quantity;
 
