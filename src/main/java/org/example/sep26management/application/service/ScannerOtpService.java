@@ -104,8 +104,29 @@ public class ScannerOtpService {
             }
         }
 
-        // Tạo OTP session
-        String sessionId = UUID.randomUUID().toString();
+        // ── Reuse session cũ nếu cùng receivingId → giữ nguyên lines đã scan ──
+        var activeOpt = sessionRedis.findActiveSession(warehouseId, userId);
+        String sessionId;
+        boolean reusingSession = false;
+
+        if (activeOpt.isPresent()) {
+            var existingData = sessionRedis.findById(activeOpt.get());
+            if (existingData.isPresent()
+                    && java.util.Objects.equals(existingData.get().getReceivingId(), receivingId)) {
+                // Cùng phiếu → reuse session cũ, giữ nguyên lines
+                sessionId = activeOpt.get();
+                reusingSession = true;
+                log.info("[ScannerOtp] Reusing existing session={} for same receivingId={} (lines preserved)",
+                        sessionId, receivingId);
+            } else {
+                // Khác phiếu → tạo session mới
+                sessionId = UUID.randomUUID().toString();
+            }
+        } else {
+            sessionId = UUID.randomUUID().toString();
+        }
+
+        // Luôn tạo OTP mới + gửi email (dù reuse hay tạo mới session)
         String rawOtp    = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
         String otpHash   = passwordEncoder.encode(rawOtp);
 
@@ -126,24 +147,28 @@ public class ScannerOtpService {
         otpRedis.incrementRateLimit(userId, clientIp);
         sendScannerOtpEmail(userEmail, rawOtp, role, sessionId);
 
-        // CREATE SCAN SESSION DATA IMMEDIATELY
-        // Để Frontend Web có thể subscribe SSE stream ngay lập tức mà không bị lỗi 500
-        org.example.sep26management.application.dto.scan.ScanSessionData sessionData = org.example.sep26management.application.dto.scan.ScanSessionData.builder()
-                .sessionId(sessionId)
-                .warehouseId(warehouseId)
-                .createdBy(userId)
-                .receivingId(receivingId)
-                .role(role)
-                .lines(new java.util.ArrayList<>())
-                .build();
-        // pre-claim QC if needed
-        if ("QC".equals(role) && receivingId != null) {
-                sessionData.setAssignedQcId(userId);
+        if (!reusingSession) {
+            // TẠO SCAN SESSION DATA MỚI (chỉ khi không reuse)
+            org.example.sep26management.application.dto.scan.ScanSessionData sessionData = org.example.sep26management.application.dto.scan.ScanSessionData.builder()
+                    .sessionId(sessionId)
+                    .warehouseId(warehouseId)
+                    .createdBy(userId)
+                    .receivingId(receivingId)
+                    .role(role)
+                    .lines(new java.util.ArrayList<>())
+                    .build();
+            // pre-claim QC if needed
+            if ("QC".equals(role) && receivingId != null) {
+                    sessionData.setAssignedQcId(userId);
+            }
+
+            // Lưu ScanSessionData vào Redis để Laptop có thể SSE ngay
+            sessionRedis.save(sessionId, sessionData);
+            sessionRedis.saveActiveSession(warehouseId, userId, sessionId);
+        } else {
+            // Reuse: chỉ refresh TTL để session không hết hạn
+            sessionRedis.refreshTtl(sessionId);
         }
-        
-        // Lưu ScanSessionData vào Redis để Laptop có thể SSE ngay
-        sessionRedis.save(sessionId, sessionData);
-        sessionRedis.saveActiveSession(warehouseId, userId, sessionId);
         
         log.info("[ScannerOtp] Generated + ScanSession created: sessionId={} userId={} role={} receivingId={}",
                 sessionId, userId, role, receivingId);

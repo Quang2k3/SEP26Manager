@@ -66,9 +66,17 @@ public class ReceivingSessionService {
                                 log.info("Reusing scan session: {} userId={} warehouseId={} — reset lines, rebind receivingId={}",
                                         existingId, userId, warehouseId, receivingId);
                                 ScanSessionData data = existingDataOpt.get();
-                                // Reset lines + rebind phiếu + role
+                                // [FIX] CHỈ reset lines khi đổi sang phiếu KHÁC
+                                // Nếu cùng phiếu → giữ nguyên lines đã scan
                                 Long oldReceivingId = data.getReceivingId();
-                                data.setLines(new ArrayList<>());
+                                if (!java.util.Objects.equals(oldReceivingId, receivingId)) {
+                                        data.setLines(new ArrayList<>());
+                                        log.info("Session reuse: different receivingId {} → {} — lines cleared",
+                                                oldReceivingId, receivingId);
+                                } else {
+                                        log.info("Session reuse: same receivingId={} — lines preserved ({})",
+                                                receivingId, data.getLines() != null ? data.getLines().size() : 0);
+                                }
                                 data.setReceivingId(receivingId);
                                 data.setRole(role);
                                 data.setAssignedQcId(null);
