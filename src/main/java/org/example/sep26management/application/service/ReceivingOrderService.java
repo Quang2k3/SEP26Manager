@@ -337,44 +337,41 @@ public class ReceivingOrderService {
             allIncidentItems.addAll(incidentItemRepo.findByIncidentIncidentId(inc.getIncidentId()));
         }
 
-        // [FIX] Gộp receiving items theo skuId trước khi build response
-        // Tránh hiển thị nhiều dòng riêng biệt cho cùng 1 SKU
-        java.util.Map<Long, BigDecimal> aggExpectedQty = new java.util.LinkedHashMap<>();
-        java.util.Map<Long, BigDecimal> aggReceivedQty = new java.util.LinkedHashMap<>();
-        java.util.Map<Long, ReceivingItemEntity> aggBestItem = new java.util.LinkedHashMap<>();
-
-        java.util.Map<Long, String> bestLotBySku = new java.util.HashMap<>();
-        java.util.Map<Long, java.time.LocalDate> bestMfgBySku = new java.util.HashMap<>();
-        java.util.Map<Long, java.time.LocalDate> bestExpBySku = new java.util.HashMap<>();
+        // [FIX] Gộp receiving items theo khóa (skuId_lotNumber) trước khi build response
+        // Cho phép hiển thị từng lô (Lot) riêng biệt cho cùng 1 SKU
+        java.util.Map<String, BigDecimal> aggExpectedQty = new java.util.LinkedHashMap<>();
+        java.util.Map<String, BigDecimal> aggReceivedQty = new java.util.LinkedHashMap<>();
+        java.util.Map<String, ReceivingItemEntity> aggBestItem = new java.util.LinkedHashMap<>();
 
         for (ReceivingItemEntity item : items) {
-            Long skuId = item.getSkuId();
+            String key = item.getSkuId() + "_" + (item.getLotNumber() != null ? item.getLotNumber() : "");
+            
             BigDecimal exp = item.getExpectedQty() != null ? item.getExpectedQty() : BigDecimal.ZERO;
             BigDecimal rcv = item.getReceivedQty() != null ? item.getReceivedQty() : BigDecimal.ZERO;
-            aggExpectedQty.merge(skuId, exp, BigDecimal::add);
-            aggReceivedQty.merge(skuId, rcv, BigDecimal::add);
+            aggExpectedQty.merge(key, exp, BigDecimal::add);
+            aggReceivedQty.merge(key, rcv, BigDecimal::add);
 
-            // Collect the best available metadata instead of replacing the entire row
-            if (item.getLotNumber() != null) bestLotBySku.put(skuId, item.getLotNumber());
-            if (item.getManufactureDate() != null) bestMfgBySku.put(skuId, item.getManufactureDate());
-            if (item.getExpiryDate() != null) bestExpBySku.put(skuId, item.getExpiryDate());
-
-            if (!aggBestItem.containsKey(skuId)) {
-                aggBestItem.put(skuId, item);
+            if (!aggBestItem.containsKey(key)) {
+                aggBestItem.put(key, item);
             }
         }
 
         // Map aggregated items
         List<ReceivingItemResponse> itemResponses = new ArrayList<>();
-        for (java.util.Map.Entry<Long, ReceivingItemEntity> entry : aggBestItem.entrySet()) {
-            Long skuId = entry.getKey();
+        for (java.util.Map.Entry<String, ReceivingItemEntity> entry : aggBestItem.entrySet()) {
+            String key = entry.getKey();
+            Long skuId = Long.parseLong(key.split("_")[0]);
             ReceivingItemEntity bestItem = entry.getValue();
-            BigDecimal totalExpected = aggExpectedQty.getOrDefault(skuId, BigDecimal.ZERO);
-            BigDecimal totalQty = aggReceivedQty.getOrDefault(skuId, BigDecimal.ZERO);
+            BigDecimal totalExpected = aggExpectedQty.getOrDefault(key, BigDecimal.ZERO);
+            BigDecimal totalQty = aggReceivedQty.getOrDefault(key, BigDecimal.ZERO);
 
-            // [FIX] Tính damagedQty từ incident data thay vì dùng condition trên DB row
+            // [FIX] Tính damagedQty từ incident data thay vì dùng condition trên DB row (Tính riêng theo từng Lot)
+            String expectedNoteSuffix = "(Lot: " + (bestItem.getLotNumber() == null ? "" : bestItem.getLotNumber()) + ")";
             BigDecimal failQty = allIncidentItems.stream()
-                    .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
+                    .filter(i -> "DAMAGE".equals(i.getReasonCode()) 
+                            && skuId.equals(i.getSkuId())
+                            && i.getNote() != null 
+                            && i.getNote().contains(expectedNoteSuffix))
                     .map(IncidentItemEntity::getDamagedQty)
                     .filter(java.util.Objects::nonNull)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -382,7 +379,10 @@ public class ReceivingOrderService {
             // Lấy attachmentUrl từ incident DAMAGE items
             String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0
                     ? allIncidentItems.stream()
-                    .filter(i -> "DAMAGE".equals(i.getReasonCode()) && skuId.equals(i.getSkuId()))
+                    .filter(i -> "DAMAGE".equals(i.getReasonCode()) 
+                            && skuId.equals(i.getSkuId())
+                            && i.getNote() != null 
+                            && i.getNote().contains(expectedNoteSuffix))
                     .map(IncidentItemEntity::getAttachmentUrl)
                     .filter(u -> u != null && !u.isBlank())
                     .findFirst().orElse(null)
@@ -393,10 +393,10 @@ public class ReceivingOrderService {
             resp.setReceivedQty(totalQty);
             resp.setDamagedQty(failQty);
             resp.setAttachmentUrl(attachmentUrl);
-            // Apply merged meta
-            resp.setLotNumber(bestLotBySku.get(skuId));
-            resp.setManufactureDate(bestMfgBySku.get(skuId));
-            resp.setExpiryDate(bestExpBySku.get(skuId));
+            // Lot is preserved correctly via bestItem
+            resp.setLotNumber(bestItem.getLotNumber());
+            resp.setManufactureDate(bestItem.getManufactureDate());
+            resp.setExpiryDate(bestItem.getExpiryDate());
 
             // [FIX] Set condition chính xác: chỉ FAIL nếu toàn bộ là hỏng
             if (failQty.compareTo(BigDecimal.ZERO) > 0) {
