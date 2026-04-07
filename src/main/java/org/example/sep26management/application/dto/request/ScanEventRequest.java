@@ -19,6 +19,9 @@ public class ScanEventRequest {
     @NotBlank(message = "barcode is required")
     private String barcode;
 
+    @Schema(description = "Mã Lô (LOT) parse từ QR Code", example = "LOT-B")
+    private String lotNumber;
+
     @Schema(description = "Số lượng quét", example = "10")
     @NotNull(message = "qty is required")
     @Positive(message = "qty must be positive")

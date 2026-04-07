@@ -52,15 +52,17 @@ public class ScanEventController {
             + "- `Query.skuId`: ID sản phẩm cần xoá/giảm.\n"
             + "- `Query.condition`: PASS hoặc FAIL.\n"
             + "- `Query.qty`: Số lượng cần trừ (không truyền = xóa hết dòng đó).\n"
-            + "- `Query.receivingId`: (Optional) Mã phiếu nhập — nếu có sẽ trừ luôn receivedQty trên phiếu.")
+            + "- `Query.receivingId`: (Optional) Mã phiếu nhập.\n"
+            + "- `Query.lotNumber`: (Optional) Mã Lô để xóa đúng dòng nếu có.")
     public ApiResponse<Map<String, Object>> removeScanItem(
             @RequestParam String sessionId,
             @RequestParam Long skuId,
             @RequestParam(defaultValue = "PASS") String condition,
             @RequestParam(required = false) java.math.BigDecimal qty,
-            @RequestParam(required = false) Long receivingId) {
+            @RequestParam(required = false) Long receivingId,
+            @RequestParam(required = false) String lotNumber) {
 
-        return scanEventService.removeScanItem(sessionId, skuId, condition, qty, receivingId);
+        return scanEventService.removeScanItem(sessionId, skuId, condition, qty, receivingId, lotNumber);
     }
 
     private String extractToken(HttpServletRequest request) {

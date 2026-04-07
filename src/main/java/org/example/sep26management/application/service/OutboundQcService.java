@@ -31,6 +31,12 @@ import java.util.stream.Collectors;
  *  - finalizeQc: khi có FAIL → tạo Incident(DAMAGE) + set SO → ON_HOLD
  *  - resolveOutboundDamage: Manager xử lý DAMAGE (RETURN_SCRAP / ACCEPT)
  *  - resolveOutboundShortage: Manager xử lý SHORTAGE (WAIT_BACKORDER / CLOSE_SHORT)
+ *
+ * [FIX DUPLICATE] finalizeQc bây giờ idempotent:
+ *  - Nếu task đã ở QC_DONE / COMPLETED / CANCELLED → trả về summary hiện tại, không tạo incident mới
+ *  - Nếu incident DAMAGE OPEN đã tồn tại cho soId → không tạo thêm
+ *  - Điều này ngăn chặn việc điện thoại bấm "Xác nhận" rồi web modal poll
+ *    và gọi finalizeQc lần 2, tạo ra 2 incident + 2 notification cho Manager
  */
 @Service
 @RequiredArgsConstructor
@@ -44,6 +50,7 @@ public class OutboundQcService {
     private final InventorySnapshotJpaRepository inventorySnapshotRepository;
     private final InventoryTransactionJpaRepository inventoryTransactionRepository;
     private final ReservationQueryRepository reservationRepository;
+    private final ReservationJpaRepository reservationJpaRepository; // [FIX] dùng để tạo mới Reservation sau RETURN_SCRAP
     private final IncidentJpaRepository incidentRepository;
     private final IncidentItemJpaRepository incidentItemRepository;
     private final InventoryLotJpaRepository inventoryLotRepository;
@@ -240,11 +247,27 @@ public class OutboundQcService {
         return finalizeQc(taskId, userId);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
     // 4) FINALIZE QC — [V20] tạo Incident DAMAGE khi có FAIL, set ON_HOLD
+    //
+    // [FIX DUPLICATE] Idempotent guard:
+    //   - Task đã COMPLETED/CANCELLED → trả về summary, không làm gì thêm
+    //   - SO đã ON_HOLD + incident DAMAGE OPEN tồn tại → trả về summary, không tạo thêm
+    //   - SO đã QC_PASSED → trả về summary, không notify lại
+    //
+    // Root cause của duplicate: điện thoại bấm "Xác nhận" → gọi finalize-qc (lần 1),
+    // rồi web modal polling QcScanPanel phát hiện allScanned → QcFinalizeOrDispatch
+    // mount → gọi finalizeQc lại (lần 2) → 2 incident + 2 notification Manager.
     // ─────────────────────────────────────────────────────────────────────────
     @Transactional
     public ApiResponse<QcSummaryResponse> finalizeQc(Long taskId, Long userId) {
         PickingTaskEntity task = findPickingTask(taskId);
+
+        // [FIX DUPLICATE] Guard 1: task đã kết thúc → trả về summary hiện tại, không làm gì
+        if ("COMPLETED".equals(task.getStatus()) || "CANCELLED".equals(task.getStatus())) {
+            log.info("finalizeQc taskId={} already {} — returning current summary (idempotent)", taskId, task.getStatus());
+            return buildCurrentSummary(taskId);
+        }
 
         if ("PICKED".equals(task.getStatus())) {
             startQcSession(taskId, userId);
@@ -252,8 +275,11 @@ public class OutboundQcService {
         }
 
         if (!"QC_IN_PROGRESS".equals(task.getStatus())) {
-            throw new BusinessException(
-                    "Cannot finalize QC: task status is " + task.getStatus() + ". Expected QC_IN_PROGRESS.");
+            // [FIX DUPLICATE] Guard 2: task không còn ở QC_IN_PROGRESS
+            // (đã bị finalize bởi lần gọi trước) → trả về summary, không throw
+            log.info("finalizeQc taskId={} status={} — not QC_IN_PROGRESS, returning summary (idempotent)",
+                    taskId, task.getStatus());
+            return buildCurrentSummary(taskId);
         }
 
         // Auto-PASS items chưa scan đủ: cộng phần còn thiếu vào qcPassQty
@@ -282,25 +308,45 @@ public class OutboundQcService {
                 .count();
 
         Long soId = task.getSoId();
+        // [FIX COMPILE] task bị reassign ở trên nên không effectively final.
+        // Capture snapshot effectively-final để dùng được bên trong lambda.
+        final PickingTaskEntity finalTask = task;
+        final List<PickingTaskItemEntity> finalAllItems = allItems;
 
         if ((fail > 0 || hold > 0) && soId != null) {
-            // [V20] GAP 4 FIX: tạo Incident DAMAGE + set SO → ON_HOLD
-            createDamageIncident(task, allItems, soId, userId);
             salesOrderRepository.findById(soId).ifPresent(so -> {
-                so.setStatus("ON_HOLD");
-                so.setUpdatedAt(now);
-                salesOrderRepository.save(so);
-                log.info("SO {} → ON_HOLD (QC fail={}, hold={})", so.getSoCode(), fail, hold);
-                // ── Realtime: notify MANAGER có đơn lỗi QC cần xử lý ─────────
-                String customerName = customerRepository.findById(so.getCustomerId())
-                        .map(c -> c.getCustomerName()).orElse("—");
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
-                        soId, so.getSoCode(),
-                        customerName + " — QC lỗi (" + fail + " fail, " + hold + " hold)");
+                // [FIX DUPLICATE] Guard 3: Chỉ tạo incident và notify nếu SO chưa ON_HOLD
+                // hoặc chưa có incident DAMAGE OPEN nào cho soId này.
+                // Điều này ngăn lần gọi thứ 2 tạo thêm incident + notification.
+                boolean soAlreadyOnHold = "ON_HOLD".equals(so.getStatus());
+                boolean incidentAlreadyExists = !incidentRepository.findOpenIncidentsBySoId(soId)
+                        .stream()
+                        .anyMatch(inc -> inc.getIncidentType() == IncidentType.DAMAGE);
+
+                if (!soAlreadyOnHold || !incidentAlreadyExists) {
+                    // Chỉ tạo incident nếu chưa có
+                    if (incidentAlreadyExists) {
+                        // incidentAlreadyExists = true nghĩa là KHÔNG có → cần tạo
+                        createDamageIncident(finalTask, finalAllItems, soId, userId);
+                    }
+                    so.setStatus("ON_HOLD");
+                    so.setUpdatedAt(now);
+                    salesOrderRepository.save(so);
+                    log.info("SO {} → ON_HOLD (QC fail={}, hold={})", so.getSoCode(), fail, hold);
+                    // ── Realtime: notify MANAGER có đơn lỗi QC cần xử lý ─────────
+                    String customerName = customerRepository.findById(so.getCustomerId())
+                            .map(c -> c.getCustomerName()).orElse("—");
+                    notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
+                            soId, so.getSoCode(),
+                            customerName + " — QC lỗi (" + fail + " fail, " + hold + " hold)");
+                } else {
+                    log.info("finalizeQc taskId={}: SO {} đã ON_HOLD + incident DAMAGE đã tồn tại — bỏ qua tạo incident/notify (idempotent)",
+                            taskId, so.getSoCode());
+                }
             });
         } else if (soId != null) {
-            // [BUG FIX] All PASS → set SO → QC_PASSED (sẵn sàng dispatch), KHÔNG giữ QC_SCAN
             salesOrderRepository.findById(soId).ifPresent(so -> {
+                // [FIX DUPLICATE] Guard 4: Chỉ set QC_PASSED và notify nếu SO chưa ở trạng thái đó
                 if ("QC_SCAN".equals(so.getStatus()) || "PICKING".equals(so.getStatus())) {
                     so.setStatus("QC_PASSED");
                     so.setUpdatedAt(now);
@@ -312,6 +358,9 @@ public class OutboundQcService {
                     notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "qc_outbound_passed",
                             soId, so.getSoCode(),
                             customerName + " — QC đạt, sẵn sàng xuất kho");
+                } else {
+                    log.info("finalizeQc taskId={}: SO {} đã ở {} — bỏ qua set QC_PASSED/notify (idempotent)",
+                            taskId, so.getSoCode(), so.getStatus());
                 }
             });
         }
@@ -331,18 +380,47 @@ public class OutboundQcService {
                 .allScanned(pending == 0 && total > 0).build());
     }
 
-    /** Tạo Incident DAMAGE cho các FAIL/HOLD items trong task. */
+    /** Build current summary from DB — dùng cho idempotent early-return. */
+    private ApiResponse<QcSummaryResponse> buildCurrentSummary(Long taskId) {
+        List<PickingTaskItemEntity> items = pickingTaskItemRepository.findByPickingTaskId(taskId);
+        int total   = items.size();
+        int pass    = items.stream().mapToInt(i -> safeInt(i.getQcPassQty())).sum();
+        int fail    = items.stream().mapToInt(i -> safeInt(i.getQcFailQty())).sum();
+        int pending = (int) items.stream()
+                .filter(i -> safeBD(i.getQcPassQty()).add(safeBD(i.getQcFailQty()))
+                        .compareTo(i.getRequiredQty()) < 0)
+                .count();
+        return ApiResponse.success("QC already finalized.", QcSummaryResponse.builder()
+                .pickingTaskId(taskId).totalItems(total).passCount(pass)
+                .failCount(fail).holdCount(0).pendingCount(pending)
+                .allScanned(pending == 0 && total > 0).build());
+    }
+
+    /**
+     * Tạo Incident DAMAGE cho các FAIL items trong task.
+     *
+     * [FIX ROOT CAUSE] Bug cũ: 1 SKU có thể có nhiều PickingTaskItem (mỗi item = 1 reservation line).
+     * Ví dụ: SO yêu cầu 2 units SKU001 → AllocateStock tạo 2 reservation lines (1 unit/line)
+     * → 2 PickingTaskItem: item1(req=1,fail=1,pass=0), item2(req=1,fail=0,pass=1)
+     * → Bug cũ tạo IncidentItem với expectedQty=1 (chỉ item có fail)
+     * → FE hiển thị "SL Giấy tờ: 1" thay vì đúng là "2"
+     *
+     * Fix: Group theo skuId, cộng dồn toàn bộ qty → 1 IncidentItem/SKU với số liệu chính xác
+     */
     private void createDamageIncident(PickingTaskEntity task,
                                       List<PickingTaskItemEntity> allItems,
                                       Long soId, Long reportedBy) {
         SalesOrderEntity so = salesOrderRepository.findById(soId).orElse(null);
         if (so == null) return;
 
-        // Filter: chỉ lấy items có qcFailQty > 0 (thay vì filter theo qcResult string)
-        List<PickingTaskItemEntity> failItems = allItems.stream()
-                .filter(i -> safeBD(i.getQcFailQty()).compareTo(BigDecimal.ZERO) > 0)
-                .collect(Collectors.toList());
-        if (failItems.isEmpty()) return;
+        // [FIX] Group tất cả picking items theo skuId để cộng dồn qty đúng
+        java.util.Map<Long, java.util.List<PickingTaskItemEntity>> bySkuId = allItems.stream()
+                .collect(Collectors.groupingBy(PickingTaskItemEntity::getSkuId));
+
+        // Chỉ tạo incident nếu có ít nhất 1 SKU có failQty > 0
+        boolean hasAnyFail = bySkuId.values().stream().anyMatch(skuItems ->
+                skuItems.stream().anyMatch(i -> safeBD(i.getQcFailQty()).compareTo(BigDecimal.ZERO) > 0));
+        if (!hasAnyFail) return;
 
         String code = "INC-QC-" + soId + "-" + (System.currentTimeMillis() % 100_000);
         StringBuilder desc = new StringBuilder("QC FAIL khi xuất " + so.getSoCode() + ": ");
@@ -362,39 +440,62 @@ public class OutboundQcService {
                 .build();
         IncidentEntity saved = incidentRepository.save(incident);
 
-        for (PickingTaskItemEntity item : failItems) {
-            SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
-            String skuCode = sku != null ? sku.getSkuCode() : "SKU#" + item.getSkuId();
+        for (java.util.Map.Entry<Long, java.util.List<PickingTaskItemEntity>> entry : bySkuId.entrySet()) {
+            Long skuId = entry.getKey();
+            java.util.List<PickingTaskItemEntity> skuItems = entry.getValue();
 
-            // FIX: dùng qcFailQty làm damagedQty, qcPassQty làm actualQty
-            BigDecimal failQty = safeBD(item.getQcFailQty());
-            BigDecimal passQty = safeBD(item.getQcPassQty());
-            desc.append(skuCode)
-                    .append("[FAIL x").append(failQty.intValue())
-                    .append("/PASS x").append(passQty.intValue()).append("] ");
+            // [FIX] Cộng dồn toàn bộ qty của cùng SKU qua tất cả reservation lines
+            BigDecimal totalRequired = skuItems.stream()
+                    .map(i -> safeBD(i.getRequiredQty()))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal totalFailQty = skuItems.stream()
+                    .map(i -> safeBD(i.getQcFailQty()))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal totalPassQty = skuItems.stream()
+                    .map(i -> safeBD(i.getQcPassQty()))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            String fromLocCode = locationRepository.findById(item.getFromLocationId())
+            // Bỏ qua SKU hoàn toàn pass
+            if (totalFailQty.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            SkuEntity sku = skuRepository.findById(skuId).orElse(null);
+            String skuCode = sku != null ? sku.getSkuCode() : "SKU#" + skuId;
+
+            // Đại diện: item có failQty > 0 đầu tiên (để lấy ảnh, note, location)
+            PickingTaskItemEntity rep = skuItems.stream()
+                    .filter(i -> safeBD(i.getQcFailQty()).compareTo(BigDecimal.ZERO) > 0)
+                    .findFirst()
+                    .orElse(skuItems.get(0));
+            String fromLocCode = locationRepository.findById(rep.getFromLocationId())
                     .map(l -> l.getLocationCode()).orElse("N/A");
-            String noteStr = "FAIL x" + failQty.intValue() + " / PASS x" + passQty.intValue()
-                    + (item.getQcNote() != null ? " | " + item.getQcNote() : "")
+
+            desc.append(skuCode)
+                    .append("[FAIL x").append(totalFailQty.intValue())
+                    .append("/PASS x").append(totalPassQty.intValue()).append("] ");
+
+            String noteStr = "FAIL x" + totalFailQty.intValue() + " / PASS x" + totalPassQty.intValue()
+                    + (rep.getQcNote() != null ? " | " + rep.getQcNote() : "")
                     + " | from_bin: " + fromLocCode
-                    + (item.getQcAttachmentUrl() != null ? " | photo: " + item.getQcAttachmentUrl() : "");
+                    + (rep.getQcAttachmentUrl() != null ? " | photo: " + rep.getQcAttachmentUrl() : "");
 
             incidentItemRepository.save(IncidentItemEntity.builder()
                     .incident(saved)
-                    .skuId(item.getSkuId())
-                    .damagedQty(failQty)          // FIX: số unit thực FAIL
-                    .expectedQty(item.getRequiredQty())
-                    .actualQty(passQty.add(failQty))            // FIX: số unit PASS + FAIL (tất cả hàng đã quét)
+                    .skuId(skuId)
+                    // [FIX] expectedQty = TỔNG requiredQty (SL Giấy tờ đúng = 2, không phải 1)
+                    .expectedQty(totalRequired)
+                    // [FIX] actualQty = TỔNG pass + fail = tổng đã QC thực tế
+                    .actualQty(totalPassQty.add(totalFailQty))
+                    // damagedQty = TỔNG failQty
+                    .damagedQty(totalFailQty)
                     .reasonCode("DAMAGE")
                     .note(noteStr)
-                    .attachmentUrl(item.getQcAttachmentUrl())
+                    .attachmentUrl(rep.getQcAttachmentUrl())
                     .build());
         }
 
         saved.setDescription(desc.toString().trim());
         incidentRepository.save(saved);
-        log.info("Created DAMAGE Incident {} for SO {} ({} fail items)", code, so.getSoCode(), failItems.size());
+        log.info("Created DAMAGE Incident {} for SO {} (grouped by SKU)", code, so.getSoCode());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -421,22 +522,26 @@ public class OutboundQcService {
         String action = request.getAction().toUpperCase();
         switch (action) {
             case "RETURN_SCRAP" -> {
-                // [FIX] Trừ tồn kho hàng hỏng tại vị trí gốc
-                // và chuyển sang khu hàng lỗi (defect zone) để theo dõi
-                deductFailItems(incident.getSoId(), managerId, so.getWarehouseId());
-                // Reset picking items FAIL/HOLD để không tính vào pick list cũ
-                resetFailItemsForRepick(incident.getSoId());
-                // [FIX] SO → APPROVED (không phải PICKING) để Keeper re-allocate từ đầu.
-                // Hàng lỗi đã bị trừ khỏi kho → allocate lại sẽ lấy hàng thay thế từ bin khác.
-                // Cancel reservations cũ trước khi đổi status
-                cancelOpenReservationsForSo(incident.getSoId());
-                so.setStatus("APPROVED");
+                // ─── FLOW ĐÚNG sau confirmPicked ──────────────────────────────────────────
+                // Sau confirmPicked: tồn kho đã bị trừ hết tại bin gốc (quantity=0).
+                // RETURN_SCRAP cần:
+                //   1. Hàng FAIL (qcFailQty) → cộng vào Z-DEFECT (hàng lỗi)
+                //   2. Hàng PASS (qcPassQty) → cộng lại vào bin gốc (trả về kho để re-pick)
+                //   3. Giảm orderedQty của SO xuống còn passQty (bỏ phần lỗi)
+                //   4. SO → PICKING lại (task mới) — không cần qua APPROVED→Allocate vì hàng đã sẵn sàng
+                // ─────────────────────────────────────────────────────────────────────────
+                returnFailToDefectAndRestorePass(incident.getSoId(), managerId, so.getWarehouseId());
+                // Reset QC kết quả để task mới có thể scan lại
+                resetQcForRepick(incident.getSoId());
+                // Hủy picking task cũ (đã PICKED/QC_IN_PROGRESS) để tạo task mới
+                cancelOldPickingTask(incident.getSoId(), so.getWarehouseId());
+                // SO → ALLOCATED: hàng PASS đã về bin gốc, Keeper chỉ cần tạo Pick List mới
+                so.setStatus("ALLOCATED");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → APPROVED (re-allocate after DAMAGE RETURN_SCRAP)", so.getSoCode());
-                // ── Realtime: notify KEEPER cần phân bổ lại ─────────────────
+                log.info("SO {} → ALLOCATED (RETURN_SCRAP: fail→defect, pass→bin gốc)", so.getSoCode());
                 notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
-                        so.getSoId(), so.getSoCode(), "Hàng lỗi đã xử lý — cần phân bổ lại");
+                        so.getSoId(), so.getSoCode(), "Hàng lỗi về Z-DEFECT, hàng tốt trả bin — Keeper tạo Pick List mới");
             }
             case "ACCEPT" -> {
                 // Xuất luôn hàng lỗi → QC_PASSED để cho phép dispatch
@@ -462,77 +567,120 @@ public class OutboundQcService {
         return ApiResponse.success("Incident resolved. SO updated.", buildSimpleResponse(incident));
     }
 
-    /** Trừ tồn kho hàng lỗi tại vị trí gốc, cộng vào khu hàng lỗi. */
-    private void deductFailItems(Long soId, Long userId, Long warehouseId) {
-        List<PickingTaskItemEntity> failItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId)
-                .stream()
-                .filter(i -> "FAIL".equals(i.getQcResult()) || "HOLD".equals(i.getQcResult()))
-                .collect(Collectors.toList());
-
-        if (failItems.isEmpty()) return;
-
-        // Tìm hoặc tạo khu hàng lỗi (defect bin)
-        LocationEntity defectBin = getOrCreateDefectBin(warehouseId);
-
-        for (PickingTaskItemEntity item : failItems) {
-            BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
-                    ? item.getPickedQty() : item.getRequiredQty();
-            if (qty.compareTo(BigDecimal.ZERO) <= 0) continue;
-
-            Long fromLocationId = item.getFromLocationId();
-            // [BUG-FIX] Guard: fromLocationId KHONG duoc la defect bin
-            // Neu tro vao defect bin → AllocateStock lan truoc lay ham tu defect bin (sai)
-            // hoac fromLocationId = null → fallback. Ca hai truong hop: dung findLocationIdByWarehouseSkuLot
-            // (da duoc fix: exclude is_defect=true) de tim bin goc thuc su.
-            if (fromLocationId == null || fromLocationId.equals(defectBin.getLocationId())) {
-                fromLocationId = inventorySnapshotRepository
-                        .findLocationIdByWarehouseSkuLot(warehouseId, item.getSkuId(), item.getLotId());
-                log.warn("deductFailItems: fromLocationId null/defect skuId={}, fallback={}", item.getSkuId(), fromLocationId);
-            }
-            if (fromLocationId == null) {
-                log.error("deductFailItems: no usable location skuId={} warehouseId={} — skip", item.getSkuId(), warehouseId);
-                continue;
-            }
-
-            // 1. Trừ quantity tại vị trí gốc
-            inventorySnapshotRepository.decrementQuantity(
-                    warehouseId, item.getSkuId(), item.getLotId(), fromLocationId, qty);
-
-            // 2. Cộng quantity vào khu hàng lỗi
-            inventorySnapshotRepository.upsertInventory(
-                    warehouseId, item.getSkuId(), item.getLotId(), defectBin.getLocationId(), qty);
-
-            // 3. Ghi txn DAMAGE_WRITE_OFF (xuất khỏi bin gốc)
-            inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
-                    .warehouseId(warehouseId)
-                    .locationId(fromLocationId)
-                    .skuId(item.getSkuId())
-                    .lotId(item.getLotId())
-                    .quantity(qty.negate())
-                    .txnType("DAMAGE_WRITE_OFF")
-                    .referenceTable("sales_orders")
-                    .referenceId(soId)
-                    .reasonCode("QC_FAIL")
-                    .createdBy(userId != null ? userId : getSystemUserId())
-                    .build());
-
-            // 4. Ghi txn DAMAGE_TRANSFER (nhập vào khu hàng lỗi)
-            inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
-                    .warehouseId(warehouseId)
-                    .locationId(defectBin.getLocationId())
-                    .skuId(item.getSkuId())
-                    .lotId(item.getLotId())
-                    .quantity(qty)
-                    .txnType("DAMAGE_TRANSFER")
-                    .referenceTable("sales_orders")
-                    .referenceId(soId)
-                    .reasonCode("QC_FAIL_MOVE_TO_DEFECT")
-                    .createdBy(userId != null ? userId : getSystemUserId())
-                    .build());
-
-            log.info("DAMAGE: skuId={} qty={} moved from loc={} to defect bin={}",
-                    item.getSkuId(), qty, fromLocationId, defectBin.getLocationId());
+    /**
+     * RETURN_SCRAP: Sau confirmPicked, bin gốc đã trống (quantity=0).
+     *
+     * Flow:
+     *   1. Hàng FAIL (qcFailQty) → upsert vào Z-DEFECT
+     *   2. Hàng PASS (qcPassQty) → upsert trả lại bin gốc + tạo lại Reservation OPEN
+     *      (bắt buộc — Keeper gen Pick List cần reservation OPEN mới pick được)
+     *   3. Giảm orderedQty của SO item xuống còn passQty
+     *   4. Ghi inventory_transaction cho cả 2 chiều
+     *
+     * [FIX ROOT CAUSE] Bug cũ: chỉ upsert tồn kho nhưng không tạo Reservation OPEN mới
+     * → PickListService.generatePickList() query reservation OPEN → empty → throw PICKLIST_NO_ALLOCATION
+     */
+    private void returnFailToDefectAndRestorePass(Long soId, Long userId, Long warehouseId) {
+        List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
+        if (allItems.isEmpty()) {
+            log.warn("RETURN_SCRAP: soId={} — no active picking task items found", soId);
+            return;
         }
+
+        LocationEntity defectBin = getOrCreateDefectBin(warehouseId);
+        Long actorId = userId != null ? userId : getSystemUserId();
+
+        // Huỷ toàn bộ reservation cũ (nếu còn sót) trước khi tạo lại
+        reservationRepository.findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN")
+                .forEach(r -> {
+                    if (r.getLocationId() != null) {
+                        inventorySnapshotRepository.incrementReservedByLocationAndSku(
+                                r.getLocationId(), r.getSkuId(), r.getLotId(), r.getQuantity().negate());
+                    }
+                    r.setStatus("CANCELLED");
+                    reservationRepository.save(r);
+                });
+
+        for (PickingTaskItemEntity item : allItems) {
+            Long fromLocationId = item.getFromLocationId();
+            if (fromLocationId == null) continue;
+
+            BigDecimal failQty = safeBD(item.getQcFailQty());
+            BigDecimal passQty = safeBD(item.getQcPassQty());
+
+            // ── 1. Hàng FAIL → cộng vào Z-DEFECT ─────────────────────────────────
+            // (không trừ bin gốc — đã trừ lúc confirmPicked)
+            if (failQty.compareTo(BigDecimal.ZERO) > 0) {
+                inventorySnapshotRepository.upsertInventory(
+                        warehouseId, item.getSkuId(), item.getLotId(),
+                        defectBin.getLocationId(), failQty);
+                inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                        .warehouseId(warehouseId).locationId(defectBin.getLocationId())
+                        .skuId(item.getSkuId()).lotId(item.getLotId()).quantity(failQty)
+                        .txnType("DAMAGE_TRANSFER").referenceTable("sales_orders").referenceId(soId)
+                        .reasonCode("QC_FAIL_TO_DEFECT").createdBy(actorId)
+                        .build());
+                log.info("RETURN_SCRAP: skuId={} failQty={} → defect bin={}",
+                        item.getSkuId(), failQty, defectBin.getLocationId());
+            }
+
+            // ── 2. Hàng PASS → cộng lại vào bin gốc + tạo Reservation OPEN mới ──
+            if (passQty.compareTo(BigDecimal.ZERO) > 0) {
+                // 2a. Cộng tồn kho về bin gốc
+                inventorySnapshotRepository.upsertInventory(
+                        warehouseId, item.getSkuId(), item.getLotId(), fromLocationId, passQty);
+
+                // 2b. [FIX] Lock reserved_qty trên snapshot ngay
+                inventorySnapshotRepository.incrementReservedByLocationAndSku(
+                        fromLocationId, item.getSkuId(), item.getLotId(), passQty);
+
+                // 2c. [FIX] Tạo Reservation OPEN mới → PickListService mới gen được Pick List
+                reservationJpaRepository.save(ReservationEntity.builder()
+                        .warehouseId(warehouseId)
+                        .skuId(item.getSkuId())
+                        .lotId(item.getLotId())
+                        .locationId(fromLocationId)
+                        .quantity(passQty)
+                        .referenceTable("sales_orders")
+                        .referenceId(soId)
+                        .status("OPEN")
+                        .build());
+
+                inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                        .warehouseId(warehouseId).locationId(fromLocationId)
+                        .skuId(item.getSkuId()).lotId(item.getLotId()).quantity(passQty)
+                        .txnType("RETURN_TO_BIN").referenceTable("sales_orders").referenceId(soId)
+                        .reasonCode("QC_PASS_RESTORE").createdBy(actorId)
+                        .build());
+                log.info("RETURN_SCRAP: skuId={} passQty={} → restored to bin={} + reservation OPEN created",
+                        item.getSkuId(), passQty, fromLocationId);
+            }
+
+            // ── 3. Giảm orderedQty về passQty (loại bỏ phần lỗi khỏi đơn) ─────────
+            salesOrderItemRepository.findBySoId(soId).stream()
+                    .filter(si -> si.getSkuId().equals(item.getSkuId()))
+                    .findFirst()
+                    .ifPresent(si -> {
+                        BigDecimal newQty = passQty.max(BigDecimal.ZERO);
+                        if (newQty.compareTo(si.getOrderedQty()) < 0) {
+                            log.info("RETURN_SCRAP: reduce orderedQty sku={} {} → {}",
+                                    item.getSkuId(), si.getOrderedQty(), newQty);
+                            si.setOrderedQty(newQty);
+                            salesOrderItemRepository.save(si);
+                        }
+                    });
+        }
+    }
+
+    /** Hủy picking task cũ (đã PICKED/QC_IN_PROGRESS) để Keeper tạo task mới. */
+    private void cancelOldPickingTask(Long soId, Long warehouseId) {
+        pickingTaskRepository.findByWarehouseIdAndSoId(warehouseId, soId).stream()
+                .filter(t -> !"CANCELLED".equals(t.getStatus()) && !"COMPLETED".equals(t.getStatus()))
+                .forEach(t -> {
+                    t.setStatus("CANCELLED");
+                    pickingTaskRepository.save(t);
+                    log.info("RETURN_SCRAP: cancelled old picking task #{}", t.getPickingTaskId());
+                });
     }
 
     /**
@@ -544,7 +692,7 @@ public class OutboundQcService {
         Optional<LocationEntity> existing = locationRepository.findDefectBinByWarehouse(warehouseId);
         if (existing.isPresent() && existing.get().getZoneId() != null) return existing.get();
 
-        // 2. Tim zone defect theo tên — hỗ trợ nhiều variant: Z-DEFECT, DEFEQ, Z-DEFEQ, DEFECT, DAMAGE
+        // 2. Tim zone defect theo tên — hỗ trợ nhiều variant
         List<String> defectZoneCandidates = List.of("Z-DEFECT", "DEFEQ", "Z-DEFEQ", "DEFECT", "Z-DAMAGE", "DAMAGE");
         org.example.sep26management.infrastructure.persistence.entity.ZoneEntity foundDefectZone = null;
         for (String candidate : defectZoneCandidates) {
@@ -567,21 +715,17 @@ public class OutboundQcService {
                     .findFirst();
             if (defectBinInZone.isPresent()) return defectBinInZone.get();
 
-            // 2b. Lay bin dau tien trong zone defect, danh dau is_defect=true cho TẤT CẢ bins trong zone
-            // (không chỉ 1 bin) để allocation queries loại trừ được toàn bộ zone
+            // 2b. Lay bin dau tien trong zone defect, danh dau is_defect=true
             List<LocationEntity> activeBins = binsInZone.stream()
                     .filter(l -> Boolean.TRUE.equals(l.getActive())
                             && org.example.sep26management.application.enums.LocationType.BIN.equals(l.getLocationType()))
                     .collect(java.util.stream.Collectors.toList());
 
             if (!activeBins.isEmpty()) {
-                // Đánh is_defect=true cho TẤT CẢ bins trong zone defect
                 for (LocationEntity bin : activeBins) {
                     if (!Boolean.TRUE.equals(bin.getIsDefect())) {
                         bin.setIsDefect(true);
                         locationRepository.save(bin);
-                        log.info("Marked ALL bins as is_defect=true in defect zone '{}': {}",
-                                foundDefectZone.getZoneCode(), bin.getLocationCode());
                     }
                 }
                 return activeBins.get(0);
@@ -625,19 +769,19 @@ public class OutboundQcService {
                 });
     }
 
-    /** Reset qc_result → null cho FAIL/HOLD items để Keeper re-pick. */
-    private void resetFailItemsForRepick(Long soId) {
-        List<PickingTaskItemEntity> failItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId)
-                .stream()
-                .filter(i -> "FAIL".equals(i.getQcResult()) || "HOLD".equals(i.getQcResult()))
-                .collect(Collectors.toList());
-        for (PickingTaskItemEntity item : failItems) {
+    /** Reset toàn bộ QC state của task items để task mới có thể scan sạch. */
+    private void resetQcForRepick(Long soId) {
+        List<PickingTaskItemEntity> items = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
+        for (PickingTaskItemEntity item : items) {
             item.setQcResult(null);
             item.setQcScannedAt(null);
-            item.setQcNote("[Reset — re-pick required after DAMAGE RETURN_SCRAP]");
+            item.setQcPassQty(BigDecimal.ZERO);
+            item.setQcFailQty(BigDecimal.ZERO);
+            item.setQcNote("[Reset after RETURN_SCRAP — re-pick required]");
+            item.setPickedQty(BigDecimal.ZERO);
             pickingTaskItemRepository.save(item);
         }
-        log.info("Reset {} FAIL/HOLD items for re-pick, soId={}", failItems.size(), soId);
+        log.info("resetQcForRepick: reset {} items for soId={}", items.size(), soId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -668,18 +812,15 @@ public class OutboundQcService {
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
-                // ── Realtime: notify KEEPER đơn đang chờ nhập thêm hàng ──────
                 notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
                         so.getSoId(), so.getSoCode(), "Chờ nhập bù hàng — tạm giữ đơn");
             }
             case "CLOSE_SHORT" -> {
-                // [GAP 3 FIX] Cắt giảm orderedQty về available → SO → APPROVED → re-Allocate
                 adjustOrderedQtyToAvailable(so);
                 so.setStatus("APPROVED");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → APPROVED (CLOSE_SHORT, re-Allocate ready)", so.getSoCode());
-                // ── Realtime: notify KEEPER cần phân bổ lại sau khi cắt số lượng ──
                 notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
                         so.getSoId(), so.getSoCode(), "Đã cắt số lượng thiếu — cần phân bổ lại");
             }
@@ -776,10 +917,9 @@ public class OutboundQcService {
         salesOrderRepository.save(so);
         log.info("SO {} → DISPATCHED", so.getSoCode());
 
-        // ── Realtime: notify MANAGER + KEEPER đơn đã xuất kho thành công ─────
         String customerName = customerRepository.findById(so.getCustomerId())
                 .map(c -> c.getCustomerName()).orElse("—");
-        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_dispatched",
                 so.getSoId(), so.getSoCode(), customerName + " — Đã xuất kho");
 
         return ApiResponse.success("Order dispatched. Status: DISPATCHED", null);

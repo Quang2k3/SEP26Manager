@@ -350,7 +350,12 @@ public class OutboundService {
                                     .toList())));
         }
 
-        // Đủ hàng → PENDING_APPROVAL chờ Manager duyệt như bình thường
+        // Đủ hàng → phân bổ tồn kho ngay trực tiếp để giam tồn kho (Tránh Manager duyệt cho 2 phiếu trùng nhau)
+        AllocateStockRequest allocReq = new AllocateStockRequest();
+        allocReq.setDocumentId(soId);
+        allocReq.setOrderType(OutboundType.SALES_ORDER);
+        allocateStockService.allocateStock(allocReq, userId, ip, ua);
+
         so.setStatus("PENDING_APPROVAL");
         soRepository.save(so);
 
@@ -432,7 +437,9 @@ public class OutboundService {
             }
         }
 
-        so.setStatus("APPROVED");
+        // [FIX] Vì Keeper đã cấp phát tồn kho (ALLOCATED) ngay từ bước SUBMIT, nên khi duyệt, 
+        // phiếu xuất sẽ nhảy thẳng qua trạng thái ALLOCATED (bỏ qua APPROVED)
+        so.setStatus("ALLOCATED");
         so.setApprovedBy(managerId);
         so.setApprovedAt(LocalDateTime.now());
         if (request != null && request.getNote() != null) so.setNote(request.getNote());
@@ -441,14 +448,21 @@ public class OutboundService {
         auditLogService.logAction(managerId, "OUTBOUND_APPROVED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " approved", ip, ua);
 
-        // ── Realtime: notify KEEPER (người tạo đơn) lệnh xuất vừa được duyệt ──
+        // ── Realtime: notify KEEPER (người tạo đơn) + broadcast tới role KEEPER ──
         CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
         final String approveSubtitle = custForNotif != null ? custForNotif.getCustomerName() : "—";
         final Long approvedSoId = soId;
         final String approvedSoCode = so.getSoCode();
+        // 1. Notify user cụ thể (creator)
         userRepository.findById(so.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "outbound_approved",
                         approvedSoId, approvedSoCode, approveSubtitle));
+        // 2. Broadcast tới toàn bộ KEEPER để list tự refresh
+        notificationService.notifyRole("KEEPER", "outbound_approved",
+                approvedSoId, approvedSoCode, approveSubtitle);
+        // 3. [FIX] Broadcast tới QC để danh sách xuất hiển thị realtime
+        notificationService.notifyRole("QC", "outbound_approved",
+                approvedSoId, approvedSoCode, approveSubtitle + " — đã duyệt, chờ lấy hàng");
 
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_APPROVED_SUCCESS,
@@ -479,8 +493,23 @@ public class OutboundService {
         so.setApprovedAt(LocalDateTime.now());
         soRepository.save(so);
 
+        // [FIX] Giải phóng toàn bộ Tồn kho đang bị Giữ vì đơn này bị quản lý từ chối
+        allocateStockService.cancelReservations("sales_orders", soId);
+
         auditLogService.logAction(managerId, "OUTBOUND_REJECTED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " rejected. Reason: " + rejectionReason, ip, ua);
+
+        // ── Realtime: notify KEEPER (người tạo) + broadcast tới role KEEPER ──────────────────
+        CustomerEntity custForReject = customerRepository.findById(so.getCustomerId()).orElse(null);
+        final String rejectSubtitle = (custForReject != null ? custForReject.getCustomerName() : "—")
+                + " — " + rejectionReason;
+        final Long rejectedSoId = soId;
+        final String rejectedSoCode = so.getSoCode();
+        userRepository.findById(so.getCreatedBy()).ifPresent(u ->
+                notificationService.notifyUser(u.getEmail(), "outbound_rejected",
+                        rejectedSoId, rejectedSoCode, rejectSubtitle));
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "outbound_rejected",
+                rejectedSoId, rejectedSoCode, rejectSubtitle);
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);

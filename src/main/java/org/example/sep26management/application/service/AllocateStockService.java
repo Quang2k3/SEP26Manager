@@ -55,21 +55,25 @@ public class AllocateStockService {
         Long warehouseId;
         String documentCode;
         List<SkuQtyPair> required = new ArrayList<>();
+        java.util.Map<Long, java.math.BigDecimal> groupedMap = new java.util.LinkedHashMap<>();
 
         if (request.getOrderType() == OutboundType.SALES_ORDER) {
             SalesOrderEntity so = soRepository.findById(request.getDocumentId())
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            // Allow re-allocate from APPROVED or WAITING_STOCK (after Manager resolves WAIT_BACKORDER)
-            if (!"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
+            // Allow allocate from DRAFT (during submit), APPROVED, or WAITING_STOCK
+            if (!"DRAFT".equals(so.getStatus()) && !"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
                 throw new BusinessException(MessageConstants.ALLOCATE_MUST_BE_APPROVED);
             }
 
             warehouseId = so.getWarehouseId();
             documentCode = so.getSoCode();
             soItemRepository.findBySoId(so.getSoId())
-                    .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getOrderedQty())));
+                    .forEach(i -> groupedMap.merge(i.getSkuId(), i.getOrderedQty(), java.math.BigDecimal::add));
+            
+            // Populate required early for the WAITING_STOCK and APPROVED guards
+            groupedMap.forEach((sku, qty) -> required.add(new SkuQtyPair(sku, qty)));
 
             // [BUG-FIX] WAITING_STOCK guard: chỉ cho phép re-allocate khi tồn kho ĐÃ ĐỦ
             // toàn bộ yêu cầu. Nếu chưa đủ, block và yêu cầu chờ nhập thêm.
@@ -138,7 +142,9 @@ public class AllocateStockService {
             warehouseId = transfer.getFromWarehouseId();
             documentCode = transfer.getTransferCode();
             transferItemRepository.findByTransferId(transfer.getTransferId())
-                    .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getQuantity())));
+                    .forEach(i -> groupedMap.merge(i.getSkuId(), i.getQuantity(), java.math.BigDecimal::add));
+            
+            groupedMap.forEach((sku, qty) -> required.add(new SkuQtyPair(sku, qty)));
         }
 
         if (required.isEmpty()) {
@@ -172,9 +178,6 @@ public class AllocateStockService {
 
             List<InventoryAllocationRepository.FEFOAllocationProjection> stocks =
                     allocationRepository.findAvailableStockFEFO(warehouseId, pair.skuId);
-            if (stocks.isEmpty()) {
-                stocks = allocationRepository.findAvailableStockFEFONoLot(warehouseId, pair.skuId);
-            }
 
             for (InventoryAllocationRepository.FEFOAllocationProjection stock : stocks) {
                 if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
@@ -218,12 +221,14 @@ public class AllocateStockService {
         if (fullyAllocated) {
             if (request.getOrderType() == OutboundType.SALES_ORDER) {
                 soRepository.findById(request.getDocumentId()).ifPresent(so -> {
-                    so.setStatus("ALLOCATED");
-                    soRepository.save(so);
-                    log.info("SO {} status → ALLOCATED", so.getSoCode());
-                    // ── Realtime: notify KEEPER đơn đã phân bổ, cần tạo pick list ──
-                    notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
-                            so.getSoId(), so.getSoCode(), "Đã phân bổ tồn kho — cần tạo Pick List");
+                    if ("APPROVED".equals(so.getStatus()) || "WAITING_STOCK".equals(so.getStatus())) {
+                        so.setStatus("ALLOCATED");
+                        soRepository.save(so);
+                        log.info("SO {} status → ALLOCATED", so.getSoCode());
+                        // ── Realtime: notify KEEPER đơn đã phân bổ, cần tạo pick list ──
+                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                                so.getSoId(), so.getSoCode(), "Đã phân bổ tồn kho — cần tạo Pick List");
+                    }
                 });
             } else {
                 transferRepository.findById(request.getDocumentId()).ifPresent(t -> {
@@ -251,6 +256,25 @@ public class AllocateStockService {
                 .allocations(allocations).shortages(shortages.isEmpty() ? null : shortages).build());
     }
 
+    @Transactional
+    public void cancelReservations(String referenceTable, Long documentId) {
+        List<ReservationEntity> existingReservations = reservationRepository
+                .findByReferenceTableAndReferenceIdAndStatus(referenceTable, documentId, "OPEN");
+        for (ReservationEntity existing : existingReservations) {
+            if (existing.getLocationId() != null) {
+                snapshotRepository.incrementReservedByLocationAndSku(
+                        existing.getLocationId(), existing.getSkuId(), existing.getLotId(),
+                        existing.getQuantity().negate());
+            } else {
+                snapshotRepository.incrementReservedByWarehouseAndSku(
+                        existing.getWarehouseId(), existing.getSkuId(), existing.getQuantity().negate());
+            }
+            existing.setStatus("CANCELLED");
+            reservationRepository.save(existing);
+        }
+        log.info("Cancelled {} reservations for {} ID {}", existingReservations.size(), referenceTable, documentId);
+    }
+
     /**
      * Keeper báo thiếu hàng — tạo Incident SHORTAGE với soId để Manager xử lý.
      * [V20 FIX] Lưu soId vào incident.soId để countOpenIncidentsBySoId hoạt động.
@@ -262,6 +286,7 @@ public class AllocateStockService {
         Long warehouseId;
         String documentCode;
         List<SkuQtyPair> required = new ArrayList<>();
+        java.util.Map<Long, java.math.BigDecimal> groupedMap = new java.util.LinkedHashMap<>();
 
         if (orderType == OutboundType.SALES_ORDER) {
             SalesOrderEntity so = soRepository.findById(documentId)
@@ -270,7 +295,7 @@ public class AllocateStockService {
             warehouseId = so.getWarehouseId();
             documentCode = so.getSoCode();
             soItemRepository.findBySoId(so.getSoId())
-                    .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getOrderedQty())));
+                    .forEach(i -> groupedMap.merge(i.getSkuId(), i.getOrderedQty(), java.math.BigDecimal::add));
         } else {
             TransferEntity transfer = transferRepository.findById(documentId)
                     .orElseThrow(() -> new ResourceNotFoundException(
@@ -278,8 +303,10 @@ public class AllocateStockService {
             warehouseId = transfer.getFromWarehouseId();
             documentCode = transfer.getTransferCode();
             transferItemRepository.findByTransferId(transfer.getTransferId())
-                    .forEach(i -> required.add(new SkuQtyPair(i.getSkuId(), i.getQuantity())));
+                    .forEach(i -> groupedMap.merge(i.getSkuId(), i.getQuantity(), java.math.BigDecimal::add));
         }
+        
+        groupedMap.forEach((sku, qty) -> required.add(new SkuQtyPair(sku, qty)));
 
         List<CreateIncidentRequest.IncidentItemDto> incidentItems = new ArrayList<>();
         StringBuilder desc = new StringBuilder("Thiếu tồn kho khi phân bổ lệnh xuất " + documentCode + ": ");

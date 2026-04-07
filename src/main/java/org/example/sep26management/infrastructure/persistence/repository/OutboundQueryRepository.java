@@ -20,4 +20,6 @@ public interface OutboundQueryRepository extends JpaRepository<SalesOrderEntity,
             Long warehouseId, String status, String keyword);
 
     long countByWarehouseIdAndStatus(Long warehouseId, String status);
+
+    long countByWarehouseIdAndStatusAndCreatedBy(Long warehouseId, String status, Long createdBy);
 }

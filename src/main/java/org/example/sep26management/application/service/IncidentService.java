@@ -358,7 +358,7 @@ public class IncidentService {
                                     && iItem.getActionReturnQty().compareTo(java.math.BigDecimal.ZERO) > 0) {
                                 receivingItemRepo
                                     .findByReceivingOrderReceivingIdAndSkuId(order.getReceivingId(), iItem.getSkuId())
-                                    .ifPresent(ri -> {
+                                    .stream().findFirst().ifPresent(ri -> {
                                         java.math.BigDecimal newQty = ri.getReceivedQty() != null
                                                 ? ri.getReceivedQty().subtract(iItem.getActionReturnQty())
                                                 : java.math.BigDecimal.ZERO;

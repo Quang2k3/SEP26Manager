@@ -213,7 +213,7 @@ public class OutboundController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Thống kê lệnh xuất kho")
     public ResponseEntity<ApiResponse<OutboundSummaryResponse>> getSummary() {
-        return ResponseEntity.ok(outboundListService.getSummary(getWarehouseId()));
+        return ResponseEntity.ok(outboundListService.getSummary(getWarehouseId(), getUserId(), getCurrentRole()));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -300,6 +300,20 @@ public class OutboundController {
         return ResponseEntity.ok(pickListService.getPickListByDocument(documentId, getWarehouseId()));
     }
 
+    /**
+     * [FIX REALTIME] Keeper scan 1 item picking → cập nhật pickedQty realtime.
+     * Web poll fetchPickList mỗi 2s sẽ thấy ngay số lượng đã quét.
+     */
+    @PatchMapping("/pick-list/{taskId}/items/{itemId}/scan")
+    public ResponseEntity<ApiResponse<Void>> scanPickItem(
+            @PathVariable Long taskId,
+            @PathVariable Long itemId,
+            @RequestBody java.util.Map<String, Object> body) {
+        java.math.BigDecimal qty = new java.math.BigDecimal(body.getOrDefault("pickedQty", "1").toString());
+        String sessionId = body.getOrDefault("sessionId", "").toString();
+        return ResponseEntity.ok(pickListService.scanPickItem(taskId, itemId, qty, sessionId.isBlank() ? null : sessionId));
+    }
+
     @PatchMapping("/pick-list/{taskId}/confirm-picked")
     @PreAuthorize("hasRole('KEEPER')")
     @Operation(summary = "Keeper xác nhận đã lấy đủ hàng",
@@ -307,6 +321,15 @@ public class OutboundController {
     public ResponseEntity<ApiResponse<PickListResponse>> confirmPicked(
             @PathVariable Long taskId, HttpServletRequest http) {
         return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http)));
+    }
+
+    @DeleteMapping("/pick-list/{taskId}")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @Operation(summary = "Huỷ Pick List",
+            description = "Huỷ bỏ phiên lấy hàng đang OPEN/IN_PROGRESS. Đưa đơn xuất kho quay về trạng thái ALLOCATED để chỉnh sửa phân bổ.")
+    public ResponseEntity<ApiResponse<Void>> cancelPickTask(
+            @PathVariable Long taskId, HttpServletRequest http) {
+        return ResponseEntity.ok(pickListService.cancelPickTask(taskId, getUserId(), getIp(http), ua(http)));
     }
 
     @PostMapping("/pick-list/{taskId}/scan-url")
@@ -347,7 +370,8 @@ public class OutboundController {
                                 + " vừa được Keeper khác nhận. Vui lòng thử lại."));
             }
             try {
-                notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"},
+                // [FIX] Thêm QC vào picking_claimed — QC cần biết Keeper đã nhận task
+                notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER", "QC"},
                         "picking_claimed", taskId, "Task #" + taskId,
                         "Keeper userId=" + userId + " bắt đầu picking");
             } catch (Exception ignored) {}

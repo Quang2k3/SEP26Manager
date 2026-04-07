@@ -59,6 +59,9 @@ public class OutboundListService {
             List<SalesOrderEntity> soList = fetchSalesOrders(warehouseId, status, keyword, hasStatus, hasKeyword);
             for (SalesOrderEntity so : soList) {
                 try {
+                    if (!(isManager(currentUserRole) || isQc(currentUserRole)) && so.getCreatedBy() != null && !so.getCreatedBy().equals(currentUserId)) {
+                        continue;
+                    }
                     combined.add(buildSoResponse(so, currentUserId, currentUserRole));
                 } catch (Exception e) {
                     log.warn("Skip SO {}: {}", so.getSoId(), e.getMessage());
@@ -71,6 +74,9 @@ public class OutboundListService {
             List<TransferEntity> transfers = fetchTransfers(warehouseId, status, hasStatus);
             for (TransferEntity t : transfers) {
                 try {
+                    if (!(isManager(currentUserRole) || isQc(currentUserRole)) && t.getCreatedBy() != null && !t.getCreatedBy().equals(currentUserId)) {
+                        continue;
+                    }
                     if (hasKeyword && !t.getTransferCode().toLowerCase().contains(keyword.toLowerCase())) continue;
                     combined.add(buildTransferResponse(t, currentUserId, currentUserRole));
                 } catch (Exception e) {
@@ -103,21 +109,21 @@ public class OutboundListService {
     }
 
     @Transactional(readOnly = true)
-    public ApiResponse<OutboundSummaryResponse> getSummary(Long warehouseId) {
+    public ApiResponse<OutboundSummaryResponse> getSummary(Long warehouseId, Long currentUserId, String currentUserRole) {
         if (warehouseId == null) {
             return ApiResponse.success("OK", OutboundSummaryResponse.builder().build());
         }
-        long draft      = safeCount(warehouseId, "DRAFT");
-        long pending    = safeCount(warehouseId, "PENDING_APPROVAL");
-        long approved   = safeCount(warehouseId, "APPROVED");
-        long allocated  = safeCount(warehouseId, "ALLOCATED");
-        long picking    = safeCount(warehouseId, "PICKING");
-        long qcScan     = safeCount(warehouseId, "QC_SCAN");
-        long qcPassed   = safeCount(warehouseId, "QC_PASSED");
-        long onHold     = safeCount(warehouseId, "ON_HOLD");
-        long waitingStock = safeCount(warehouseId, "WAITING_STOCK");
-        long dispatched = safeCount(warehouseId, "DISPATCHED");
-        long rejected   = safeCount(warehouseId, "REJECTED");
+        long draft      = safeCount(warehouseId, "DRAFT", currentUserId, currentUserRole);
+        long pending    = safeCount(warehouseId, "PENDING_APPROVAL", currentUserId, currentUserRole);
+        long approved   = safeCount(warehouseId, "APPROVED", currentUserId, currentUserRole);
+        long allocated  = safeCount(warehouseId, "ALLOCATED", currentUserId, currentUserRole);
+        long picking    = safeCount(warehouseId, "PICKING", currentUserId, currentUserRole);
+        long qcScan     = safeCount(warehouseId, "QC_SCAN", currentUserId, currentUserRole);
+        long qcPassed   = safeCount(warehouseId, "QC_PASSED", currentUserId, currentUserRole);
+        long onHold     = safeCount(warehouseId, "ON_HOLD", currentUserId, currentUserRole);
+        long waitingStock = safeCount(warehouseId, "WAITING_STOCK", currentUserId, currentUserRole);
+        long dispatched = safeCount(warehouseId, "DISPATCHED", currentUserId, currentUserRole);
+        long rejected   = safeCount(warehouseId, "REJECTED", currentUserId, currentUserRole);
 
         return ApiResponse.success("OK", OutboundSummaryResponse.builder()
                 .total(draft + pending + approved + allocated + picking + qcScan + qcPassed + onHold + waitingStock + dispatched + rejected)
@@ -226,8 +232,11 @@ public class OutboundListService {
         }
     }
 
-    private long safeCount(Long warehouseId, String status) {
+    private long safeCount(Long warehouseId, String status, Long currentUserId, String currentUserRole) {
         try {
+            if (!(isManager(currentUserRole) || isQc(currentUserRole))) {
+                return soQueryRepository.countByWarehouseIdAndStatusAndCreatedBy(warehouseId, status, currentUserId);
+            }
             return soQueryRepository.countByWarehouseIdAndStatus(warehouseId, status);
         } catch (Exception e) {
             log.warn("safeCount({},{}) failed: {}", warehouseId, status, e.getMessage());
@@ -247,6 +256,7 @@ public class OutboundListService {
     private boolean owns(Long c, Long u) { return c != null && c.equals(u); }
     private boolean isManager(String r)  { return "MANAGER".equals(r) || "ROLE_MANAGER".equals(r); }
     private boolean isKeeper(String r)   { return "KEEPER".equals(r)  || "ROLE_KEEPER".equals(r); }
+    private boolean isQc(String r)       { return "QC".equals(r)      || "ROLE_QC".equals(r); }
 
     // [FIX TC-1A] true if any item in DRAFT SO has available < requested
     private boolean checkDraftShortage(Long warehouseId, Long soId) {

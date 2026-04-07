@@ -28,7 +28,11 @@ public class PutawayAllocateRequest {
     @AllArgsConstructor
     @Builder
     public static class AllocateItem {
-        @Schema(description = "ID SKU cần cất", example = "3")
+        @Schema(description = "ID của Item trong task cần cất (unique per lot)", example = "3")
+        @NotNull
+        private Long putawayTaskItemId;
+
+        @Schema(description = "ID SKU cần cất (để log/reference)", example = "3")
         @NotNull
         private Long skuId;
 

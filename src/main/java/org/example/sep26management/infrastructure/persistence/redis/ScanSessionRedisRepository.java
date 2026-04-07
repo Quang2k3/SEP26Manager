@@ -86,10 +86,14 @@ public class ScanSessionRedisRepository {
             "local skuCode = ARGV[5]\n" +
             "local skuName = ARGV[6]\n" +
             "local barcode = ARGV[7]\n" +
+            "local lotNumber = ARGV[8]\n" +
+            "if lotNumber == '' then lotNumber = nil end\n" +
             "local found = false\n" +
             "local newQty = delta\n" +
             "for i, line in ipairs(data.lines) do\n" +
-            "  if tostring(line.skuId) == skuId and line.condition == cond then\n" +
+            "  local lineLot = line.lotNumber or ''\n" +
+            "  local argLot = lotNumber or ''\n" +
+            "  if tostring(line.skuId) == skuId and line.condition == cond and lineLot == argLot then\n" +
             "    line.qty = (line.qty or 0) + delta\n" +
             "    newQty = line.qty\n" +
             "    found = true\n" +
@@ -97,12 +101,12 @@ public class ScanSessionRedisRepository {
             "  end\n" +
             "end\n" +
             "if not found then\n" +
-            "  table.insert(data.lines, {skuId=tonumber(skuId), condition=cond, qty=delta, skuCode=skuCode, skuName=skuName, barcode=barcode})\n" +
+            "  table.insert(data.lines, {skuId=tonumber(skuId), condition=cond, lotNumber=lotNumber, qty=delta, skuCode=skuCode, skuName=skuName, barcode=barcode})\n" +
             "end\n" +
             "redis.call('SET', KEYS[1], cjson.encode(data), 'EX', ttl)\n" +
             "return tostring(newQty)\n";
 
-    public String atomicUpdateLine(String sessionId, Long skuId, String condition, java.math.BigDecimal delta, String skuCode, String skuName, String barcode) {
+    public String atomicUpdateLine(String sessionId, Long skuId, String condition, java.math.BigDecimal delta, String skuCode, String skuName, String barcode, String lotNumber) {
         try {
             DefaultRedisScript<String> script = new DefaultRedisScript<>(LUA_UPDATE_LINE, String.class);
             long ttlSec = TTL.getSeconds();
@@ -117,7 +121,8 @@ public class ScanSessionRedisRepository {
                     String.valueOf(ttlSec),
                     skuCode != null ? skuCode : "",
                     skuName != null ? skuName : "",
-                    barcode != null ? barcode : ""
+                    barcode != null ? barcode : "",
+                    lotNumber != null ? lotNumber : ""
             );
             return result != null ? result.toString() : null;
         } catch (Exception e) {
