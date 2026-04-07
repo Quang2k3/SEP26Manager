@@ -1259,6 +1259,19 @@ public class ReceivingOrderService {
                         List<IncidentItemEntity> discrepancyItems = incidentItems.stream()
                                         .filter(i -> !"DAMAGE".equals(i.getReasonCode())).collect(Collectors.toList());
 
+                        // [FIX] Nếu item DAMAGE cũng có shortage/overage (expectedQty ≠ actualQty)
+                        // thì chuyển sang discrepancy để FE hiển thị đúng phán quyết
+                        // VD: expected=3, actual=2, fail=1 → DAMAGE + SHORTAGE → gộp thành DISCREPANCY
+                        boolean damageHasQtyMismatch = damageItems.stream().anyMatch(i ->
+                                        i.getExpectedQty() != null && i.getActualQty() != null
+                                        && i.getExpectedQty().compareTo(BigDecimal.ZERO) > 0
+                                        && i.getExpectedQty().compareTo(i.getActualQty()) != 0);
+                        if (damageHasQtyMismatch && discrepancyItems.isEmpty()) {
+                                // Chuyển tất cả DAMAGE items sang discrepancy
+                                discrepancyItems = new ArrayList<>(damageItems);
+                                damageItems = new ArrayList<>();
+                        }
+
                         List<IncidentEntity> createdIncidents = new ArrayList<>();
 
                         // ════════════════════════════════════════════════════════════════════
