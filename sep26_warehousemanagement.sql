@@ -1459,3 +1459,11 @@ CREATE TABLE IF NOT EXISTS putaway_allocations (
 
 CREATE INDEX IF NOT EXISTS idx_putaway_alloc_task ON putaway_allocations(putaway_task_id, status);
 CREATE INDEX IF NOT EXISTS idx_putaway_alloc_location ON putaway_allocations(location_id, status);
+
+-- ============================================================
+-- 11) MIGRATION: Thêm lot_number và expiry_date cho incident_items
+-- Để hiển thị thông tin lô hàng trong incident detail
+-- ============================================================
+ALTER TABLE incident_items ADD COLUMN IF NOT EXISTS lot_number VARCHAR(100);
+ALTER TABLE incident_items ADD COLUMN IF NOT EXISTS expiry_date DATE;
+ALTER TABLE incident_items ADD COLUMN IF NOT EXISTS attachment_url TEXT;

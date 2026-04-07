@@ -4,6 +4,7 @@ import lombok.*;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Getter
 @Setter
@@ -42,4 +43,10 @@ public class IncidentItemResponse {
     // [FIX QC] URL ảnh bằng chứng hàng hỏng từ QC scan FAIL
     @Schema(description = "URL ảnh bằng chứng hàng hỏng (chụp khi scan FAIL)")
     private String attachmentUrl;
+
+    @Schema(description = "Số lô", example = "LOT-2026-001")
+    private String lotNumber;
+
+    @Schema(description = "Hạn sử dụng", example = "2027-04-07")
+    private LocalDate expiryDate;
 }

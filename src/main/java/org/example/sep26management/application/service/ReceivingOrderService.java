@@ -1107,6 +1107,8 @@ public class ReceivingOrderService {
                                                 .note("Hàng hỏng phát hiện khi QC (Lot: "
                                                                 + (lotNumber == null ? "" : lotNumber) + ")")
                                                 .attachmentUrl(attachmentUrl)
+                                                .lotNumber(lotNumber)
+                                                .expiryDate(dbItem.getExpiryDate())
                                                 .actionPassQty(BigDecimal.ZERO)
                                                 .actionReturnQty(BigDecimal.ZERO)
                                                 .actionScrapQty(BigDecimal.ZERO)

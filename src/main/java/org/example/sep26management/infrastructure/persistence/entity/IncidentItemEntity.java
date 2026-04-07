@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Entity
 @Table(name = "incident_items")
@@ -56,4 +57,11 @@ public class IncidentItemEntity {
     // [FIX QC] URL ảnh bằng chứng hàng hỏng — chụp trên điện thoại khi scan FAIL
     @Column(name = "attachment_url", columnDefinition = "TEXT")
     private String attachmentUrl;
+
+    // [FIX] Số lô và hạn sử dụng — hiển thị trong incident detail
+    @Column(name = "lot_number", length = 100)
+    private String lotNumber;
+
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
 }

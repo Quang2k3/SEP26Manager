@@ -705,6 +705,9 @@ public class IncidentService {
                     .note(item.getNote())
                     // [FIX QC] Trả attachmentUrl — FE hiển ảnh trong IncidentDetailModal
                     .attachmentUrl(item.getAttachmentUrl())
+                    // [FIX] Trả lotNumber + expiryDate cho FE hiển thị trong incident detail
+                    .lotNumber(item.getLotNumber())
+                    .expiryDate(item.getExpiryDate())
                     .build();
         }).collect(Collectors.toList());
 
