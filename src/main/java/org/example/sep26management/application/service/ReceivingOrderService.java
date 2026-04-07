@@ -1117,6 +1117,59 @@ public class ReceivingOrderService {
                         receivingItemRepo.save(dbItem);
                 }
 
+                // ── STEP 1b: Phát hiện thiếu/thừa so với giấy tờ (expectedQty vs scannedQty) ──
+                // Case: Keeper tạo phiếu expectedQty=2 nhưng thực tế chỉ scan được 1,
+                // QC cũng chỉ đếm được 1 → QC khớp Keeper (cả 2 = 1) → STEP 0 pass.
+                // Nhưng thực nhận (1) ≠ giấy tờ (2) → cần tạo incident SHORTAGE.
+                for (Map.Entry<Long, BigDecimal> entry : aggExpectedBySkuId.entrySet()) {
+                        Long skuId = entry.getKey();
+                        BigDecimal expectedQty = entry.getValue();
+                        BigDecimal scannedQty = aggScannedBySkuId.getOrDefault(skuId, BigDecimal.ZERO);
+
+                        // Chỉ check khi expectedQty > 0 (bỏ qua hàng ngoài phiếu có expected=0)
+                        if (expectedQty.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+                        // So sánh expectedQty vs scannedQty
+                        if (expectedQty.compareTo(scannedQty) != 0) {
+                                BigDecimal diff = scannedQty.subtract(expectedQty);
+                                String skuCode = skuRepo.findById(skuId)
+                                                .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
+
+                                String reasonCode;
+                                String note;
+                                if (diff.compareTo(BigDecimal.ZERO) < 0) {
+                                        // Thiếu: thực nhận < giấy tờ
+                                        reasonCode = "SHORTAGE";
+                                        note = "Thiếu hàng: giấy tờ=" + expectedQty
+                                                        + ", thực nhận=" + scannedQty
+                                                        + " (thiếu " + diff.abs() + ")";
+                                } else {
+                                        // Thừa: thực nhận > giấy tờ
+                                        reasonCode = "OVERAGE";
+                                        note = "Thừa hàng: giấy tờ=" + expectedQty
+                                                        + ", thực nhận=" + scannedQty
+                                                        + " (thừa " + diff.abs() + ")";
+                                }
+
+                                hasIssues = true;
+                                IncidentItemEntity discItem = IncidentItemEntity.builder()
+                                                .skuId(skuId)
+                                                .damagedQty(BigDecimal.ZERO)
+                                                .expectedQty(expectedQty)
+                                                .actualQty(scannedQty)
+                                                .reasonCode(reasonCode)
+                                                .note(note)
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                incidentItems.add(discItem);
+
+                                log.info("Discrepancy detected: SKU {} — expected={}, actual={}, reason={}",
+                                                skuCode, expectedQty, scannedQty, reasonCode);
+                        }
+                }
+
                 // ── STEP 2: Phát hiện hàng ngoài lô (QC quét Key không có trên đơn) ──
                 for (Map.Entry<String, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
                         String key = entry.getKey();
