@@ -820,6 +820,19 @@ public class ReceivingOrderService {
                             + ", QC=" + qcTotal + ")");
                     mismatchedSkuIds.add(skuId);
                     mismatchedSkuCodes.add(skuCode);
+                } else {
+                    // [GUARD] Bắt lỗi nếu KEEPER & QC đều quét 0 nhưng đây là hàng ngoài phiếu đã cắm cờ
+                    ReceivingItemEntity item = dbItems.stream()
+                            .filter(i -> i.getSkuId().equals(skuId))
+                            .findFirst().orElse(null);
+                    if (item != null && Boolean.TRUE.equals(item.getQcRequired())
+                            && (item.getExpectedQty() == null || item.getExpectedQty().compareTo(BigDecimal.ZERO) == 0)
+                            && qcTotal.compareTo(BigDecimal.ZERO) == 0) {
+                        String skuCode = skuRepo.findById(skuId).map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
+                        mismatchDetails.add(skuCode + " (Kho phát hiện ngoài phiếu nhưng bị bỏ sót: Keeper=0, QC=0)");
+                        mismatchedSkuIds.add(skuId);
+                        mismatchedSkuCodes.add(skuCode);
+                    }
                 }
             }
 
@@ -881,15 +894,32 @@ public class ReceivingOrderService {
                 boolean existsInDb = dbItems.stream()
                         .anyMatch(i -> i.getSkuId().equals(mismatchSkuId));
                 if (!existsInDb) {
+                    BigDecimal qcQty = scannedData.containsKey(mismatchSkuId) 
+                            ? scannedData.get(mismatchSkuId).values().stream().reduce(BigDecimal.ZERO, BigDecimal::add)
+                            : BigDecimal.ZERO;
+
                     ReceivingItemEntity placeholder = ReceivingItemEntity.builder()
                             .receivingOrder(order)
                             .skuId(mismatchSkuId)
                             .expectedQty(BigDecimal.ZERO)
                             .receivedQty(BigDecimal.ZERO)
+                            .qcRequired(true)
+                            .note("[QC Flagged] QC phát hiện " + qcQty + " thùng ngoài phiếu. Yêu cầu Keeper bắt buộc scan xác nhận!")
                             .build();
                     receivingItemRepo.save(placeholder);
-                    log.info("Created placeholder ReceivingItem for extra SKU {} on order {}",
+                    log.info("Created flagged placeholder ReceivingItem for extra SKU {} on order {}",
                             mismatchSkuId, order.getReceivingCode());
+                } else {
+                    // Update existing item nếu cần thiết (phòng hờ)
+                    dbItems.stream()
+                        .filter(i -> i.getSkuId().equals(mismatchSkuId))
+                        .forEach(item -> {
+                            if (item.getExpectedQty() == null || item.getExpectedQty().compareTo(BigDecimal.ZERO) == 0) {
+                                item.setQcRequired(true);
+                                item.setNote("[QC Flagged] Hàng ngoài phiếu. Bắt buộc scan xác nhận!");
+                                receivingItemRepo.save(item);
+                            }
+                        });
                 }
             }
 
@@ -1701,6 +1731,7 @@ public class ReceivingOrderService {
                 .note(item.getNote())
                 .condition(item.getCondition())
                 .reasonCode(item.getReasonCode())
+                .qcRequired(item.getQcRequired())
                 .build();
     }
 

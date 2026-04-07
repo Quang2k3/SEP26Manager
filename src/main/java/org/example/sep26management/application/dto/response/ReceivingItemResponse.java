@@ -58,4 +58,7 @@ public class ReceivingItemResponse {
 
     @Schema(description = "Số lượng hàng hỏng (FAIL) — tính từ incident data", example = "1")
     private BigDecimal damagedQty;
+
+    @Schema(description = "Cờ yêu cầu Keeper bắt buộc scan lại do QC phát hiện (dành cho hàng ngoài phiếu)", example = "true")
+    private Boolean qcRequired;
 }
