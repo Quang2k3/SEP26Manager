@@ -1095,13 +1095,15 @@ public class ReceivingOrderService {
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                 hasIssues = true;
                                 dbItem.setCondition("FAIL");
+                                // [FIX] Dùng expectedQty thực tế thay vì ZERO
+                                // Trước đây set 0 → frontend hiểu nhầm là "hàng ngoài phiếu"
+                                BigDecimal skuExpectedQty = aggExpectedBySkuId.getOrDefault(skuId, BigDecimal.ZERO);
                                 IncidentItemEntity dmgItem = IncidentItemEntity.builder()
                                                 .skuId(skuId)
                                                 .damagedQty(failQty)
-                                                .expectedQty(BigDecimal.ZERO) // Sẽ gộp sau nếu cần, Damage report theo
-                                                                              // thực tế
+                                                .expectedQty(skuExpectedQty)
                                                 .actualQty(totalScanned)
-                                                .reasonCode("DAMAGE") // simplified
+                                                .reasonCode("DAMAGE")
                                                 .note("Hàng hỏng phát hiện khi QC (Lot: "
                                                                 + (lotNumber == null ? "" : lotNumber) + ")")
                                                 .attachmentUrl(attachmentUrl)
@@ -1118,9 +1120,9 @@ public class ReceivingOrderService {
                 }
 
                 // ── STEP 1b: Phát hiện thiếu/thừa so với giấy tờ (expectedQty vs scannedQty) ──
-                // Case: Keeper tạo phiếu expectedQty=2 nhưng thực tế chỉ scan được 1,
-                // QC cũng chỉ đếm được 1 → QC khớp Keeper (cả 2 = 1) → STEP 0 pass.
-                // Nhưng thực nhận (1) ≠ giấy tờ (2) → cần tạo incident SHORTAGE.
+                // Case: Keeper tạo phiếu expectedQty=3 nhưng thực tế chỉ scan được 2,
+                // QC cũng chỉ đếm được 2 → QC khớp Keeper (cả 2 = 2) → STEP 0 pass.
+                // Nhưng thực nhận (2) ≠ giấy tờ (3) → cần tạo/gộp incident SHORTAGE.
                 for (Map.Entry<Long, BigDecimal> entry : aggExpectedBySkuId.entrySet()) {
                         Long skuId = entry.getKey();
                         BigDecimal expectedQty = entry.getValue();
@@ -1135,38 +1137,55 @@ public class ReceivingOrderService {
                                 String skuCode = skuRepo.findById(skuId)
                                                 .map(SkuEntity::getSkuCode).orElse("SKU-" + skuId);
 
-                                String reasonCode;
-                                String note;
+                                String shortageNote;
                                 if (diff.compareTo(BigDecimal.ZERO) < 0) {
-                                        // Thiếu: thực nhận < giấy tờ
-                                        reasonCode = "SHORTAGE";
-                                        note = "Thiếu hàng: giấy tờ=" + expectedQty
+                                        shortageNote = "Thiếu hàng: giấy tờ=" + expectedQty
                                                         + ", thực nhận=" + scannedQty
                                                         + " (thiếu " + diff.abs() + ")";
                                 } else {
-                                        // Thừa: thực nhận > giấy tờ
-                                        reasonCode = "OVERAGE";
-                                        note = "Thừa hàng: giấy tờ=" + expectedQty
+                                        shortageNote = "Thừa hàng: giấy tờ=" + expectedQty
                                                         + ", thực nhận=" + scannedQty
                                                         + " (thừa " + diff.abs() + ")";
                                 }
 
-                                hasIssues = true;
-                                IncidentItemEntity discItem = IncidentItemEntity.builder()
-                                                .skuId(skuId)
-                                                .damagedQty(BigDecimal.ZERO)
-                                                .expectedQty(expectedQty)
-                                                .actualQty(scannedQty)
-                                                .reasonCode(reasonCode)
-                                                .note(note)
-                                                .actionPassQty(BigDecimal.ZERO)
-                                                .actionReturnQty(BigDecimal.ZERO)
-                                                .actionScrapQty(BigDecimal.ZERO)
-                                                .build();
-                                incidentItems.add(discItem);
+                                // [FIX] Kiểm tra xem SKU này đã có incident item từ STEP 1 (DAMAGE) chưa.
+                                // Nếu có → gộp thông tin shortage vào item đó, KHÔNG tạo thêm item mới.
+                                // VD: expected=3, actual=2 (1 PASS + 1 FAIL) → 1 item duy nhất gồm
+                                //     cả thông tin hỏng (damagedQty=1) và thiếu (expected=3 vs actual=2).
+                                final Long finalSkuId = skuId;
+                                java.util.Optional<IncidentItemEntity> existingItem = incidentItems.stream()
+                                                .filter(i -> finalSkuId.equals(i.getSkuId()))
+                                                .findFirst();
 
-                                log.info("Discrepancy detected: SKU {} — expected={}, actual={}, reason={}",
-                                                skuCode, expectedQty, scannedQty, reasonCode);
+                                if (existingItem.isPresent()) {
+                                        // Gộp shortage info vào item DAMAGE đã có
+                                        IncidentItemEntity existing = existingItem.get();
+                                        existing.setExpectedQty(expectedQty);
+                                        existing.setActualQty(scannedQty);
+                                        existing.setNote(existing.getNote() + " | " + shortageNote);
+                                        log.info("Discrepancy merged into existing DAMAGE item: SKU {} — expected={}, actual={}",
+                                                        skuCode, expectedQty, scannedQty);
+                                } else {
+                                        // Không có DAMAGE → tạo item SHORTAGE/OVERAGE mới
+                                        String reasonCode = diff.compareTo(BigDecimal.ZERO) < 0
+                                                        ? "SHORTAGE" : "OVERAGE";
+                                        hasIssues = true;
+                                        IncidentItemEntity discItem = IncidentItemEntity.builder()
+                                                        .skuId(skuId)
+                                                        .damagedQty(BigDecimal.ZERO)
+                                                        .expectedQty(expectedQty)
+                                                        .actualQty(scannedQty)
+                                                        .reasonCode(reasonCode)
+                                                        .note(shortageNote)
+                                                        .actionPassQty(BigDecimal.ZERO)
+                                                        .actionReturnQty(BigDecimal.ZERO)
+                                                        .actionScrapQty(BigDecimal.ZERO)
+                                                        .build();
+                                        incidentItems.add(discItem);
+                                }
+
+                                log.info("Discrepancy detected: SKU {} — expected={}, actual={}, diff={}",
+                                                skuCode, expectedQty, scannedQty, diff);
                         }
                 }
 
