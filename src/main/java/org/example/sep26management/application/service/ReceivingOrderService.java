@@ -1150,41 +1150,35 @@ public class ReceivingOrderService {
                                                         + " (thừa " + diff.abs() + ")";
                                 }
 
-                                // [FIX] Kiểm tra xem SKU này đã có incident item từ STEP 1 (DAMAGE) chưa.
-                                // Nếu có → gộp thông tin shortage vào item đó, KHÔNG tạo thêm item mới.
-                                // VD: expected=3, actual=2 (1 PASS + 1 FAIL) → 1 item duy nhất gồm
-                                //     cả thông tin hỏng (damagedQty=1) và thiếu (expected=3 vs actual=2).
-                                final Long finalSkuId = skuId;
-                                java.util.Optional<IncidentItemEntity> existingItem = incidentItems.stream()
-                                                .filter(i -> finalSkuId.equals(i.getSkuId()))
-                                                .findFirst();
+                                // Không gộp với DAMAGE → tạo item SHORTAGE/OVERAGE mới
+                                String reasonCode = diff.compareTo(BigDecimal.ZERO) < 0
+                                                ? "SHORTAGE" : "OVERAGE";
+                                hasIssues = true;
+                                
+                                final Long finalSkuIdDisc = skuId;
+                                String representativeLot = dbItems.stream()
+                                                .filter(i -> finalSkuIdDisc.equals(i.getSkuId()) && i.getLotNumber() != null && !i.getLotNumber().isEmpty())
+                                                .map(ReceivingItemEntity::getLotNumber)
+                                                .findFirst().orElse(null);
+                                java.time.LocalDate representativeExpiry = dbItems.stream()
+                                                .filter(i -> finalSkuIdDisc.equals(i.getSkuId()) && i.getExpiryDate() != null)
+                                                .map(ReceivingItemEntity::getExpiryDate)
+                                                .findFirst().orElse(null);
 
-                                if (existingItem.isPresent()) {
-                                        // Gộp shortage info vào item DAMAGE đã có
-                                        IncidentItemEntity existing = existingItem.get();
-                                        existing.setExpectedQty(expectedQty);
-                                        existing.setActualQty(scannedQty);
-                                        existing.setNote(existing.getNote() + " | " + shortageNote);
-                                        log.info("Discrepancy merged into existing DAMAGE item: SKU {} — expected={}, actual={}",
-                                                        skuCode, expectedQty, scannedQty);
-                                } else {
-                                        // Không có DAMAGE → tạo item SHORTAGE/OVERAGE mới
-                                        String reasonCode = diff.compareTo(BigDecimal.ZERO) < 0
-                                                        ? "SHORTAGE" : "OVERAGE";
-                                        hasIssues = true;
-                                        IncidentItemEntity discItem = IncidentItemEntity.builder()
-                                                        .skuId(skuId)
-                                                        .damagedQty(BigDecimal.ZERO)
-                                                        .expectedQty(expectedQty)
-                                                        .actualQty(scannedQty)
-                                                        .reasonCode(reasonCode)
-                                                        .note(shortageNote)
-                                                        .actionPassQty(BigDecimal.ZERO)
-                                                        .actionReturnQty(BigDecimal.ZERO)
-                                                        .actionScrapQty(BigDecimal.ZERO)
-                                                        .build();
-                                        incidentItems.add(discItem);
-                                }
+                                IncidentItemEntity discItem = IncidentItemEntity.builder()
+                                                .skuId(skuId)
+                                                .damagedQty(BigDecimal.ZERO)
+                                                .expectedQty(expectedQty)
+                                                .actualQty(scannedQty)
+                                                .reasonCode(reasonCode)
+                                                .note(shortageNote)
+                                                .lotNumber(representativeLot)
+                                                .expiryDate(representativeExpiry)
+                                                .actionPassQty(BigDecimal.ZERO)
+                                                .actionReturnQty(BigDecimal.ZERO)
+                                                .actionScrapQty(BigDecimal.ZERO)
+                                                .build();
+                                incidentItems.add(discItem);
 
                                 log.info("Discrepancy detected: SKU {} — expected={}, actual={}, diff={}",
                                                 skuCode, expectedQty, scannedQty, diff);
@@ -1208,6 +1202,14 @@ public class ReceivingOrderService {
                         if (totalExtra.compareTo(BigDecimal.ZERO) <= 0)
                                 continue;
 
+                        java.util.Optional<ReceivingItemEntity> existingItem = receivingItemRepo
+                                        .findByReceivingOrderReceivingIdAndSkuId(id, skuId).stream()
+                                        .filter(i -> (mismatchLot.isEmpty() ? i.getLotNumber() == null
+                                                        : mismatchLot.equals(i.getLotNumber())))
+                                        .findFirst();
+
+                        java.time.LocalDate extraExpiryDate = existingItem.map(ReceivingItemEntity::getExpiryDate).orElse(null);
+
                         hasIssues = true;
 
                         IncidentItemEntity extraItem = IncidentItemEntity.builder()
@@ -1218,17 +1220,14 @@ public class ReceivingOrderService {
                                         .reasonCode("UNEXPECTED_ITEM")
                                         .note("Hàng lạ lô/ngoài phiếu (Lot: " + mismatchLot + ") — QC quét được "
                                                         + totalExtra)
+                                        .lotNumber(mismatchLot.isEmpty() ? null : mismatchLot)
+                                        .expiryDate(extraExpiryDate)
                                         .actionPassQty(BigDecimal.ZERO)
                                         .actionReturnQty(BigDecimal.ZERO)
                                         .actionScrapQty(BigDecimal.ZERO)
                                         .build();
                         incidentItems.add(extraItem);
 
-                        java.util.Optional<ReceivingItemEntity> existingItem = receivingItemRepo
-                                        .findByReceivingOrderReceivingIdAndSkuId(id, skuId).stream()
-                                        .filter(i -> (mismatchLot.isEmpty() ? i.getLotNumber() == null
-                                                        : mismatchLot.equals(i.getLotNumber())))
-                                        .findFirst();
                         if (existingItem.isPresent()) {
                                 ReceivingItemEntity rcItem = existingItem.get();
                                 rcItem.setReceivedQty(totalExtra);
