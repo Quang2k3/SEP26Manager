@@ -1021,6 +1021,9 @@ public class ReceivingOrderService {
                     log.info("SHORTAGE detected for SKU {} on order {}: expected={}, scanned={}, shortage={}",
                             skuId, order.getReceivingCode(), expectedQty, totalScanned, shortageQty);
 
+                    log.info("DEBUG INCIDENT - Creating Shortage Item: skuId={}, damagedQty={}, expectedQty={}, actualQty={}",
+                            skuId, failQty, expectedQty, totalScanned);
+
                     IncidentItemEntity shortageItem = IncidentItemEntity.builder()
                             .skuId(skuId)
                             .damagedQty(failQty)
