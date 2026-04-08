@@ -370,6 +370,11 @@ public class ReceivingOrderService {
                         BigDecimal totalExpected = aggExpectedQty.getOrDefault(key, BigDecimal.ZERO);
                         BigDecimal totalQty = aggReceivedQty.getOrDefault(key, BigDecimal.ZERO);
 
+                        // Lọc bỏ hàng ngoài phiếu đã bị hoàn trả toàn bộ (Expected=0, Received=0)
+                        if (totalExpected.compareTo(BigDecimal.ZERO) == 0 && totalQty.compareTo(BigDecimal.ZERO) == 0) {
+                                continue;
+                        }
+
                         // [FIX] Tính damagedQty từ incident data thay vì dùng condition trên DB row
                         // (Tính riêng theo từng Lot)
                         String expectedNoteSuffix = "(Lot: "
