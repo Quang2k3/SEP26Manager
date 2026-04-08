@@ -101,6 +101,12 @@ public class OutboundService {
                 .toList();
         soItemRepository.saveAll(items);
 
+        // [NEW] Tự động giữ hàng (allocate) ngay lập tức lúc lưu nháp
+        AllocateStockRequest allocReq = new AllocateStockRequest();
+        allocReq.setDocumentId(saved.getSoId());
+        allocReq.setOrderType(OutboundType.SALES_ORDER);
+        allocateStockService.allocateStock(allocReq, createdBy, ip, ua);
+
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "SALES_ORDER", saved.getSoId(),
                 "Sales order " + code + " created DRAFT", ip, ua);
 
@@ -149,6 +155,12 @@ public class OutboundService {
                         .build())
                 .toList();
         transferItemRepository.saveAll(items);
+
+        // [NEW] Tự động giữ hàng ngay lập tức lúc lưu nháp
+        AllocateStockRequest allocReq = new AllocateStockRequest();
+        allocReq.setDocumentId(saved.getTransferId());
+        allocReq.setOrderType(OutboundType.INTERNAL_TRANSFER);
+        allocateStockService.allocateStock(allocReq, createdBy, ip, ua);
 
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "TRANSFER", saved.getTransferId(),
                 "Internal transfer " + code + " created DRAFT", ip, ua);
@@ -206,6 +218,9 @@ public class OutboundService {
         if (req.getNote() != null) so.setNote(req.getNote());
         soRepository.save(so);
 
+        // Giải phóng tồn cũ trước khi cấp phát lại
+        allocateStockService.cancelReservations("sales_orders", soId);
+
         soItemRepository.deleteBySoId(soId);
         List<SalesOrderItemEntity> newItems = req.getItems().stream()
                 .map(i -> SalesOrderItemEntity.builder()
@@ -214,6 +229,12 @@ public class OutboundService {
                         .build())
                 .toList();
         soItemRepository.saveAll(newItems);
+
+        // [NEW] Tự động giữ hàng ngay lập tức với số lượng mới
+        AllocateStockRequest allocReq = new AllocateStockRequest();
+        allocReq.setDocumentId(soId);
+        allocReq.setOrderType(OutboundType.SALES_ORDER);
+        allocateStockService.allocateStock(allocReq, userId, ip, ua);
 
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 so.getWarehouseId(), req.getItems().stream()
@@ -251,6 +272,9 @@ public class OutboundService {
         if (req.getNote() != null) transfer.setNote(req.getNote());
         transferRepository.save(transfer);
 
+        // Giải phóng tồn cũ trước khi cập nhật
+        allocateStockService.cancelReservations("transfers", transferId);
+
         transferItemRepository.deleteByTransferId(transferId);
         List<TransferItemEntity> newItems = req.getItems().stream()
                 .map(i -> TransferItemEntity.builder()
@@ -258,6 +282,12 @@ public class OutboundService {
                         .build())
                 .toList();
         transferItemRepository.saveAll(newItems);
+
+        // [NEW] Tự động giữ hàng ngay lập tức với số lượng mới
+        AllocateStockRequest allocReq = new AllocateStockRequest();
+        allocReq.setDocumentId(transferId);
+        allocReq.setOrderType(OutboundType.INTERNAL_TRANSFER);
+        allocateStockService.allocateStock(allocReq, userId, ip, ua);
 
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 transfer.getFromWarehouseId(), req.getItems().stream()
@@ -311,27 +341,17 @@ public class OutboundService {
         if (req.getNote() != null) so.setNote(req.getNote());
 
         // ── Kiểm tra tồn kho ngay khi submit ──────────────────────────────
-        // Không chờ đến bước Manager duyệt mới phát hiện thiếu
-        boolean hasShortage = false;
-        for (SalesOrderItemEntity item : items) {
-            BigDecimal available = getAvailableQty(so.getWarehouseId(), item.getSkuId());
-            if (available.compareTo(item.getOrderedQty()) < 0) {
-                hasShortage = true;
-                break;
-            }
-        }
+        // Đã được giữ hàng từ DRAFT. Re-allocate để refresh allocateStatus.
+        AllocateStockRequest allocReq = new AllocateStockRequest();
+        allocReq.setDocumentId(soId);
+        allocReq.setOrderType(OutboundType.SALES_ORDER);
+        ApiResponse<AllocateStockResponse> allocResp = allocateStockService.allocateStock(allocReq, userId, ip, ua);
 
-        if (hasShortage) {
-            // Thiếu hàng → allocate phần có sẵn (lock reservation) + tạo incident SHORTAGE
+        if (!allocResp.getData().isFullyAllocated()) {
+            // Thiếu hàng → tạo incident SHORTAGE
             // SO → SHORTAGE_PENDING để Manager xử lý, không qua bước duyệt
             so.setStatus("SHORTAGE_PENDING");
             soRepository.save(so);
-
-            // Allocate phần có (để lock reservation, đơn khác không lấy mất)
-            AllocateStockRequest allocReq = new AllocateStockRequest();
-            allocReq.setDocumentId(soId);
-            allocReq.setOrderType(OutboundType.SALES_ORDER);
-            allocateStockService.allocateStock(allocReq, userId, ip, ua);
 
             // Tạo incident SHORTAGE gửi Manager
             allocateStockService.reportShortage(soId, OutboundType.SALES_ORDER, userId, ip, ua);
@@ -349,12 +369,6 @@ public class OutboundService {
                                     .map(i -> new AbstractMap.SimpleEntry<>(i.getSkuId(), i.getOrderedQty()))
                                     .toList())));
         }
-
-        // Đủ hàng → phân bổ tồn kho ngay trực tiếp để giam tồn kho (Tránh Manager duyệt cho 2 phiếu trùng nhau)
-        AllocateStockRequest allocReq = new AllocateStockRequest();
-        allocReq.setDocumentId(soId);
-        allocReq.setOrderType(OutboundType.SALES_ORDER);
-        allocateStockService.allocateStock(allocReq, userId, ip, ua);
 
         so.setStatus("PENDING_APPROVAL");
         soRepository.save(so);
@@ -389,11 +403,16 @@ public class OutboundService {
         if (req.getNote() != null) transfer.setNote(req.getNote());
 
         // Internal Transfer tự động duyệt, không cần Manager.
-        // KHÔNG reserve tồn ở đây — Keeper sẽ gọi AllocateStock (FEFO) ở bước tiếp theo.
         transfer.setStatus("APPROVED");
         transfer.setApprovedAt(LocalDateTime.now());
         transfer.setApprovedBy(0L);
         transferRepository.save(transfer);
+
+        // Re-allocate để refresh trạng thái sang ALLOCATED nếu đủ hàng
+        AllocateStockRequest allocReq = new AllocateStockRequest();
+        allocReq.setDocumentId(transferId);
+        allocReq.setOrderType(OutboundType.INTERNAL_TRANSFER);
+        allocateStockService.allocateStock(allocReq, userId, ip, ua);
 
         auditLogService.logAction(userId, "OUTBOUND_AUTO_APPROVED", "TRANSFER", transferId,
                 "Internal transfer " + transfer.getTransferCode() + " auto-approved", ip, ua);
@@ -531,6 +550,8 @@ public class OutboundService {
         if (!so.getCreatedBy().equals(userId))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
 
+        allocateStockService.cancelReservations("sales_orders", soId);
+
         soItemRepository.deleteBySoId(soId);
         soRepository.delete(so);
         auditLogService.logAction(userId, "OUTBOUND_DELETED", "SALES_ORDER", soId,
@@ -547,6 +568,8 @@ public class OutboundService {
             throw new BusinessException("Chỉ có thể xóa lệnh chuyển kho đang ở trạng thái DRAFT. Hiện: " + transfer.getStatus());
         if (!transfer.getCreatedBy().equals(userId))
             throw new BusinessException(MessageConstants.OUTBOUND_NOT_CREATOR);
+
+        allocateStockService.cancelReservations("transfers", transferId);
 
         transferItemRepository.deleteByTransferId(transferId);
         transferRepository.delete(transfer);

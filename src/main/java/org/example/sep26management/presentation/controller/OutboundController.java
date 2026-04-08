@@ -311,7 +311,8 @@ public class OutboundController {
             @RequestBody java.util.Map<String, Object> body) {
         java.math.BigDecimal qty = new java.math.BigDecimal(body.getOrDefault("pickedQty", "1").toString());
         String sessionId = body.getOrDefault("sessionId", "").toString();
-        return ResponseEntity.ok(pickListService.scanPickItem(taskId, itemId, qty, sessionId.isBlank() ? null : sessionId));
+        String lotNumber = body.get("lotNumber") != null ? body.get("lotNumber").toString() : null;
+        return ResponseEntity.ok(pickListService.scanPickItem(taskId, itemId, qty, sessionId.isBlank() ? null : sessionId, lotNumber));
     }
 
     @PatchMapping("/pick-list/{taskId}/confirm-picked")

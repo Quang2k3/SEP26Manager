@@ -135,8 +135,8 @@ public class AllocateStockService {
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            if (!"APPROVED".equals(transfer.getStatus())) {
-                throw new BusinessException(MessageConstants.ALLOCATE_MUST_BE_APPROVED);
+            if (!"APPROVED".equals(transfer.getStatus()) && !"DRAFT".equals(transfer.getStatus())) {
+                throw new BusinessException("Trạng thái lệnh chuyển kho không hợp lệ để phân bổ. Cần APPROVED hoặc DRAFT.");
             }
 
             warehouseId = transfer.getFromWarehouseId();
@@ -232,11 +232,13 @@ public class AllocateStockService {
                 });
             } else {
                 transferRepository.findById(request.getDocumentId()).ifPresent(t -> {
-                    t.setStatus("ALLOCATED");
-                    transferRepository.save(t);
-                    // ── Realtime: notify KEEPER transfer đã phân bổ ────────────────
-                    notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
-                            t.getTransferId(), t.getTransferCode(), "Transfer đã phân bổ — cần tạo Pick List");
+                    if ("APPROVED".equals(t.getStatus())) {
+                        t.setStatus("ALLOCATED");
+                        transferRepository.save(t);
+                        // ── Realtime: notify KEEPER transfer đã phân bổ ────────────────
+                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                                t.getTransferId(), t.getTransferCode(), "Transfer đã phân bổ — cần tạo Pick List");
+                    }
                 });
             }
         }

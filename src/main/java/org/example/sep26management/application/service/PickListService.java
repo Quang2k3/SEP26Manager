@@ -451,12 +451,22 @@ public class PickListService {
      * PATCH /v1/outbound/pick-list/{taskId}/items/{itemId}/scan
      */
     @Transactional
-    public ApiResponse<Void> scanPickItem(Long taskId, Long itemId, java.math.BigDecimal pickedQty, String sessionId) {
+    public ApiResponse<Void> scanPickItem(Long taskId, Long itemId, java.math.BigDecimal pickedQty, String sessionId, String scannedLotNumber) {
         PickingTaskItemEntity item = pickingTaskItemRepository.findById(itemId)
                 .orElseThrow(() -> new ResourceNotFoundException("PickingTaskItem not found: " + itemId));
         if (!item.getPickingTaskId().equals(taskId)) {
             throw new BusinessException("Item " + itemId + " không thuộc task " + taskId);
         }
+
+        // Validate LOT
+        if (scannedLotNumber != null && !scannedLotNumber.isBlank() && item.getLotId() != null) {
+            lotRepository.findById(item.getLotId()).ifPresent(lot -> {
+                if (!lot.getLotNumber().equalsIgnoreCase(scannedLotNumber.trim())) {
+                    throw new BusinessException("Mã LOT quét (" + scannedLotNumber + ") không khớp với mã LOT được phân bổ (" + lot.getLotNumber() + ")");
+                }
+            });
+        }
+
         // Cập nhật pickedQty — không vượt quá requiredQty
         java.math.BigDecimal capped = pickedQty.min(item.getRequiredQty());
         item.setPickedQty(capped);
