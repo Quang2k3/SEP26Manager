@@ -39,10 +39,16 @@ public class PickSignedNoteService {
         SalesOrderEntity so = salesOrderRepository.findById(soId)
                 .orElseThrow(() -> new BusinessException("Sales Order không tồn tại: " + soId));
 
-        // [ONE-TIME LOCK] Chặn upload lần 2 — mỗi phiếu chỉ được upload 1 lần duy nhất
-        if (so.getPickSignedNoteUrl() != null && !so.getPickSignedNoteUrl().isBlank()) {
+        // Cho phép upload ở bước PICKING, QC_SCAN, QC_PASSED, DISPATCHED
+        // Sau khi COMPLETED thì không cho thay đổi
+        if ("COMPLETED".equals(so.getStatus())) {
             throw new BusinessException(
-                    "Đã có ảnh phiếu lấy hàng. Mỗi đơn chỉ được upload 1 lần — không thể ghi đè.");
+                    "Đơn hàng đã COMPLETED — không thể thay đổi ảnh chữ ký phiếu lấy hàng.");
+        }
+        String st = so.getStatus();
+        if (!java.util.Set.of("PICKING","QC_SCAN","QC_PASSED","DISPATCHED","ON_HOLD").contains(st)) {
+            throw new BusinessException(
+                    "Chỉ có thể upload ảnh phiếu lấy hàng khi đơn đang ở bước lấy hàng hoặc sau đó. Hiện tại: " + st);
         }
 
         if (file == null || file.isEmpty())

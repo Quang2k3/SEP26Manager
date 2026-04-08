@@ -511,6 +511,19 @@ public class OutboundController {
     // SIGNED NOTE — Upload ảnh phiếu xuất kho đã ký (via QR điện thoại)
     // ─────────────────────────────────────────────────────────────
 
+    @PostMapping("/sales-orders/{soId}/complete")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Hoàn thành xuất kho (KEEPER)",
+            description = "Bước cuối cùng sau DISPATCHED. Yêu cầu đã upload đủ 2 ảnh chữ ký:\n\n"
+                    + "- Ảnh phiếu lấy hàng đã ký (pick_signed_note_url)\n"
+                    + "- Ảnh phiếu xuất kho đã ký (signed_note_url)\n\n"
+                    + "Khi đủ điều kiện: DISPATCHED → COMPLETED.")
+    public ResponseEntity<ApiResponse<Void>> completeOutbound(
+            @PathVariable Long soId,
+            HttpServletRequest http) {
+        return ResponseEntity.ok(outboundQcService.completeOutbound(soId, getUserId()));
+    }
+
     /**
      * POST /v1/outbound/sales-orders/{soId}/signed-note
      * Không cần JWT — điện thoại scan QR không có token.

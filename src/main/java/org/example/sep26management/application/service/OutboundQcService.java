@@ -926,6 +926,51 @@ public class OutboundQcService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // 9) COMPLETE OUTBOUND
+    // Bước cuối cùng: sau khi DISPATCHED, Keeper đã in phiếu và upload đủ
+    // 2 ảnh chữ ký (phiếu lấy hàng + phiếu xuất kho) → Hoàn thành xuất kho
+    // DISPATCHED → COMPLETED
+    // ─────────────────────────────────────────────────────────────────────────
+    @Transactional
+    public ApiResponse<Void> completeOutbound(Long soId, Long userId) {
+        SalesOrderEntity so = findSalesOrder(soId);
+
+        if (!"DISPATCHED".equals(so.getStatus()))
+            throw new BusinessException(
+                    "Chỉ có thể hoàn thành đơn đang ở trạng thái DISPATCHED. Hiện tại: " + so.getStatus());
+
+        // Kiểm tra ảnh phiếu lấy hàng đã ký (pick_signed_note_url)
+        boolean hasPickNote = so.getPickSignedNoteUrl() != null && !so.getPickSignedNoteUrl().isBlank();
+        // Kiểm tra ảnh phiếu xuất kho đã ký (signed_note_url)
+        boolean hasDispatchNote = so.getSignedNoteUrl() != null && !so.getSignedNoteUrl().isBlank();
+
+        if (!hasPickNote && !hasDispatchNote) {
+            throw new BusinessException(
+                    "Chưa có ảnh chữ ký. Cần upload đủ 2 phiếu: Phiếu lấy hàng và Phiếu xuất kho.");
+        }
+        if (!hasPickNote) {
+            throw new BusinessException(
+                    "Còn thiếu ảnh Phiếu lấy hàng đã ký. Keeper scan QR 'Phiếu lấy hàng' để chụp ảnh.");
+        }
+        if (!hasDispatchNote) {
+            throw new BusinessException(
+                    "Còn thiếu ảnh Phiếu xuất kho đã ký. Scan QR 'Phiếu xuất kho' để chụp và upload.");
+        }
+
+        so.setStatus("COMPLETED");
+        so.setUpdatedAt(LocalDateTime.now());
+        salesOrderRepository.save(so);
+        log.info("SO {} → COMPLETED (both signed notes uploaded)", so.getSoCode());
+
+        String customerName = customerRepository.findById(so.getCustomerId())
+                .map(c -> c.getCustomerName()).orElse("—");
+        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_completed",
+                so.getSoId(), so.getSoCode(), customerName + " — Xuất kho hoàn tất");
+
+        return ApiResponse.success("Xuất kho hoàn tất. Đơn hàng đã COMPLETED.", null);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ─────────────────────────────────────────────────────────────────────────
     private PickingTaskEntity findPickingTask(Long taskId) {
