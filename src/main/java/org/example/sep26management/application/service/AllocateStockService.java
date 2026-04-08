@@ -311,17 +311,42 @@ public class AllocateStockService {
 
         groupedMap.forEach((sku, qty) -> required.add(new SkuQtyPair(sku, qty)));
 
+        // Lấy danh sách reservation OPEN của đơn này (đã allocate được)
+        // để tính đúng shortage = orderedQty - allocatedQty (không phải orderedQty - available)
+        //
+        // Bug cũ: dùng getAvailableQty() = total - reserved
+        //   → available=0 vì reservation của đơn này đã chiếm hết reserved
+        //   → shortage = orderedQty(11) - 0 = 11 ← SAI
+        //
+        // Fix: shortage = orderedQty - allocatedQty (SL đã được allocate cho đơn này)
+        //   → allocated=10, orderedQty=11 → shortage=1 ← ĐÚNG
+        String refTable = orderType == OutboundType.SALES_ORDER ? "sales_orders" : "transfers";
+        java.util.Map<Long, BigDecimal> allocatedBySkuMap = new java.util.LinkedHashMap<>();
+        reservationRepository.findByReferenceTableAndReferenceIdAndStatus(refTable, documentId, "OPEN")
+                .forEach(r -> allocatedBySkuMap.merge(r.getSkuId(), r.getQuantity(), BigDecimal::add));
+
         List<CreateIncidentRequest.IncidentItemDto> incidentItems = new ArrayList<>();
         StringBuilder desc = new StringBuilder("Thiếu tồn kho khi phân bổ lệnh xuất " + documentCode + ": ");
 
         for (SkuQtyPair pair : required) {
-            BigDecimal available = getAvailableQty(warehouseId, pair.skuId);
-            if (available.compareTo(pair.qty) < 0) {
-                BigDecimal shortage = pair.qty.subtract(available);
+            // SL đã allocate được cho đơn này (reservation OPEN)
+            BigDecimal allocated = allocatedBySkuMap.getOrDefault(pair.skuId, BigDecimal.ZERO);
+
+            if (allocated.compareTo(pair.qty) < 0) {
+                // shortage = SL cần - SL đã allocate được
+                BigDecimal shortage = pair.qty.subtract(allocated);
+                // available = tổng tồn - reserved (bao gồm cả reservation của đơn này)
+                // → để hiển thị thực tế tồn kho, tính lại available = allocated + (total - reserved)
+                BigDecimal totalQty   = snapshotRepository.sumQuantityByWarehouseAndSku(warehouseId, pair.skuId);
+                BigDecimal totalRes   = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, pair.skuId);
+                if (totalQty == null) totalQty = BigDecimal.ZERO;
+                if (totalRes == null) totalRes = BigDecimal.ZERO;
+                // tồn thực trong kho = allocated (đang giữ cho đơn này) + phần tự do
+                BigDecimal totalInStock = totalQty; // tổng tồn vật lý
                 String skuCode = skuRepository.findById(pair.skuId).map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
                 incidentItems.add(new CreateIncidentRequest.IncidentItemDto(
-                        pair.skuId, shortage, pair.qty, available, "SHORTAGE",
-                        skuCode + ": cần " + pair.qty + ", còn " + available));
+                        pair.skuId, shortage, pair.qty, totalInStock, "SHORTAGE",
+                        skuCode + ": cần " + pair.qty + ", kho có " + totalInStock + ", đã giữ " + allocated + ", thiếu " + shortage));
                 desc.append(skuCode).append(" thiếu ").append(shortage).append("; ");
             }
         }
