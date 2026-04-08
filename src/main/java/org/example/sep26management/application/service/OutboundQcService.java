@@ -539,19 +539,27 @@ public class OutboundQcService {
                 so.setStatus("ALLOCATED");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → ALLOCATED (RETURN_SCRAP: fail→defect, pass→bin gốc)", so.getSoCode());
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
-                        so.getSoId(), so.getSoCode(), "Hàng lỗi về Z-DEFECT, hàng tốt trả bin — Keeper tạo Pick List mới");
+                log.info("SO {} → ALLOCATED (RETURN_SCRAP: fail→Z-DEFECT, pass→bin gốc, Keeper tạo Pick List mới)", so.getSoCode());
+                // Notify Keeper: hàng tốt đã trả về bin, cần tạo Pick List mới
+                notificationService.notifyRoles(new String[]{"KEEPER"}, "outbound_approved",
+                        so.getSoId(), so.getSoCode(), "Hàng lỗi → Z-DEFECT, hàng tốt trả bin — Tạo Pick List mới");
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC"}, "outbound_approved",
+                        so.getSoId(), so.getSoCode(), "RETURN_SCRAP xong — SO chờ Keeper lấy hàng lại");
             }
             case "ACCEPT" -> {
-                // Xuất luôn hàng lỗi → QC_PASSED để cho phép dispatch
+                // Hàng lỗi chuyển vào Z-DEFECT, chỉ xuất phần hàng tốt
+                // Không xuất phần hỏng — ghi vào defect bin trước
+                returnFailToDefect(incident.getSoId(), managerId, so.getWarehouseId());
+                // SO → QC_PASSED: sẵn sàng dispatch (chỉ phần hàng tốt)
                 so.setStatus("QC_PASSED");
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
-                log.info("SO {} → QC_PASSED (DAMAGE ACCEPT)", so.getSoCode());
-                // ── Realtime: notify KEEPER QC đạt, sẵn sàng dispatch ────────
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "qc_outbound_passed",
-                        so.getSoId(), so.getSoCode(), "Chấp nhận hàng lỗi — sẵn sàng xuất kho");
+                log.info("SO {} → QC_PASSED (DAMAGE ACCEPT: hàng lỗi vào Z-DEFECT, hàng tốt xuất kho)", so.getSoCode());
+                // Notify Keeper: QC đạt, sẵn sàng xuất kho
+                notificationService.notifyRoles(new String[]{"KEEPER"}, "qc_outbound_passed",
+                        so.getSoId(), so.getSoCode(), "QC đạt — Keeper xem Dispatch Note và xuất kho");
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC"}, "outbound_approved",
+                        so.getSoId(), so.getSoCode(), "Chấp nhận hàng lỗi vào Z-DEFECT — sẵn sàng xuất phần tốt");
             }
             default -> throw new BusinessException(
                     "Invalid action: " + action + ". Must be RETURN_SCRAP or ACCEPT.");
@@ -565,6 +573,53 @@ public class OutboundQcService {
 
         log.info("DAMAGE Incident {} resolved by manager {}, action={}", incidentId, managerId, action);
         return ApiResponse.success("Incident resolved. SO updated.", buildSimpleResponse(incident));
+    }
+
+    /**
+     * ACCEPT: Chỉ chuyển hàng FAIL vào Z-DEFECT.
+     * Hàng PASS giữ nguyên trạng thái — đã được pick và sẵn sàng dispatch.
+     * Ghi inventory_transaction DAMAGE_TRANSFER cho phần hỏng.
+     */
+    private void returnFailToDefect(Long soId, Long userId, Long warehouseId) {
+        List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
+        if (allItems.isEmpty()) {
+            log.warn("returnFailToDefect: soId={} — no active picking task items found", soId);
+            return;
+        }
+        LocationEntity defectBin = getOrCreateDefectBin(warehouseId);
+        Long actorId = userId != null ? userId : getSystemUserId();
+
+        for (PickingTaskItemEntity item : allItems) {
+            BigDecimal failQty = safeBD(item.getQcFailQty());
+            if (failQty.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            // Hàng FAIL → cộng vào Z-DEFECT
+            inventorySnapshotRepository.upsertInventory(
+                    warehouseId, item.getSkuId(), item.getLotId(),
+                    defectBin.getLocationId(), failQty);
+            inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                    .warehouseId(warehouseId).locationId(defectBin.getLocationId())
+                    .skuId(item.getSkuId()).lotId(item.getLotId()).quantity(failQty)
+                    .txnType("DAMAGE_TRANSFER").referenceTable("sales_orders").referenceId(soId)
+                    .reasonCode("QC_FAIL_TO_DEFECT_ACCEPT").createdBy(actorId)
+                    .build());
+
+            // Giảm orderedQty xuống còn passQty (bỏ phần hỏng khỏi đơn)
+            BigDecimal passQty = safeBD(item.getQcPassQty());
+            salesOrderItemRepository.findBySoId(soId).stream()
+                    .filter(si -> si.getSkuId().equals(item.getSkuId()))
+                    .findFirst()
+                    .ifPresent(si -> {
+                        if (passQty.compareTo(si.getOrderedQty()) < 0) {
+                            si.setOrderedQty(passQty.max(BigDecimal.ZERO));
+                            salesOrderItemRepository.save(si);
+                            log.info("ACCEPT: reduce orderedQty sku={} → {}", item.getSkuId(), passQty);
+                        }
+                    });
+
+            log.info("returnFailToDefect (ACCEPT): skuId={} failQty={} → defect bin={}",
+                    item.getSkuId(), failQty, defectBin.getLocationId());
+        }
     }
 
     /**
