@@ -380,7 +380,7 @@ public class ReceivingOrderService {
                         String expectedNoteSuffix = "(Lot: "
                                         + (bestItem.getLotNumber() == null ? "" : bestItem.getLotNumber()) + ")";
                         BigDecimal failQty = allIncidentItems.stream()
-                                        .filter(i -> "DAMAGE".equals(i.getReasonCode())
+                                        .filter(i -> ("DAMAGE".equals(i.getReasonCode()) || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
                                                         && skuId.equals(i.getSkuId())
                                                         && i.getNote() != null
                                                         && i.getNote().contains(expectedNoteSuffix))
@@ -391,7 +391,7 @@ public class ReceivingOrderService {
                         // Lấy attachmentUrl từ incident DAMAGE items
                         String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0
                                         ? allIncidentItems.stream()
-                                                        .filter(i -> "DAMAGE".equals(i.getReasonCode())
+                                                        .filter(i -> ("DAMAGE".equals(i.getReasonCode()) || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
                                                                         && skuId.equals(i.getSkuId())
                                                                         && i.getNote() != null
                                                                         && i.getNote().contains(expectedNoteSuffix))

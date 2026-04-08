@@ -361,7 +361,9 @@ public class IncidentService {
                                     && iItem.getActionReturnQty().compareTo(java.math.BigDecimal.ZERO) > 0) {
                                 receivingItemRepo
                                     .findByReceivingOrderReceivingIdAndSkuId(order.getReceivingId(), iItem.getSkuId())
-                                    .stream().findFirst().ifPresent(ri -> {
+                                    .stream()
+                                    .filter(ri -> iItem.getLotNumber() == null ? ri.getLotNumber() == null : iItem.getLotNumber().equals(ri.getLotNumber()))
+                                    .findFirst().ifPresent(ri -> {
                                         java.math.BigDecimal newQty = ri.getReceivedQty() != null
                                                 ? ri.getReceivedQty().subtract(iItem.getActionReturnQty())
                                                 : java.math.BigDecimal.ZERO;
@@ -442,7 +444,10 @@ public class IncidentService {
             // Find corresponding receiving item
             org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity rcItem = receivingItemRepo
                     .findByReceivingOrderReceivingId(order.getReceivingId()).stream()
-                    .filter(itm -> itm.getSkuId().equals(incItem.getSkuId()))
+                    .filter(itm -> itm.getSkuId().equals(incItem.getSkuId())
+                            && (incItem.getLotNumber() == null 
+                                ? itm.getLotNumber() == null 
+                                : incItem.getLotNumber().equals(itm.getLotNumber())))
                     .findFirst().orElse(null);
 
             String action = res.getAction().toUpperCase();
