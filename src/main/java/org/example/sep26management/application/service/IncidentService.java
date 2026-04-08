@@ -243,12 +243,15 @@ public class IncidentService {
                     }
                 }
 
-                if ("PASS".equalsIgnoreCase(res.getAction()) || "ACCEPT".equalsIgnoreCase(res.getAction())) {
+                if ("PASS".equalsIgnoreCase(res.getAction()) 
+                        || "ACCEPT".equalsIgnoreCase(res.getAction())
+                        || "ACCEPT_DAMAGE".equalsIgnoreCase(res.getAction())) {
                     // ACCEPT = Manager chấp nhận nhận hàng hỏng vào kho (ghi nhận như PASS)
                     if (item.getActionPassQty() == null)
                         item.setActionPassQty(java.math.BigDecimal.ZERO);
                     item.setActionPassQty(item.getActionPassQty().add(effectiveQty));
-                } else if ("RETURN".equalsIgnoreCase(res.getAction())) {
+                } else if ("RETURN".equalsIgnoreCase(res.getAction())
+                        || "RETURN_DAMAGE".equalsIgnoreCase(res.getAction())) {
                     if (item.getActionReturnQty() == null)
                         item.setActionReturnQty(java.math.BigDecimal.ZERO);
                     item.setActionReturnQty(item.getActionReturnQty().add(effectiveQty));

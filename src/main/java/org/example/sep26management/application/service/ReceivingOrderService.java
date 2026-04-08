@@ -1052,14 +1052,8 @@ public class ReceivingOrderService {
                         aggExpectedBySkuId.merge(item.getSkuId(), exp, BigDecimal::add);
                 }
 
-                // Tổng scannedQty theo SkuId
+                // Tổng scannedQty theo SkuId (CHỈ cộng nếu KHÔNG phải UNEXPECTED_ITEM)
                 java.util.Map<Long, BigDecimal> aggScannedBySkuId = new java.util.LinkedHashMap<>();
-                for (Map.Entry<String, Map<String, BigDecimal>> entry : scannedData.entrySet()) {
-                        Long skuId = Long.parseLong(entry.getKey().split("_")[0]);
-                        BigDecimal qcTotal = entry.getValue().values().stream().reduce(BigDecimal.ZERO,
-                                        BigDecimal::add);
-                        aggScannedBySkuId.merge(skuId, qcTotal, BigDecimal::add);
-                }
 
                 // Xử lý nhận hàng và phân loại Damage cho TỪNG LOT (Key)
                 java.util.Set<String> processedKeys = new java.util.HashSet<>();
@@ -1074,6 +1068,20 @@ public class ReceivingOrderService {
                                 continue;
                         }
                         processedKeys.add(key);
+                        
+                        Long skuId = dbItem.getSkuId();
+                        boolean isUnexpected = false;
+                        if (dbItem.getExpectedQty() == null || dbItem.getExpectedQty().compareTo(BigDecimal.ZERO) == 0) {
+                                boolean hasLotAgnostic = dbItems.stream()
+                                                .anyMatch(i -> i.getSkuId().equals(skuId)
+                                                                && (i.getLotNumber() == null
+                                                                                || i.getLotNumber().isEmpty())
+                                                                && i.getExpectedQty() != null
+                                                                && i.getExpectedQty().compareTo(BigDecimal.ZERO) > 0);
+                                if (!hasLotAgnostic) {
+                                        isUnexpected = true;
+                                }
+                        }
 
                         Map<String, BigDecimal> scanDataMap = scannedData.getOrDefault(key, Map.of());
 
@@ -1082,9 +1090,14 @@ public class ReceivingOrderService {
 
                         BigDecimal totalScanned = passQty.add(failQty);
                         dbItem.setReceivedQty(totalScanned);
+                        
+                        // [FIX] Chỉ cộng vào tổng SKU nếu KHÔNG phải là hàng ngoài phiếu
+                        // Để không làm sai lệch tính toán SHORTAGE/OVERAGE của những lô hàng đúng
+                        if (!isUnexpected) {
+                                aggScannedBySkuId.merge(skuId, totalScanned, BigDecimal::add);
+                        }
 
                         // Fetch attachmentUrl
-                        Long skuId = dbItem.getSkuId();
                         String lotNumber = dbItem.getLotNumber();
                         String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0 ? lines.stream()
                                         .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId)
@@ -1096,31 +1109,55 @@ public class ReceivingOrderService {
                                         .findFirst()
                                         .orElse(null) : null;
 
-                        // Xử lý hàng hỏng (Tính riêng theo từng Lot)
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
-                                hasIssues = true;
                                 dbItem.setCondition("FAIL");
-                                // [FIX] Dùng expectedQty thực tế thay vì ZERO
-                                // Trước đây set 0 → frontend hiểu nhầm là "hàng ngoài phiếu"
-                                BigDecimal skuExpectedQty = aggExpectedBySkuId.getOrDefault(skuId, BigDecimal.ZERO);
-                                IncidentItemEntity dmgItem = IncidentItemEntity.builder()
-                                                .skuId(skuId)
-                                                .damagedQty(failQty)
-                                                .expectedQty(skuExpectedQty)
-                                                .actualQty(totalScanned)
-                                                .reasonCode("DAMAGE")
-                                                .note("Hàng hỏng phát hiện khi QC (Lot: "
-                                                                + (lotNumber == null ? "" : lotNumber) + ")")
-                                                .attachmentUrl(attachmentUrl)
-                                                .lotNumber(lotNumber)
-                                                .expiryDate(dbItem.getExpiryDate())
-                                                .actionPassQty(BigDecimal.ZERO)
-                                                .actionReturnQty(BigDecimal.ZERO)
-                                                .actionScrapQty(BigDecimal.ZERO)
-                                                .build();
-                                incidentItems.add(dmgItem);
                         } else {
                                 dbItem.setCondition("PASS");
+                        }
+
+                        if (isUnexpected) {
+                                // Nếu là hàng lạ lô, luôn là UNEXPECTED_ITEM
+                                if (totalScanned.compareTo(BigDecimal.ZERO) > 0) {
+                                        hasIssues = true;
+                                        IncidentItemEntity extraItem = IncidentItemEntity.builder()
+                                                        .skuId(skuId)
+                                                        .damagedQty(failQty)
+                                                        .expectedQty(BigDecimal.ZERO)
+                                                        .actualQty(totalScanned)
+                                                        .reasonCode("UNEXPECTED_ITEM")
+                                                        .note("Hàng lạ lô/ngoài phiếu (Lot: " + lotNumber
+                                                                        + ") — QC quét được " + totalScanned)
+                                                        .attachmentUrl(attachmentUrl)
+                                                        .lotNumber(lotNumber)
+                                                        .expiryDate(dbItem.getExpiryDate())
+                                                        .actionPassQty(BigDecimal.ZERO)
+                                                        .actionReturnQty(BigDecimal.ZERO)
+                                                        .actionScrapQty(BigDecimal.ZERO)
+                                                        .build();
+                                        incidentItems.add(extraItem);
+                                }
+                        } else {
+                                // Xử lý hàng hỏng (Tính riêng theo từng Lot)
+                                if (failQty.compareTo(BigDecimal.ZERO) > 0) {
+                                        hasIssues = true;
+                                        BigDecimal skuExpectedQty = aggExpectedBySkuId.getOrDefault(skuId, BigDecimal.ZERO);
+                                        IncidentItemEntity dmgItem = IncidentItemEntity.builder()
+                                                        .skuId(skuId)
+                                                        .damagedQty(failQty)
+                                                        .expectedQty(skuExpectedQty)
+                                                        .actualQty(totalScanned)
+                                                        .reasonCode("DAMAGE")
+                                                        .note("Hàng hỏng phát hiện khi QC (Lot: "
+                                                                        + (lotNumber == null ? "" : lotNumber) + ")")
+                                                        .attachmentUrl(attachmentUrl)
+                                                        .lotNumber(lotNumber)
+                                                        .expiryDate(dbItem.getExpiryDate())
+                                                        .actionPassQty(BigDecimal.ZERO)
+                                                        .actionReturnQty(BigDecimal.ZERO)
+                                                        .actionScrapQty(BigDecimal.ZERO)
+                                                        .build();
+                                        incidentItems.add(dmgItem);
+                                }
                         }
 
                         receivingItemRepo.save(dbItem);
