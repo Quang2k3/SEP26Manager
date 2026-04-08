@@ -62,10 +62,10 @@ public class AllocateStockService {
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            // Chỉ cho phép allocate khi SO đã được Manager APPROVED hoặc đang WAITING_STOCK (chờ hàng bù)
-            // KHÔNG cho phép từ DRAFT hoặc PENDING_APPROVAL — tồn kho chỉ khoá sau khi Manager duyệt
-            if (!"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
-                throw new BusinessException(MessageConstants.ALLOCATE_MUST_BE_APPROVED);
+            // [FIX] Cho phép tự động giữ hàng (allocate) ngay từ trạng thái nháp (DRAFT)
+            java.util.List<String> allowedStatuses = java.util.List.of("DRAFT", "PENDING_APPROVAL", "APPROVED", "WAITING_STOCK", "SHORTAGE_PENDING");
+            if (!allowedStatuses.contains(so.getStatus())) {
+                throw new BusinessException("Lệnh xuất " + so.getSoCode() + " có trạng thái " + so.getStatus() + " không hợp lệ để phân bổ.");
             }
 
             warehouseId = so.getWarehouseId();
