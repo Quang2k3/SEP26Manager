@@ -577,7 +577,6 @@ public class OutboundQcService {
 
     /**
      * ACCEPT: Chỉ chuyển hàng FAIL vào Z-DEFECT.
-     * Hàng PASS giữ nguyên trạng thái — đã được pick và sẵn sàng dispatch.
      * Ghi inventory_transaction DAMAGE_TRANSFER cho phần hỏng.
      */
     private void returnFailToDefect(Long soId, Long userId, Long warehouseId) {
