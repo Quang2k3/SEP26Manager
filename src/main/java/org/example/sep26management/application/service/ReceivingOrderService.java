@@ -942,10 +942,9 @@ public class ReceivingOrderService {
                                         .collect(Collectors.toList());
                         if (!extraItems.isEmpty()) {
                                 receivingItemRepo.deleteAll(extraItems);
+                                dbItems.removeAll(extraItems);
                         }
                         for (ReceivingItemEntity dbItem : dbItems) {
-                                if (extraItems.contains(dbItem))
-                                        continue;
                                 String iKey = dbItem.getSkuId() + "_"
                                                 + (dbItem.getLotNumber() == null ? "" : dbItem.getLotNumber());
                                 if (mismatchedKeys.contains(iKey)) {
@@ -975,6 +974,14 @@ public class ReceivingOrderService {
                                                                         .reduce(BigDecimal.ZERO, BigDecimal::add)
                                                         : BigDecimal.ZERO;
 
+                                        String qcNote;
+                                        if (qcQty.compareTo(BigDecimal.ZERO) == 0) {
+                                                qcNote = "[QC Flagged] QC xác nhận KHÔNG CÓ thùng nào của lô này (0 thùng). Nếu bạn quét nhầm, hãy điều chỉnh (bấm -) xoá đi!";
+                                        } else {
+                                                qcNote = "[QC Flagged] QC phát hiện " + qcQty
+                                                                + " thùng ngoài phiếu rác lô. Yêu cầu Keeper bắt buộc scan xác nhận!";
+                                        }
+
                                         ReceivingItemEntity placeholder = ReceivingItemEntity.builder()
                                                         .receivingOrder(order)
                                                         .skuId(mismatchSkuId)
@@ -982,12 +989,11 @@ public class ReceivingOrderService {
                                                         .expectedQty(BigDecimal.ZERO)
                                                         .receivedQty(BigDecimal.ZERO)
                                                         .qcRequired(true)
-                                                        .note("[QC Flagged] QC phát hiện " + qcQty
-                                                                        + " thùng ngoài phiếu rác lô. Yêu cầu Keeper bắt buộc scan xác nhận!")
+                                                        .note(qcNote)
                                                         .build();
                                         receivingItemRepo.save(placeholder);
-                                        log.info("Created flagged placeholder ReceivingItem for extra Key {} on order {}",
-                                                        mismatchKey, order.getReceivingCode());
+                                        log.info("Created flagged placeholder ReceivingItem for extra Key {} on order {} (qcQty={})",
+                                                        mismatchKey, order.getReceivingCode(), qcQty);
                                 } else {
                                         // Update existing item nếu cần thiết (phòng hờ)
                                         dbItems.stream()
