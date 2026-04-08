@@ -545,11 +545,11 @@ public class PickListService {
                 reservationRepository.save(existing);
             }
 
-            // Trả SO về ALLOCATED — reservation đã giải phóng, Keeper có thể Re-Allocate hoặc tạo lại Pick List
+            // Cập nhật: Khi huỷ phiên lấy hàng (Pick List) thì huỷ luôn lệnh xuất kho (Sales Order)
             soRepository.findById(documentId).ifPresent(so -> {
-                so.setStatus("ALLOCATED");
+                so.setStatus("CANCELLED");
                 soRepository.save(so);
-                log.info("SO {} reverted to ALLOCATED after pick task cancelled — ready to re-generate pick list", so.getSoCode());
+                log.info("SO {} closed (CANCELLED) after pick task cancelled", so.getSoCode());
             });
         }
 
