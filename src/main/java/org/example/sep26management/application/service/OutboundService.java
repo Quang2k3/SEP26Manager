@@ -456,32 +456,26 @@ public class OutboundService {
             }
         }
 
-        // [FIX] Vì Keeper đã cấp phát tồn kho (ALLOCATED) ngay từ bước SUBMIT, nên khi duyệt, 
-        // phiếu xuất sẽ nhảy thẳng qua trạng thái ALLOCATED (bỏ qua APPROVED)
-        so.setStatus("ALLOCATED");
+        // PENDING_APPROVAL → APPROVED: Manager duyệt, Keeper sẽ tự Allocate tồn kho ở bước tiếp theo
+        so.setStatus("APPROVED");
         so.setApprovedBy(managerId);
         so.setApprovedAt(LocalDateTime.now());
         if (request != null && request.getNote() != null) so.setNote(request.getNote());
         soRepository.save(so);
 
         auditLogService.logAction(managerId, "OUTBOUND_APPROVED", "SALES_ORDER", soId,
-                "Sales order " + so.getSoCode() + " approved", ip, ua);
+                "Sales order " + so.getSoCode() + " approved → APPROVED, chờ Keeper Allocate", ip, ua);
 
-        // ── Realtime: notify KEEPER (người tạo đơn) + broadcast tới role KEEPER ──
+        // ── Realtime: notify KEEPER đơn đã được duyệt, cần Allocate tồn kho ──
         CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
         final String approveSubtitle = custForNotif != null ? custForNotif.getCustomerName() : "—";
         final Long approvedSoId = soId;
         final String approvedSoCode = so.getSoCode();
-        // 1. Notify user cụ thể (creator)
         userRepository.findById(so.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "outbound_approved",
                         approvedSoId, approvedSoCode, approveSubtitle));
-        // 2. Broadcast tới toàn bộ KEEPER để list tự refresh
         notificationService.notifyRole("KEEPER", "outbound_approved",
-                approvedSoId, approvedSoCode, approveSubtitle);
-        // 3. [FIX] Broadcast tới QC để danh sách xuất hiển thị realtime
-        notificationService.notifyRole("QC", "outbound_approved",
-                approvedSoId, approvedSoCode, approveSubtitle + " — đã duyệt, chờ lấy hàng");
+                approvedSoId, approvedSoCode, approveSubtitle + " — đã duyệt, cần Phân Bổ Tồn Kho");
 
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_APPROVED_SUCCESS,

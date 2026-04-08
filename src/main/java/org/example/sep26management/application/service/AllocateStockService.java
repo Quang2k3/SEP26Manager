@@ -62,8 +62,9 @@ public class AllocateStockService {
                     .orElseThrow(() -> new ResourceNotFoundException(
                             String.format(MessageConstants.OUTBOUND_NOT_FOUND, request.getDocumentId())));
 
-            // Allow allocate from DRAFT (during submit), APPROVED, or WAITING_STOCK
-            if (!"DRAFT".equals(so.getStatus()) && !"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
+            // Chỉ cho phép allocate khi SO đã được Manager APPROVED hoặc đang WAITING_STOCK (chờ hàng bù)
+            // KHÔNG cho phép từ DRAFT hoặc PENDING_APPROVAL — tồn kho chỉ khoá sau khi Manager duyệt
+            if (!"APPROVED".equals(so.getStatus()) && !"WAITING_STOCK".equals(so.getStatus())) {
                 throw new BusinessException(MessageConstants.ALLOCATE_MUST_BE_APPROVED);
             }
 
@@ -71,7 +72,7 @@ public class AllocateStockService {
             documentCode = so.getSoCode();
             soItemRepository.findBySoId(so.getSoId())
                     .forEach(i -> groupedMap.merge(i.getSkuId(), i.getOrderedQty(), java.math.BigDecimal::add));
-            
+
             // Populate required early for the WAITING_STOCK and APPROVED guards
             groupedMap.forEach((sku, qty) -> required.add(new SkuQtyPair(sku, qty)));
 
@@ -143,7 +144,7 @@ public class AllocateStockService {
             documentCode = transfer.getTransferCode();
             transferItemRepository.findByTransferId(transfer.getTransferId())
                     .forEach(i -> groupedMap.merge(i.getSkuId(), i.getQuantity(), java.math.BigDecimal::add));
-            
+
             groupedMap.forEach((sku, qty) -> required.add(new SkuQtyPair(sku, qty)));
         }
 
@@ -307,7 +308,7 @@ public class AllocateStockService {
             transferItemRepository.findByTransferId(transfer.getTransferId())
                     .forEach(i -> groupedMap.merge(i.getSkuId(), i.getQuantity(), java.math.BigDecimal::add));
         }
-        
+
         groupedMap.forEach((sku, qty) -> required.add(new SkuQtyPair(sku, qty)));
 
         List<CreateIncidentRequest.IncidentItemDto> incidentItems = new ArrayList<>();
@@ -341,19 +342,18 @@ public class AllocateStockService {
             }
         }
 
-        // [BUG-FIX] Đổi SO status → ON_HOLD để khoá Keeper không thể báo cáo lại
-        // và để FE hiển thị banner "Đang chờ Manager xử lý" thay vì cho phép thao tác tiếp.
-        // [FIX TC-1A] DRAFT → WAITING_STOCK (báo thiếu từ đơn nháp, chưa qua duyệt)
-        // APPROVED → ON_HOLD (Allocate thất bại sau khi Manager đã duyệt)
+        // Khi Keeper báo thiếu hàng ở bước Allocate (SO đang APPROVED hoặc WAITING_STOCK):
+        // → set WAITING_STOCK để khoá đơn, Keeper không thể thao tác tiếp
+        // → Manager sẽ xử lý: CLOSE_SHORT (cắt qty → APPROVED lại) hoặc WAIT_BACKORDER (giữ WAITING_STOCK)
         if (orderType == OutboundType.SALES_ORDER) {
             soRepository.findById(documentId).ifPresent(so -> {
                 String prevStatus = so.getStatus();
-                String newStatus = "DRAFT".equals(prevStatus) ? "WAITING_STOCK" : "ON_HOLD";
-                so.setStatus(newStatus);
+                // Luôn chuyển về WAITING_STOCK khi báo thiếu — không phân biệt DRAFT/APPROVED
+                so.setStatus("WAITING_STOCK");
                 so.setUpdatedAt(java.time.LocalDateTime.now());
                 soRepository.save(so);
-                log.info("SO {} → {} (shortage reported from {}, waiting Manager)",
-                        so.getSoCode(), newStatus, prevStatus);
+                log.info("SO {} → WAITING_STOCK (shortage reported from {}, waiting Manager)",
+                        so.getSoCode(), prevStatus);
             });
         }
 

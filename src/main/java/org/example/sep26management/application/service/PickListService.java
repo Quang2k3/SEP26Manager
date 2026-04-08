@@ -545,16 +545,16 @@ public class PickListService {
                 reservationRepository.save(existing);
             }
 
-            // Trả SO về CANCELLED
+            // Trả SO về ALLOCATED — reservation đã giải phóng, Keeper có thể Re-Allocate hoặc tạo lại Pick List
             soRepository.findById(documentId).ifPresent(so -> {
-                so.setStatus("CANCELLED");
+                so.setStatus("ALLOCATED");
                 soRepository.save(so);
-                log.info("SO {} reverted to CANCELLED and reservations cleared after pick task cancelled", so.getSoCode());
+                log.info("SO {} reverted to ALLOCATED after pick task cancelled — ready to re-generate pick list", so.getSoCode());
             });
         }
 
         auditLogService.logAction(userId, "PICKING_CANCELLED", "picking_tasks", taskId,
-                "Pick task " + taskId + " cancelled. Reservations released and document reverted to CANCELLED.", ip, ua);
+                "Pick task " + taskId + " cancelled. Reservations released and SO reverted to ALLOCATED.", ip, ua);
 
         // Giải phóng claim
         try { pickingTaskRepository.releaseKeeperAssignment(taskId, userId); } catch (Exception ignored) {}
