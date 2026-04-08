@@ -35,14 +35,18 @@ public class SignedNoteService {
     private static final long MAX_SIZE = 15 * 1024 * 1024; // 15MB (ảnh điện thoại thường lớn)
 
     public ApiResponse<Map<String, String>> uploadSignedNote(Long soId, MultipartFile file) {
-        // Validate SO tồn tại
         SalesOrderEntity so = salesOrderRepository.findById(soId)
                 .orElseThrow(() -> new BusinessException("Sales Order không tồn tại: " + soId));
 
-        // [ONE-TIME LOCK] Chặn upload lần 2 — mỗi phiếu chỉ được upload 1 lần duy nhất
-        if (so.getSignedNoteUrl() != null && !so.getSignedNoteUrl().isBlank()) {
+        // Chỉ cho phép upload khi đơn đang DISPATCHED (chờ hoàn tất)
+        // Sau khi COMPLETED thì không cho upload lại
+        if ("COMPLETED".equals(so.getStatus())) {
             throw new BusinessException(
-                    "Đã có ảnh phiếu xuất kho. Mỗi đơn chỉ được upload 1 lần — không thể ghi đ財.");
+                    "Đơn hàng đã COMPLETED — không thể thay đổi ảnh chữ ký.");
+        }
+        if (!"DISPATCHED".equals(so.getStatus())) {
+            throw new BusinessException(
+                    "Chỉ có thể upload ảnh phiếu xuất kho khi đơn đang ở DISPATCHED. Hiện tại: " + so.getStatus());
         }
 
         // Validate file
