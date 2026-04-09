@@ -38,6 +38,7 @@ public class OutboundService {
     private final AllocateStockService allocateStockService;
     private final NotificationService notificationService;
     private final UserJpaRepository userRepository;
+    private final ReservationJpaRepository reservationRepository;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
