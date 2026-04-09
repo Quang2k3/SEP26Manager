@@ -339,7 +339,7 @@ public class AllocateStockService {
                 BigDecimal totalInStock = totalQty; // tổng tồn vật lý
                 String skuCode = skuRepository.findById(pair.skuId).map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
                 incidentItems.add(new CreateIncidentRequest.IncidentItemDto(
-                        pair.skuId, shortage, pair.qty, totalInStock, "SHORTAGE",
+                        pair.skuId, BigDecimal.ZERO, pair.qty, allocated, "SHORTAGE",
                         skuCode + ": cần " + pair.qty + ", kho có " + totalInStock + ", đã giữ " + allocated + ", thiếu " + shortage));
                 desc.append(skuCode).append(" thiếu ").append(shortage).append("; ");
             }
