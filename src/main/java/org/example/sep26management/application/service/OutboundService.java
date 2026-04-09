@@ -591,7 +591,19 @@ public class OutboundService {
         long seq = isSales
                 ? soRepository.countTodayByWarehouse(warehouseId, startOfDay, endOfDay) + 1
                 : transferRepository.countTodayByWarehouse(warehouseId, startOfDay, endOfDay) + 1;
-        return String.format("%s-%s-%04d", prefix, date, seq);
+        
+        String code;
+        boolean exists;
+        // Check for uniqueness to gracefully handle cases where previous orders in the sequence were deleted
+        do {
+            code = String.format("%s-%s-%04d", prefix, date, seq);
+            exists = isSales ? soRepository.existsBySoCode(code) : transferRepository.existsByTransferCode(code);
+            if (exists) {
+                seq++;
+            }
+        } while (exists);
+        
+        return code;
     }
 
     private void validateRequiredFieldsByType(CreateOutboundRequest req) {
