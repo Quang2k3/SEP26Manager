@@ -101,11 +101,7 @@ public class OutboundService {
                 .toList();
         soItemRepository.saveAll(items);
 
-        // [NEW] Tự động giữ hàng (allocate) ngay lập tức lúc lưu nháp
-        AllocateStockRequest allocReq = new AllocateStockRequest();
-        allocReq.setDocumentId(saved.getSoId());
-        allocReq.setOrderType(OutboundType.SALES_ORDER);
-        allocateStockService.allocateStock(allocReq, createdBy, ip, ua);
+        // Không tự động giữ hàng (allocate) lúc lưu nháp, chỉ giữ khi Submit
 
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "SALES_ORDER", saved.getSoId(),
                 "Sales order " + code + " created DRAFT", ip, ua);
@@ -156,11 +152,7 @@ public class OutboundService {
                 .toList();
         transferItemRepository.saveAll(items);
 
-        // [NEW] Tự động giữ hàng ngay lập tức lúc lưu nháp
-        AllocateStockRequest allocReq = new AllocateStockRequest();
-        allocReq.setDocumentId(saved.getTransferId());
-        allocReq.setOrderType(OutboundType.INTERNAL_TRANSFER);
-        allocateStockService.allocateStock(allocReq, createdBy, ip, ua);
+        // Không tự động giữ hàng lúc lưu nháp
 
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "TRANSFER", saved.getTransferId(),
                 "Internal transfer " + code + " created DRAFT", ip, ua);
@@ -230,11 +222,7 @@ public class OutboundService {
                 .toList();
         soItemRepository.saveAll(newItems);
 
-        // [NEW] Tự động giữ hàng ngay lập tức với số lượng mới
-        AllocateStockRequest allocReq = new AllocateStockRequest();
-        allocReq.setDocumentId(soId);
-        allocReq.setOrderType(OutboundType.SALES_ORDER);
-        allocateStockService.allocateStock(allocReq, userId, ip, ua);
+        // Không tự động giữ hàng lại ở trạng thái nháp
 
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 so.getWarehouseId(), req.getItems().stream()
@@ -283,11 +271,7 @@ public class OutboundService {
                 .toList();
         transferItemRepository.saveAll(newItems);
 
-        // [NEW] Tự động giữ hàng ngay lập tức với số lượng mới
-        AllocateStockRequest allocReq = new AllocateStockRequest();
-        allocReq.setDocumentId(transferId);
-        allocReq.setOrderType(OutboundType.INTERNAL_TRANSFER);
-        allocateStockService.allocateStock(allocReq, userId, ip, ua);
+        // Không tự động giữ hàng lại ở trạng thái nháp
 
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 transfer.getFromWarehouseId(), req.getItems().stream()
