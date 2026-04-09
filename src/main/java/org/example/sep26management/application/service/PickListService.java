@@ -103,13 +103,15 @@ public class PickListService {
             throw new BusinessException(MessageConstants.PICKLIST_NO_ALLOCATION);
         }
 
-        // Huỷ pick task cũ nếu có
+        // Huỷ pick task cũ nếu có (bỏ qua task đã COMPLETED để bảo lưu lịch sử nhặt hàng PASS)
         List<PickingTaskEntity> existing = pickingTaskRepository
                 .findByWarehouseIdAndSoId(warehouseId, request.getDocumentId());
-        existing.forEach(t -> {
-            t.setStatus("CANCELLED");
-            pickingTaskRepository.save(t);
-        });
+        existing.stream()
+                .filter(t -> !"CANCELLED".equals(t.getStatus()) && !"COMPLETED".equals(t.getStatus()))
+                .forEach(t -> {
+                    t.setStatus("CANCELLED");
+                    pickingTaskRepository.save(t);
+                });
 
         String taskCode = generatePickTaskCode(warehouseId);
         PickingTaskEntity task = PickingTaskEntity.builder()
