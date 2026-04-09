@@ -46,7 +46,7 @@ public interface ReservationJpaRepository extends JpaRepository<ReservationEntit
 
     /** Query reserved qty for a specific reference (order/transfer) */
     @Query("""
-            SELECT COALESCE(SUM(r.quantity), 0)
+            SELECT SUM(r.quantity)
             FROM ReservationEntity r
             WHERE r.referenceTable = :refTable
               AND r.referenceId = :refId

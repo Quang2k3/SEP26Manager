@@ -59,4 +59,8 @@ public interface SkuJpaRepository extends JpaRepository<SkuEntity, Long> {
                    OR LOWER(s.skuName) LIKE LOWER(CONCAT('%', :keyword, '%')))
             """)
     long countByKeyword(@Param("keyword") String keyword);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM SkuEntity s WHERE s.skuId = :skuId")
+    Optional<SkuEntity> findByIdForUpdate(@Param("skuId") Long skuId);
 }
