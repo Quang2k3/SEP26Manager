@@ -123,36 +123,7 @@ public class AllocateStockService {
                 }
             }
 
-            // [FIX] APPROVED guard: kiem tra ton kho truoc khi allocate
-            // Neu available = 0 cho bat ky SKU nao -> chuyen SO ve WAITING_STOCK ngay
-            // thay vi de allocate tao shortage roi Keeper moi biet.
-            if ("APPROVED".equals(so.getStatus())) {
-                java.util.List<String> zeroStock = new java.util.ArrayList<>();
-                for (SkuQtyPair pair : required) {
-                    java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
-                    java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
-                    java.math.BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("sales_orders", so.getSoId(), pair.skuId);
-                    if (total    == null) total    = java.math.BigDecimal.ZERO;
-                    if (reserved == null) reserved = java.math.BigDecimal.ZERO;
-                    if (ownReserved == null) ownReserved = java.math.BigDecimal.ZERO;
-                    java.math.BigDecimal available = total.subtract(reserved).add(ownReserved).max(java.math.BigDecimal.ZERO);
-                    if (available.compareTo(java.math.BigDecimal.ZERO) == 0) {
-                        String skuCode = skuRepository.findById(pair.skuId)
-                                .map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
-                        zeroStock.add(skuCode + " (can " + pair.qty + ", hien co 0)");
-                    }
-                }
-                if (!zeroStock.isEmpty()) {
-                    // Chuyen SO ve WAITING_STOCK de Manager biet can xu ly
-                    so.setStatus("WAITING_STOCK");
-                    so.setUpdatedAt(java.time.LocalDateTime.now());
-                    soRepository.save(so);
-                    log.warn("SO {} -> WAITING_STOCK: ton kho = 0 cho {}", so.getSoCode(), zeroStock);
-                    throw new BusinessException(
-                            "Ton kho = 0, khong the phan bo. SO chuyen WAITING_STOCK. " +
-                                    "Manager can xu ly them hang: " + String.join("; ", zeroStock));
-                }
-            }
+
 
         } else {
             TransferEntity transfer = transferRepository.findById(request.getDocumentId())
@@ -390,18 +361,12 @@ public class AllocateStockService {
             }
         }
 
-        // Khi Keeper báo thiếu hàng ở bước Allocate (SO đang APPROVED hoặc WAITING_STOCK):
-        // → set WAITING_STOCK để khoá đơn, Keeper không thể thao tác tiếp
-        // → Manager sẽ xử lý: CLOSE_SHORT (cắt qty → APPROVED lại) hoặc WAIT_BACKORDER (giữ WAITING_STOCK)
+        // Đơn hàng tạm thời giữ nguyên trạng thái (APPROVED) để giao diện AllocatePanel 
+        // tiếp tục mở, cho phép Manager nhìn thấy bảng chọn xử lý inline.
+        // Trạng thái sẽ chỉ chuyển sang WAITING_STOCK khi Manager click "WAIT_BACKORDER".
         if (orderType == OutboundType.SALES_ORDER) {
             soRepository.findById(documentId).ifPresent(so -> {
-                String prevStatus = so.getStatus();
-                // Luôn chuyển về WAITING_STOCK khi báo thiếu — không phân biệt DRAFT/APPROVED
-                so.setStatus("WAITING_STOCK");
-                so.setUpdatedAt(java.time.LocalDateTime.now());
-                soRepository.save(so);
-                log.info("SO {} → WAITING_STOCK (shortage reported from {}, waiting Manager)",
-                        so.getSoCode(), prevStatus);
+                log.info("SO {} reported shortage. Pending Manager resolution.", so.getSoCode());
             });
         }
 
