@@ -504,7 +504,7 @@ public class PickListService {
     }
 
     @Transactional
-    public ApiResponse<Void> cancelPickTask(Long taskId, Long userId, String ip, String ua) {
+    public ApiResponse<Object> cancelPickTask(Long taskId, Long userId, String ip, String ua) {
         log.info("cancelPickTask: taskId={}, userId={}", taskId, userId);
 
         PickingTaskEntity task = pickingTaskRepository.findById(taskId)
@@ -528,6 +528,8 @@ public class PickListService {
             }
         }
 
+        java.util.List<java.util.Map<String, Object>> restockedItems = new java.util.ArrayList<>();
+
         if (documentId != null) {
             // Giải phóng tồn kho: huỷ tất cả OPEN reservations của đơn hàng này
             List<ReservationEntity> existingReservations = reservationRepository
@@ -545,6 +547,48 @@ public class PickListService {
                 reservationRepository.save(existing);
             }
 
+            // [NEW] Hoàn trả hàng đã PASS QC từ các vòng repick trước
+            List<PickingTaskItemEntity> passedItems = pickingTaskItemRepository.findPassedItemsBySoId(documentId);
+            for (PickingTaskItemEntity pItem : passedItems) {
+                java.math.BigDecimal passQty = pItem.getQcPassQty();
+                if (passQty != null && passQty.compareTo(java.math.BigDecimal.ZERO) > 0 && pItem.getFromLocationId() != null) {
+                    // Trả lại kho vật lý (cộng available)
+                    snapshotRepository.upsertInventory(
+                            task.getWarehouseId(), pItem.getSkuId(), pItem.getLotId(),
+                            pItem.getFromLocationId(), passQty);
+
+                    txnRepository.save(InventoryTransactionEntity.builder()
+                            .warehouseId(task.getWarehouseId())
+                            .skuId(pItem.getSkuId())
+                            .lotId(pItem.getLotId())
+                            .locationId(pItem.getFromLocationId())
+                            .quantity(passQty)
+                            .txnType("RESTOCK_CANCEL")
+                            .referenceTable("sales_orders")
+                            .referenceId(documentId)
+                            .reasonCode("SO_CANCELLED_RESTOCK")
+                            .createdBy(userId)
+                            .build());
+
+                    String skuCode = skuRepository.findById(pItem.getSkuId()).map(s -> s.getSkuCode()).orElse("Unknown");
+                    String skuName = skuRepository.findById(pItem.getSkuId()).map(s -> s.getSkuName()).orElse("Unknown");
+                    String locCode = locationRepository.findById(pItem.getFromLocationId()).map(l -> l.getLocationCode()).orElse("Unknown");
+                    String lotNumber = pItem.getLotId() != null 
+                        ? lotRepository.findById(pItem.getLotId()).map(l -> l.getLotNumber()).orElse(null) 
+                        : null;
+
+                    java.util.Map<String, Object> rItem = new java.util.HashMap<>();
+                    rItem.put("skuCode", skuCode);
+                    rItem.put("skuName", skuName);
+                    rItem.put("lotNumber", lotNumber);
+                    rItem.put("locationCode", locCode);
+                    rItem.put("quantity", passQty);
+                    restockedItems.add(rItem);
+                    
+                    log.info("RESTOCK PASS ITEMS: soId={} skuId={} qty={} loc={}", documentId, pItem.getSkuId(), passQty, pItem.getFromLocationId());
+                }
+            }
+
             // Cập nhật: Khi huỷ phiên lấy hàng (Pick List) thì huỷ luôn lệnh xuất kho (Sales Order)
             soRepository.findById(documentId).ifPresent(so -> {
                 so.setStatus("CANCELLED");
@@ -559,6 +603,9 @@ public class PickListService {
         // Giải phóng claim
         try { pickingTaskRepository.releaseKeeperAssignment(taskId, userId); } catch (Exception ignored) {}
 
-        return ApiResponse.success("Đã huỷ lấy hàng và giải phóng tồn kho thành công.");
+        java.util.Map<String, Object> resultData = new java.util.HashMap<>();
+        resultData.put("restockedItems", restockedItems);
+
+        return ApiResponse.success("Đã huỷ lấy hàng và giải phóng tồn kho thành công.", resultData);
     }
 }
