@@ -88,6 +88,13 @@ public class AllocateStockService {
                 }
             });
 
+            // [RACE CONDITION FIX] Lock SKUs in ascending order to prevent deadlocks and ensure 
+            // that our availability calculations (total, reserved, ownReserved) remain completely 
+            // atomic across concurrent allocations by different Keepers.
+            required.stream().map(p -> p.skuId).sorted().distinct().forEach(skuId -> {
+                skuRepository.findByIdForUpdate(skuId);
+            });
+
             // [BUG-FIX] WAITING_STOCK guard: chỉ cho phép re-allocate khi tồn kho ĐÃ ĐỦ
             // toàn bộ yêu cầu. Nếu chưa đủ, block và yêu cầu chờ nhập thêm.
             // Không có guard này, Keeper có thể re-allocate bất kỳ lúc nào dù hàng
@@ -97,9 +104,11 @@ public class AllocateStockService {
                 for (SkuQtyPair pair : required) {
                     java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
                     java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
+                    java.math.BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("sales_orders", so.getSoId(), pair.skuId);
                     if (total    == null) total    = java.math.BigDecimal.ZERO;
                     if (reserved == null) reserved = java.math.BigDecimal.ZERO;
-                    java.math.BigDecimal available = total.subtract(reserved).max(java.math.BigDecimal.ZERO);
+                    if (ownReserved == null) ownReserved = java.math.BigDecimal.ZERO;
+                    java.math.BigDecimal available = total.subtract(reserved).add(ownReserved).max(java.math.BigDecimal.ZERO);
                     if (available.compareTo(pair.qty) < 0) {
                         String skuCode = skuRepository.findById(pair.skuId)
                                 .map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
@@ -122,9 +131,11 @@ public class AllocateStockService {
                 for (SkuQtyPair pair : required) {
                     java.math.BigDecimal total    = snapshotRepository.sumQuantityByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
                     java.math.BigDecimal reserved = snapshotRepository.sumReservedByWarehouseAndSku(so.getWarehouseId(), pair.skuId);
+                    java.math.BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("sales_orders", so.getSoId(), pair.skuId);
                     if (total    == null) total    = java.math.BigDecimal.ZERO;
                     if (reserved == null) reserved = java.math.BigDecimal.ZERO;
-                    java.math.BigDecimal available = total.subtract(reserved).max(java.math.BigDecimal.ZERO);
+                    if (ownReserved == null) ownReserved = java.math.BigDecimal.ZERO;
+                    java.math.BigDecimal available = total.subtract(reserved).add(ownReserved).max(java.math.BigDecimal.ZERO);
                     if (available.compareTo(java.math.BigDecimal.ZERO) == 0) {
                         String skuCode = skuRepository.findById(pair.skuId)
                                 .map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
