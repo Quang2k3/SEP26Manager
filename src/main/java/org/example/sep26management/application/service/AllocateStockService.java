@@ -44,6 +44,7 @@ public class AllocateStockService {
     private final IncidentJpaRepository incidentJpaRepository;
     private final IncidentItemJpaRepository incidentItemJpaRepository;
     private final NotificationService notificationService;
+    private final PickingTaskItemJpaRepository pickingTaskItemRepository;
 
     @Transactional
     public ApiResponse<AllocateStockResponse> allocateStock(
@@ -73,8 +74,19 @@ public class AllocateStockService {
             soItemRepository.findBySoId(so.getSoId())
                     .forEach(i -> groupedMap.merge(i.getSkuId(), i.getOrderedQty(), java.math.BigDecimal::add));
 
-            // Populate required early for the WAITING_STOCK and APPROVED guards
-            groupedMap.forEach((sku, qty) -> required.add(new SkuQtyPair(sku, qty)));
+            // [PARTIAL REPICK FIX] Deduct already passed items from previous picking tasks
+            pickingTaskItemRepository.findAllUncancelledItemsBySoId(so.getSoId()).forEach(oldItem -> {
+                if (oldItem.getQcPassQty() != null && oldItem.getQcPassQty().compareTo(java.math.BigDecimal.ZERO) > 0) {
+                    groupedMap.computeIfPresent(oldItem.getSkuId(), (k, v) -> v.subtract(oldItem.getQcPassQty()).max(java.math.BigDecimal.ZERO));
+                }
+            });
+
+            // Populate required early for the WAITING_STOCK and APPROVED guards (only keep qty > 0)
+            groupedMap.forEach((sku, qty) -> {
+                if (qty.compareTo(java.math.BigDecimal.ZERO) > 0) {
+                    required.add(new SkuQtyPair(sku, qty));
+                }
+            });
 
             // [BUG-FIX] WAITING_STOCK guard: chỉ cho phép re-allocate khi tồn kho ĐÃ ĐỦ
             // toàn bộ yêu cầu. Nếu chưa đủ, block và yêu cầu chờ nhập thêm.

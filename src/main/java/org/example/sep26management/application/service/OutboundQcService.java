@@ -523,17 +523,14 @@ public class OutboundQcService {
         switch (action) {
             case "RETURN_SCRAP" -> {
                 // ─── FLOW ĐÚNG sau confirmPicked ─────────────────────────────────────────
-                // 1. Hàng FAIL → Z-DEFECT, Hàng PASS → bin gốc (quantity trả lại)
+                // 1. Hàng FAIL → Z-DEFECT, Hàng PASS → GIỮ NGUYÊN (đã pick thành công)
                 // 2. orderedQty GIỮ NGUYÊN (đặt 2, lỗi 1 → repick vẫn là 2)
-                // 3. SO → APPROVED → Keeper phân bổ lại (AllocateService chạy FEFO cho orderedQty gốc)
-                //    - Nếu passQty đủ cho orderedQty → ALLOCATED → Keeper tạo Pick List mới
-                //    - Nếu thiếu (passQty=1 < orderedQty=2) → AllocateService báo shortage
+                // 3. SO → APPROVED → Keeper phân bổ lại (AllocateService sẽ tự động trừ đi số PASS)
                 // ─────────────────────────────────────────────────────────────────────────
-                returnFailToDefectAndRestorePass(incident.getSoId(), managerId, so.getWarehouseId());
-                // Reset QC state để task mới scan sạch
-                resetQcForRepick(incident.getSoId());
-                // Huỷ picking task cũ
-                cancelOldPickingTask(incident.getSoId(), so.getWarehouseId());
+                returnFailToDefectAndKeepPass(incident.getSoId(), managerId, so.getWarehouseId());
+                // Không reset QC vì cần bảo lưu thông tin hàng PASS để in Dispatch Note
+                // Chốt picking task cũ thành COMPLETED để bảo lưu kết quả PASS
+                completeOldPickingTask(incident.getSoId(), so.getWarehouseId());
                 // SO → APPROVED: Keeper phân bổ tồn kho lại trước khi tạo Pick List
                 so.setStatus("APPROVED");
                 so.setUpdatedAt(LocalDateTime.now());
@@ -628,16 +625,15 @@ public class OutboundQcService {
      *   - orderedQty GIỮ NGUYÊN như lúc tạo đơn (VD: đặt 2, lỗi 1 → orderedQty vẫn là 2)
      *   - SO → APPROVED để Keeper qua bước Phân bổ tồn kho trước khi tạo Pick List
      *   - AllocateService chạy lại FEFO, tạo reservation đúng với orderedQty gốc
-     *   - Nếu tồn không đủ (passQty=1 < orderedQty=2) → AllocateService báo shortage
+     *   - Nếu tồn không đủ (hàng cần nhặt bù > tồn kho còn lại) → AllocateService báo shortage
      *
      * Flow:
      *   1. Hàng FAIL (qcFailQty) → cộng vào Z-DEFECT
-     *   2. Hàng PASS (qcPassQty) → cộng lại vào bin gốc (KHÔNG tạo reservation)
+     *   2. Hàng PASS (qcPassQty) → GIỮ NGUYÊN (không trả về kho, hệ thống ghi nhận đã pick xong phần này)
      *   3. orderedQty KHÔNG thay đổi
-     *   4. Huỷ reservation OPEN cũ (AllocateService sẽ tạo mới đúng số lượng)
-     *   5. Ghi inventory_transaction cho cả 2 chiều
+     *   4. Ghi inventory_transaction cho hàng về Z-DEFECT
      */
-    private void returnFailToDefectAndRestorePass(Long soId, Long userId, Long warehouseId) {
+    private void returnFailToDefectAndKeepPass(Long soId, Long userId, Long warehouseId) {
         List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
         if (allItems.isEmpty()) {
             log.warn("RETURN_SCRAP: soId={} — no active picking task items found", soId);
@@ -684,19 +680,12 @@ public class OutboundQcService {
                         item.getSkuId(), failQty, defectBin.getLocationId());
             }
 
-            // ── 2. Hàng PASS → cộng lại vào bin gốc (chỉ quantity, KHÔNG reservation) ──
-            // AllocateService sẽ chạy FEFO và tạo reservation cho orderedQty gốc
+            // ── 2. Hàng PASS → GIỮ NGUYÊN ──────────────────────────────────
+            // Do không tạo transaction trả về kho và không reset QC,
+            // lượng hàng này được ngầm định là đang chờ xuất kho (ở staging/QC area)
             if (passQty.compareTo(BigDecimal.ZERO) > 0) {
-                inventorySnapshotRepository.upsertInventory(
-                        warehouseId, item.getSkuId(), item.getLotId(), fromLocationId, passQty);
-                inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
-                        .warehouseId(warehouseId).locationId(fromLocationId)
-                        .skuId(item.getSkuId()).lotId(item.getLotId()).quantity(passQty)
-                        .txnType("RETURN_TO_BIN").referenceTable("sales_orders").referenceId(soId)
-                        .reasonCode("QC_PASS_RESTORE").createdBy(actorId)
-                        .build());
-                log.info("RETURN_SCRAP: skuId={} passQty={} → bin gốc={} (no reservation — AllocateService re-allocate)",
-                        item.getSkuId(), passQty, fromLocationId);
+                log.info("RETURN_SCRAP: skuId={} passQty={} → PRESERVED (giữ nguyên đã pick để xuất kho)",
+                        item.getSkuId(), passQty);
             }
 
             // ── 3. orderedQty KHÔNG thay đổi ──────────────────────────────────
@@ -708,14 +697,14 @@ public class OutboundQcService {
         }
     }
 
-    /** Hủy picking task cũ (đã PICKED/QC_IN_PROGRESS) để Keeper tạo task mới. */
-    private void cancelOldPickingTask(Long soId, Long warehouseId) {
+    /** Chốt picking task cũ để bảo lưu lịch sử (đã PICKED/QC_IN_PROGRESS) để Keeper tạo task pick hụt mới. */
+    private void completeOldPickingTask(Long soId, Long warehouseId) {
         pickingTaskRepository.findByWarehouseIdAndSoId(warehouseId, soId).stream()
                 .filter(t -> !"CANCELLED".equals(t.getStatus()) && !"COMPLETED".equals(t.getStatus()))
                 .forEach(t -> {
-                    t.setStatus("CANCELLED");
+                    t.setStatus("COMPLETED");
                     pickingTaskRepository.save(t);
-                    log.info("RETURN_SCRAP: cancelled old picking task #{}", t.getPickingTaskId());
+                    log.info("RETURN_SCRAP: completed old picking task #{}", t.getPickingTaskId());
                 });
     }
 
@@ -1049,8 +1038,8 @@ public class OutboundQcService {
                 .lotNumber(lotNumber).manufactureDate(manufactureDate).expiryDate(expiryDate)
                 .locationCode(locationRepository.findById(item.getFromLocationId())
                         .map(LocationEntity::getLocationCode).orElse("N/A"))
-                .quantity(item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
-                        ? item.getPickedQty() : item.getRequiredQty())
+                .quantity(item.getQcPassQty() != null && item.getQcPassQty().compareTo(BigDecimal.ZERO) > 0
+                        ? item.getQcPassQty() : item.getRequiredQty())
                 .build();
     }
 

@@ -75,7 +75,7 @@ public interface PickingTaskItemJpaRepository extends JpaRepository<PickingTaskI
             JOIN PickingTaskEntity t ON t.pickingTaskId = i.pickingTaskId
             WHERE t.soId = :soId
               AND t.status NOT IN ('CANCELLED')
-              AND i.qcResult = 'PASS'
+              AND i.qcPassQty > 0
             """)
     List<PickingTaskItemEntity> findPassedItemsBySoId(@Param("soId") Long soId);
 
@@ -125,4 +125,17 @@ public interface PickingTaskItemJpaRepository extends JpaRepository<PickingTaskI
               AND t.status NOT IN ('CANCELLED', 'COMPLETED')
             """)
     List<PickingTaskItemEntity> findAllActiveItemsBySoId(@Param("soId") Long soId);
+
+    /**
+     * Fetch all items for a SO across all picking tasks except CANCELLED ones.
+     * Used to calculate previously passed items during partial repick allocation.
+     */
+    @Query("""
+            SELECT i
+            FROM PickingTaskItemEntity i
+            JOIN PickingTaskEntity t ON t.pickingTaskId = i.pickingTaskId
+            WHERE t.soId = :soId
+              AND t.status NOT IN ('CANCELLED')
+            """)
+    List<PickingTaskItemEntity> findAllUncancelledItemsBySoId(@Param("soId") Long soId);
 }
