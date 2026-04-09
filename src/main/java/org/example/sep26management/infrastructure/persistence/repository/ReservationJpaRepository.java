@@ -43,4 +43,18 @@ public interface ReservationJpaRepository extends JpaRepository<ReservationEntit
             @Param("warehouseId") Long warehouseId,
             @Param("skuId") Long skuId,
             @Param("locationId") Long locationId);
+
+    /** Query reserved qty for a specific reference (order/transfer) */
+    @Query("""
+            SELECT COALESCE(SUM(r.quantity), 0)
+            FROM ReservationEntity r
+            WHERE r.referenceTable = :refTable
+              AND r.referenceId = :refId
+              AND r.skuId = :skuId
+              AND r.status = 'OPEN'
+            """)
+    BigDecimal sumReservedByReferenceAndSku(
+            @Param("refTable") String refTable,
+            @Param("refId") Long refId,
+            @Param("skuId") Long skuId);
 }

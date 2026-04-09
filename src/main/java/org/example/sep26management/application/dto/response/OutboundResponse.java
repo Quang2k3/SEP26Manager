@@ -108,6 +108,8 @@ public class OutboundResponse {
         private BigDecimal requestedQty;
         @Schema(description = "Số lượng KHẢ DỤNG trong kho thực tế tính đến GIỜ PHÚT NÀY", example = "150.0")
         private BigDecimal availableQty; // BR-OUT-03: real-time
+        @Schema(description = "Số lượng ĐÃ PHÂN BỔ (Reserve) cho đơn hàng này", example = "50.0")
+        private BigDecimal allocatedQty; 
         @Schema(description = "Kho không đủ hàng (true/false) - Nếu true, số dư nhỏ hơn khách đòi, quản lý sẽ bị cảnh báo đỏ chóet", example = "false")
         private boolean insufficientStock; // true if requested > available
         @Schema(description = "Ghi chú dòng", example = "Lấy hàng mới")

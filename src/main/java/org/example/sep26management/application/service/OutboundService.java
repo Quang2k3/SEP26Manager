@@ -663,19 +663,25 @@ public class OutboundService {
         boolean isPostAllocate = POST_ALLOCATE_STATUSES.contains(so.getStatus());
 
         List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream().map(i -> {
-            BigDecimal available = getAvailableQty(so.getWarehouseId(), i.getSkuId());
+            BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("sales_orders", so.getSoId(), i.getSkuId());
+            if (ownReserved == null) ownReserved = BigDecimal.ZERO;
+            
+            BigDecimal rawAvailable = getAvailableQty(so.getWarehouseId(), i.getSkuId());
+            // Tồn khả dụng THỰC TẾ = (Tồn khả dụng hiển thị hiện tại) + (Tồn đã bị chính đơn này giữ)
+            BigDecimal trueAvailable = rawAvailable.add(ownReserved);
+
             String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
             String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
 
-            // [FIX] Luôn hiển thị tồn khả dụng thực tế (available) — không thay thế bằng orderedQty.
-            // Trước đây khi post-allocate, displayAvailable = orderedQty → user thấy sai (VD: 2 thay vì 8).
-            BigDecimal displayAvailable = available;
-            boolean isInsufficient = isPostAllocate ? false : available.compareTo(i.getOrderedQty()) < 0;
+            // [FIX] Cập nhật insufficientStock phải dựa trên trueAvailable để không báo "Thiếu" khi chính đơn đã giữ đủ hàng.
+            boolean isInsufficient = isPostAllocate ? false : trueAvailable.compareTo(i.getOrderedQty()) < 0;
 
             return OutboundResponse.OutboundItemResponse.builder()
                     .itemId(i.getSoItemId()).skuId(i.getSkuId())
                     .skuCode(skuCode).skuName(skuName)
-                    .requestedQty(i.getOrderedQty()).availableQty(displayAvailable)
+                    .requestedQty(i.getOrderedQty())
+                    .availableQty(trueAvailable)
+                    .allocatedQty(ownReserved) // số lượng đã đặt/phân bổ
                     .insufficientStock(isInsufficient)
                     .note(i.getNote()).build();
         }).toList();
@@ -710,18 +716,23 @@ public class OutboundService {
         boolean isPostAllocate = POST_ALLOCATE_STATUSES.contains(transfer.getStatus());
 
         List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream().map(i -> {
-            BigDecimal available = getAvailableQty(transfer.getFromWarehouseId(), i.getSkuId());
+            BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("transfers", transfer.getTransferId(), i.getSkuId());
+            if (ownReserved == null) ownReserved = BigDecimal.ZERO;
+
+            BigDecimal rawAvailable = getAvailableQty(transfer.getFromWarehouseId(), i.getSkuId());
+            BigDecimal trueAvailable = rawAvailable.add(ownReserved);
+
             String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
             String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
 
-            // [FIX] Luôn hiển thị tồn khả dụng thực tế
-            BigDecimal displayAvailable = available;
-            boolean isInsufficient = isPostAllocate ? false : available.compareTo(i.getQuantity()) < 0;
+            boolean isInsufficient = isPostAllocate ? false : trueAvailable.compareTo(i.getQuantity()) < 0;
 
             return OutboundResponse.OutboundItemResponse.builder()
                     .itemId(i.getTransferItemId()).skuId(i.getSkuId())
                     .skuCode(skuCode).skuName(skuName)
-                    .requestedQty(i.getQuantity()).availableQty(displayAvailable)
+                    .requestedQty(i.getQuantity())
+                    .availableQty(trueAvailable)
+                    .allocatedQty(ownReserved)
                     .insufficientStock(isInsufficient)
                     .build();
         }).toList();
