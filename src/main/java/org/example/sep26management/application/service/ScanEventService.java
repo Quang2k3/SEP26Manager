@@ -111,17 +111,22 @@ public class ScanEventService {
                 sessionId, sku.getSkuId(), condition, inc, sku.getSkuCode(), sku.getSkuName(), sku.getBarcode(), request.getLotNumber());
         BigDecimal newQty = luaResult != null ? new BigDecimal(luaResult) : inc;
 
-        // 7b. Reload session từ Redis để push SSE (Lua đã save rồi) và gán ảnh nếu có
+        // 7b. Reload session từ Redis để push SSE (Lua đã save rồi) và gán ảnh + reasonCode nếu có
         sessionRedis.findById(sessionId).ifPresent(updated -> {
             boolean changed = false;
-            // Add attachmentUrl into the fetched session line
-            if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
-                for (ScanLineItem line : updated.getLines()) {
-                    if (sku.getSkuId().equals(line.getSkuId()) && condition.equals(line.getCondition())) {
+            for (ScanLineItem line : updated.getLines()) {
+                if (sku.getSkuId().equals(line.getSkuId()) && condition.equals(line.getCondition())) {
+                    // Add attachmentUrl into the fetched session line
+                    if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
                         line.setAttachmentUrl(mergePhotoUrls(line.getAttachmentUrl(), request.getAttachmentUrl()));
                         changed = true;
-                        break;
                     }
+                    // [DEFECT-TAGS] Lưu reasonCode (chứa defect tags) vào scan line
+                    if (request.getReasonCode() != null && !request.getReasonCode().isBlank()) {
+                        line.setReasonCode(request.getReasonCode());
+                        changed = true;
+                    }
+                    break;
                 }
             }
             if (changed) {
