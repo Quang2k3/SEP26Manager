@@ -1103,17 +1103,21 @@ public class ReceivingOrderService {
                                 aggScannedBySkuId.merge(skuId, totalScanned, BigDecimal::add);
                         }
 
-                        // Fetch attachmentUrl
+                        // Fetch attachmentUrl + reasonCode (defect tags) from FAIL scan lines
                         String lotNumber = dbItem.getLotNumber();
-                        String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0 ? lines.stream()
+                        // [DEFECT-TAGS] Tìm FAIL scan line để lấy cả attachmentUrl và reasonCode
+                        ScanLineItem failScanLine = failQty.compareTo(BigDecimal.ZERO) > 0 ? lines.stream()
                                         .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId)
                                                         && "FAIL".equals(l.getCondition())
                                                         && (lotNumber == null ? l.getLotNumber() == null
                                                                         : lotNumber.equals(l.getLotNumber())))
-                                        .map(ScanLineItem::getAttachmentUrl)
-                                        .filter(u -> u != null && !u.isBlank())
-                                        .findFirst()
-                                        .orElse(null) : null;
+                                        .findFirst().orElse(null) : null;
+                        String attachmentUrl = failScanLine != null
+                                        && failScanLine.getAttachmentUrl() != null
+                                        && !failScanLine.getAttachmentUrl().isBlank()
+                                        ? failScanLine.getAttachmentUrl() : null;
+                        // [DEFECT-TAGS] reasonCode chứa defect tags dạng [TAG1][TAG2] mô tả...
+                        String qcReasonCode = failScanLine != null ? failScanLine.getReasonCode() : null;
 
                         if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                 dbItem.setCondition("FAIL");
@@ -1125,14 +1129,19 @@ public class ReceivingOrderService {
                                 // Nếu là hàng lạ lô, luôn là UNEXPECTED_ITEM
                                 if (totalScanned.compareTo(BigDecimal.ZERO) > 0) {
                                         hasIssues = true;
+                                        // [DEFECT-TAGS] Gộp defect tags vào note nếu có
+                                        String extraNote = "Hàng lạ lô/ngoài phiếu (Lot: " + lotNumber
+                                                        + ") — QC quét được " + totalScanned;
+                                        if (qcReasonCode != null && !qcReasonCode.isBlank()) {
+                                                extraNote = qcReasonCode + " | " + extraNote;
+                                        }
                                         IncidentItemEntity extraItem = IncidentItemEntity.builder()
                                                         .skuId(skuId)
                                                         .damagedQty(failQty)
                                                         .expectedQty(BigDecimal.ZERO)
                                                         .actualQty(totalScanned)
                                                         .reasonCode("UNEXPECTED_ITEM")
-                                                        .note("Hàng lạ lô/ngoài phiếu (Lot: " + lotNumber
-                                                                        + ") — QC quét được " + totalScanned)
+                                                        .note(extraNote)
                                                         .attachmentUrl(attachmentUrl)
                                                         .lotNumber(lotNumber)
                                                         .expiryDate(dbItem.getExpiryDate())
@@ -1147,14 +1156,21 @@ public class ReceivingOrderService {
                                 if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                         hasIssues = true;
                                         BigDecimal skuExpectedQty = aggExpectedBySkuId.getOrDefault(skuId, BigDecimal.ZERO);
+                                        // [DEFECT-TAGS] Gộp defect tags vào note: "[TAG1][TAG2] mô tả | Lot: xxx"
+                                        String dmgNote;
+                                        if (qcReasonCode != null && !qcReasonCode.isBlank()) {
+                                                dmgNote = qcReasonCode;
+                                        } else {
+                                                dmgNote = "Hàng hỏng phát hiện khi QC (Lot: "
+                                                                + (lotNumber == null ? "" : lotNumber) + ")";
+                                        }
                                         IncidentItemEntity dmgItem = IncidentItemEntity.builder()
                                                         .skuId(skuId)
                                                         .damagedQty(failQty)
                                                         .expectedQty(skuExpectedQty)
                                                         .actualQty(totalScanned)
                                                         .reasonCode("DAMAGE")
-                                                        .note("Hàng hỏng phát hiện khi QC (Lot: "
-                                                                        + (lotNumber == null ? "" : lotNumber) + ")")
+                                                        .note(dmgNote)
                                                         .attachmentUrl(attachmentUrl)
                                                         .lotNumber(lotNumber)
                                                         .expiryDate(dbItem.getExpiryDate())
