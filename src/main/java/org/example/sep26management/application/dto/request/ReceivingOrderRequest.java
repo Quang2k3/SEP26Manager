@@ -53,9 +53,11 @@ public class ReceivingOrderRequest {
         private String lotNumber;
 
         @Schema(description = "Ngày sản xuất", example = "2023-10-01")
+        @jakarta.validation.constraints.NotNull(message = "Ngày sản xuất không được để trống")
         private LocalDate manufactureDate;
 
         @Schema(description = "Ngày hết hạn", example = "2024-10-01")
+        @jakarta.validation.constraints.NotNull(message = "Hạn sử dụng không được để trống")
         private LocalDate expiryDate;
     }
 }
