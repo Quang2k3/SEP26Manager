@@ -210,7 +210,7 @@ public class DefaultPutawaySuggestionEngine implements PutawaySuggestionEngine {
         for (LocationEntity bin : bins) {
             BigDecimal occupied = occupiedMap.getOrDefault(bin.getLocationId(), BigDecimal.ZERO);
             BigDecimal reserved = reservedMap.getOrDefault(bin.getLocationId(), BigDecimal.ZERO);
-            BigDecimal maxCap = bin.getMaxWeightKg() != null ? bin.getMaxWeightKg() : BigDecimal.ZERO;
+            BigDecimal maxCap = bin.getMaxWeightKg() != null ? bin.getMaxWeightKg() : new BigDecimal("9999999"); // NULL = unlimited capacity
             BigDecimal available = maxCap.subtract(occupied).subtract(reserved);
             if (available.compareTo(BigDecimal.ZERO) < 0) {
                 available = BigDecimal.ZERO;
