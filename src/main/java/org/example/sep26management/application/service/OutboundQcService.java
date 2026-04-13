@@ -473,24 +473,44 @@ public class OutboundQcService {
                     .append("[FAIL x").append(totalFailQty.intValue())
                     .append("/PASS x").append(totalPassQty.intValue()).append("] ");
 
-            String noteStr = "FAIL x" + totalFailQty.intValue() + " / PASS x" + totalPassQty.intValue()
-                    + (rep.getQcNote() != null ? " | " + rep.getQcNote() : "")
-                    + " | from_bin: " + fromLocCode
-                    + (rep.getQcAttachmentUrl() != null ? " | photo: " + rep.getQcAttachmentUrl() : "");
+            String templateNoteStr = (rep.getQcNote() != null ? rep.getQcNote() : "")
+                    + " | from_bin: " + fromLocCode;
 
-            incidentItemRepository.save(IncidentItemEntity.builder()
-                    .incident(saved)
-                    .skuId(skuId)
-                    // [FIX] expectedQty = TỔNG requiredQty (SL Giấy tờ đúng = 2, không phải 1)
-                    .expectedQty(totalRequired)
-                    // [FIX] actualQty = TỔNG pass + fail = tổng đã QC thực tế
-                    .actualQty(totalPassQty.add(totalFailQty))
-                    // damagedQty = TỔNG failQty
-                    .damagedQty(totalFailQty)
-                    .reasonCode("DAMAGE")
-                    .note(noteStr)
-                    .attachmentUrl(rep.getQcAttachmentUrl())
-                    .build());
+            // Parse danh sách ảnh
+            java.util.List<String> photos = new java.util.ArrayList<>();
+            if (rep.getQcAttachmentUrl() != null && !rep.getQcAttachmentUrl().isBlank()) {
+                if (rep.getQcAttachmentUrl().trim().startsWith("[")) {
+                    try {
+                        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                        java.util.List<String> parsed = om.readValue(rep.getQcAttachmentUrl(), new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>(){});
+                        photos.addAll(parsed);
+                    } catch (Exception e) {
+                        photos.add(rep.getQcAttachmentUrl());
+                    }
+                } else {
+                    photos.add(rep.getQcAttachmentUrl());
+                }
+            }
+
+            // Tách thành từng dòng riêng biệt (damagedQty = 1)
+            int failCount = totalFailQty.intValue();
+            for (int k = 0; k < failCount; k++) {
+                String photoUrl = null;
+                if (!photos.isEmpty()) {
+                    photoUrl = (k < photos.size()) ? photos.get(k) : photos.get(photos.size() - 1);
+                }
+
+                incidentItemRepository.save(IncidentItemEntity.builder()
+                        .incident(saved)
+                        .skuId(skuId)
+                        .expectedQty(totalRequired)
+                        .actualQty(totalPassQty.add(totalFailQty))
+                        .damagedQty(BigDecimal.ONE)
+                        .reasonCode("DAMAGE")
+                        .note("1 FAIL | " + templateNoteStr)
+                        .attachmentUrl(photoUrl)
+                        .build());
+            }
         }
 
         saved.setDescription(desc.toString().trim());
