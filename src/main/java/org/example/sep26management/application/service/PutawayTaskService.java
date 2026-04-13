@@ -116,28 +116,48 @@ public class PutawayTaskService {
 
     @Transactional(readOnly = true)
     public ApiResponse<List<PutawaySuggestion>> getSuggestions(Long taskId) {
+        log.info("[SUGGESTION DEBUG] ═══ getSuggestions called for taskId={} ═══", taskId);
         PutawayTaskEntity task = findTask(taskId);
+        log.info("[SUGGESTION DEBUG] Task found: warehouseId={}", task.getWarehouseId());
+        
         List<PutawayTaskItemEntity> rawItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
         List<PutawayTaskItemEntity> groupedItems = groupItems(rawItems);
+        log.info("[SUGGESTION DEBUG] Task has {} items (raw={}, grouped={})", groupedItems.size(), rawItems.size(), groupedItems.size());
 
         List<PutawaySuggestion> suggestions = new ArrayList<>();
         for (PutawayTaskItemEntity item : groupedItems) {
-            Optional<PutawaySuggestion> suggestion = putawaySuggestionService.suggestLocation(
-                    task.getWarehouseId(), item.getSkuId(), item.getQuantity());
-            if (suggestion.isPresent()) {
-                suggestions.add(suggestion.get());
-            } else {
+            log.info("[SUGGESTION DEBUG] Processing item: skuId={}, qty={}", item.getSkuId(), item.getQuantity());
+            try {
+                Optional<PutawaySuggestion> suggestion = putawaySuggestionService.suggestLocation(
+                        task.getWarehouseId(), item.getSkuId(), item.getQuantity());
+                if (suggestion.isPresent()) {
+                    PutawaySuggestion s = suggestion.get();
+                    log.info("[SUGGESTION DEBUG] ✓ FOUND suggestion: zone={} (zoneId={}), bin={} (locationId={}), available={}",
+                            s.getMatchedZoneCode(), s.getMatchedZoneId(), s.getSuggestedLocationCode(), s.getSuggestedLocationId(), s.getAvailableCapacity());
+                    suggestions.add(s);
+                } else {
+                    log.warn("[SUGGESTION DEBUG] ✗ NO suggestion returned for skuId={}", item.getSkuId());
+                    PutawaySuggestion fallback = PutawaySuggestion.builder()
+                            .skuId(item.getSkuId())
+                            .reason("No matching zone or available BIN found for this SKU. "
+                                    + "Check: (1) SKU has category assigned, "
+                                    + "(2) Zone 'Z-{categoryCode}' exists and is active, "
+                                    + "(3) Zone has active BIN locations with capacity.")
+                            .build();
+                    suggestions.add(fallback);
+                }
+            } catch (Exception e) {
+                log.error("[SUGGESTION DEBUG] ✗ EXCEPTION for skuId={}: {}", item.getSkuId(), e.getMessage(), e);
                 PutawaySuggestion fallback = PutawaySuggestion.builder()
                         .skuId(item.getSkuId())
-                        .reason("No matching zone or available BIN found for this SKU. "
-                                + "Check: (1) SKU has category assigned, "
-                                + "(2) Zone 'Z-{categoryCode}' exists and is active, "
-                                + "(3) Zone has active BIN locations with capacity.")
+                        .reason("Error: " + e.getMessage())
                         .build();
                 suggestions.add(fallback);
             }
         }
 
+        log.info("[SUGGESTION DEBUG] ═══ Result: {} total suggestions, {} with valid zone ═══",
+                suggestions.size(), suggestions.stream().filter(s -> s.getMatchedZoneId() != null).count());
         return ApiResponse.success("OK", suggestions);
     }
 
