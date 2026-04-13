@@ -12,6 +12,9 @@ import org.example.sep26management.infrastructure.persistence.repository.Locatio
 import org.example.sep26management.infrastructure.persistence.repository.SkuJpaRepository;
 import org.example.sep26management.infrastructure.persistence.repository.ZoneJpaRepository;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -21,6 +24,8 @@ import java.util.stream.Collectors;
  * Hiện tại: áp dụng zone theo convention Z-{categoryCode} và rule capacity cơ bản.
  */
 public class DefaultPutawaySuggestionEngine implements PutawaySuggestionEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(DefaultPutawaySuggestionEngine.class);
 
     private final SkuJpaRepository skuRepo;
     private final ZoneJpaRepository zoneRepo;
@@ -165,29 +170,50 @@ public class DefaultPutawaySuggestionEngine implements PutawaySuggestionEngine {
 
     private Set<Long> resolveAllowedZones(PutawaySuggestionRequest request) {
         if (request.getSkuId() == null || request.getWarehouseId() == null) {
+            log.warn("[ENGINE DEBUG] resolveAllowedZones: skuId or warehouseId is null");
             return Collections.emptySet();
         }
 
         SkuEntity sku = skuRepo.findByIdWithCategory(request.getSkuId()).orElse(null);
-        if (sku == null || sku.getCategory() == null) {
+        if (sku == null) {
+            log.warn("[ENGINE DEBUG] resolveAllowedZones: SKU {} not found", request.getSkuId());
+            return Collections.emptySet();
+        }
+        if (sku.getCategory() == null) {
+            log.warn("[ENGINE DEBUG] resolveAllowedZones: SKU {} ({}) has NO category", request.getSkuId(), sku.getSkuCode());
             return Collections.emptySet();
         }
 
         String categoryCode = sku.getCategory().getCategoryCode();
         String zoneCode = "Z-" + categoryCode;
+        log.info("[ENGINE DEBUG] resolveAllowedZones: SKU {} → category={} → zoneCode={}", sku.getSkuCode(), categoryCode, zoneCode);
 
         Optional<ZoneEntity> zoneOpt = zoneRepo.findByWarehouseIdAndZoneCode(request.getWarehouseId(), zoneCode);
-        return zoneOpt.filter(ZoneEntity::getActive)
-                .map(z -> Collections.singleton(z.getZoneId()))
-                .orElse(Collections.emptySet());
+        if (zoneOpt.isEmpty()) {
+            log.warn("[ENGINE DEBUG] resolveAllowedZones: Zone '{}' NOT FOUND in warehouse {}", zoneCode, request.getWarehouseId());
+            return Collections.emptySet();
+        }
+        ZoneEntity zone = zoneOpt.get();
+        if (!Boolean.TRUE.equals(zone.getActive())) {
+            log.warn("[ENGINE DEBUG] resolveAllowedZones: Zone '{}' exists but is INACTIVE", zoneCode);
+            return Collections.emptySet();
+        }
+        log.info("[ENGINE DEBUG] resolveAllowedZones: Zone '{}' found, zoneId={}, active={}", zoneCode, zone.getZoneId(), zone.getActive());
+        return Collections.singleton(zone.getZoneId());
     }
 
     private List<LocationEntity> loadCandidateBins(PutawaySuggestionContext ctx) {
         if (ctx.getAllowedZoneIds().isEmpty()) {
+            log.warn("[ENGINE DEBUG] loadCandidateBins: allowedZoneIds is EMPTY → no bins");
             return Collections.emptyList();
         }
         Long zoneId = ctx.getAllowedZoneIds().iterator().next();
-        return locationRepo.findActiveBinsByZone(zoneId);
+        List<LocationEntity> bins = locationRepo.findActiveBinsByZone(zoneId);
+        log.info("[ENGINE DEBUG] loadCandidateBins: zoneId={} → found {} active BINs", zoneId, bins.size());
+        if (!bins.isEmpty()) {
+            bins.forEach(b -> log.debug("[ENGINE DEBUG]   BIN: id={} code={} maxWeightKg={}", b.getLocationId(), b.getLocationCode(), b.getMaxWeightKg()));
+        }
+        return bins;
     }
 
     private List<CandidateBin> enrichCandidates(PutawaySuggestionContext ctx, List<LocationEntity> bins) {

@@ -85,7 +85,25 @@ public class PutawaySuggestionService {
 
         PutawaySuggestionLineResponse lineRes = engine().suggestForLine(req);
         List<PutawayBinSuggestionDto> bins = lineRes.getBinSuggestions();
+        log.info("[SUGGESTION DEBUG] Engine result for SKU {} ({}): bins={}, explanation='{}'",
+                skuId, sku.getSkuCode(), bins != null ? bins.size() : 0, lineRes.getOverallExplanation());
         if (bins == null || bins.isEmpty()) {
+            // [FIX] Vẫn trả zone-level suggestion nếu zone match → FE sẽ highlight zone
+            ZoneEntity matchedZone = zoneRepo.findByWarehouseIdAndZoneCode(warehouseId, expectedZoneCode).orElse(null);
+            if (matchedZone != null) {
+                log.info("[SUGGESTION DEBUG] No bins available but zone matched → returning zone-level suggestion");
+                return Optional.of(PutawaySuggestion.builder()
+                        .skuId(skuId)
+                        .skuCode(sku.getSkuCode())
+                        .categoryCode(categoryCode)
+                        .matchedZoneCode(matchedZone.getZoneCode())
+                        .matchedZoneId(matchedZone.getZoneId())
+                        .matchedZoneName(matchedZone.getZoneName())
+                        .suggestedLocationId(null)
+                        .suggestedLocationCode(null)
+                        .reason(lineRes.getOverallExplanation())
+                        .build());
+            }
             return Optional.empty();
         }
 
