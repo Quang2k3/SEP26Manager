@@ -93,7 +93,7 @@ public class ScanSessionRedisRepository {
             "for i, line in ipairs(data.lines) do\n" +
             "  local lineLot = line.lotNumber or ''\n" +
             "  local argLot = lotNumber or ''\n" +
-            "  if tostring(line.skuId) == skuId and line.condition == cond and lineLot == argLot then\n" +
+            "  if tostring(line.skuId) == skuId and line.condition == cond and cond ~= 'FAIL' and lineLot == argLot then\n" +
             "    line.qty = (line.qty or 0) + delta\n" +
             "    newQty = line.qty\n" +
             "    found = true\n" +

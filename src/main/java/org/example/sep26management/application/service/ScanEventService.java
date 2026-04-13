@@ -114,7 +114,8 @@ public class ScanEventService {
         // 7b. Reload session từ Redis để push SSE (Lua đã save rồi) và gán ảnh + reasonCode nếu có
         sessionRedis.findById(sessionId).ifPresent(updated -> {
             boolean changed = false;
-            for (ScanLineItem line : updated.getLines()) {
+            for (int i = updated.getLines().size() - 1; i >= 0; i--) {
+                ScanLineItem line = updated.getLines().get(i);
                 if (sku.getSkuId().equals(line.getSkuId()) && condition.equals(line.getCondition())) {
                     // Add attachmentUrl into the fetched session line
                     if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
