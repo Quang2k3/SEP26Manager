@@ -143,7 +143,7 @@ public class OutboundQcService {
         item.setQcScannedAt(LocalDateTime.now());
         if ("FAIL".equals(request.getResult())) {
             item.setQcFailQty(safeBD(item.getQcFailQty()).add(BigDecimal.ONE));
-            item.setQcNote(request.getReason());
+            item.setQcNote(mergeNotes(item.getQcNote(), request.getReason()));
             // [MULTI-PHOTO] Merge JSON array — không ghi đè, cộng dồn ảnh
             if (request.getAttachmentUrl() != null && !request.getAttachmentUrl().isBlank()) {
                 item.setQcAttachmentUrl(mergePhotoUrls(item.getQcAttachmentUrl(), request.getAttachmentUrl()));
@@ -226,6 +226,29 @@ public class OutboundQcService {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(deduped);
         } catch (Exception e) {
             return deduped.isEmpty() ? null : deduped.get(0);
+        }
+    }
+
+    private String mergeNotes(String existing, String incoming) {
+        java.util.List<String> notes = new java.util.ArrayList<>();
+        if (existing != null && !existing.isBlank()) {
+            if (existing.trim().startsWith("[")) {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                    java.util.List<String> parsed = om.readValue(existing, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>(){});
+                    notes.addAll(parsed);
+                } catch (Exception e) { notes.add(existing); } // fallback: not a JSON array
+            } else {
+                notes.add(existing);
+            }
+        }
+        if (incoming != null && !incoming.isBlank()) {
+            notes.add(incoming);
+        }
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(notes);
+        } catch (Exception e) {
+            return notes.isEmpty() ? null : notes.get(0);
         }
     }
 
@@ -471,9 +494,6 @@ public class OutboundQcService {
                     .append("[FAIL x").append(totalFailQty.intValue())
                     .append("/PASS x").append(totalPassQty.intValue()).append("] ");
 
-            String templateNoteStr = (rep.getQcNote() != null ? rep.getQcNote() : "")
-                    + " | from_bin: " + fromLocCode;
-
             // Parse danh sách ảnh
             java.util.List<String> photos = new java.util.ArrayList<>();
             if (rep.getQcAttachmentUrl() != null && !rep.getQcAttachmentUrl().isBlank()) {
@@ -490,6 +510,22 @@ public class OutboundQcService {
                 }
             }
 
+            // Parse danh sách notes
+            java.util.List<String> notes = new java.util.ArrayList<>();
+            if (rep.getQcNote() != null && !rep.getQcNote().isBlank()) {
+                if (rep.getQcNote().trim().startsWith("[")) {
+                    try {
+                        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                        java.util.List<String> parsed = om.readValue(rep.getQcNote(), new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>(){});
+                        notes.addAll(parsed);
+                    } catch (Exception e) {
+                        notes.add(rep.getQcNote());
+                    }
+                } else {
+                    notes.add(rep.getQcNote());
+                }
+            }
+
             // Tách thành từng dòng riêng biệt (damagedQty = 1)
             int failCount = totalFailQty.intValue();
             for (int k = 0; k < failCount; k++) {
@@ -497,6 +533,11 @@ public class OutboundQcService {
                 if (!photos.isEmpty()) {
                     photoUrl = (k < photos.size()) ? photos.get(k) : photos.get(photos.size() - 1);
                 }
+                String currentNoteStr = "";
+                if (!notes.isEmpty()) {
+                    currentNoteStr = (k < notes.size()) ? notes.get(k) : notes.get(notes.size() - 1);
+                }
+                String templateNoteStr = currentNoteStr + " | from_bin: " + fromLocCode;
 
                 incidentItemRepository.save(IncidentItemEntity.builder()
                         .incident(saved)
