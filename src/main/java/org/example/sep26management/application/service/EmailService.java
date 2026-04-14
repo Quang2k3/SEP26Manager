@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
 
@@ -47,7 +46,7 @@ public class EmailService {
     @Async
     public CompletableFuture<Boolean> sendOtpEmail(String toEmail, String otpCode, String purpose) {
         String from = (fromEmail == null) ? "" : fromEmail.trim();
-        String to   = (toEmail   == null) ? "" : toEmail.trim();
+        String to = (toEmail == null) ? "" : toEmail.trim();
 
         if (from.isEmpty()) {
             log.error(LogMessages.EMAIL_FROM_EMPTY, fromEmail);
@@ -126,7 +125,7 @@ public class EmailService {
 
     @Async
     public void sendStatusChangeEmail(String toEmail, String oldStatus, String newStatus,
-                                      LocalDate suspendUntil, String reason, String changedBy) {
+            LocalDate suspendUntil, String reason, String changedBy) {
         try {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);
@@ -217,11 +216,11 @@ public class EmailService {
     }
 
     private String buildStatusChangeEmailBody(String oldStatus, String newStatus, LocalDate suspendUntil,
-                                              String reason, String changedBy) {
+            String reason, String changedBy) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
         if ("INACTIVE".equals(newStatus)) {
             String suspendUntilText = suspendUntil != null ? suspendUntil.format(formatter) : "N/A";
-            String reasonText       = (reason != null && !reason.isEmpty()) ? reason : "Not specified";
+            String reasonText = (reason != null && !reason.isEmpty()) ? reason : "Not specified";
             return String.format("""
                     Dear User,
 

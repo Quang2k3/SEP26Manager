@@ -241,6 +241,18 @@ public class OutboundController {
         return ResponseEntity.ok(outboundService.deleteTransfer(transferId, getUserId(), getIp(http), ua(http)));
     }
 
+    @PostMapping("/sales-orders/{soId}/create-backorder-grn")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Tạo phiếu nhập hàng bù nhanh (Backorder GRN)", 
+               description = "Tạo tự động 1 đơn GRN DRAFT chứa các mặt hàng đang thiếu cho Sales Order hiện tại. "
+                           + "Chỉ dùng khi đơn hàng ở trạng thái WAITING_STOCK.")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> createBackorderGrn(
+            @PathVariable Long soId,
+            HttpServletRequest http) {
+        return ResponseEntity.ok(outboundService.createBackorderGrn(
+                soId, getUserId(), getIp(http), ua(http)));
+    }
+
     @PostMapping("/allocate")
     @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
     @Operation(summary = "Phân bổ / Khóa tồn kho (FEFO)", description = "Khóa số lượng tồn theo FEFO trước khi đi lấy hàng.\n\n"
