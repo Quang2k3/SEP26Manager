@@ -7,7 +7,6 @@ import com.itextpdf.text.pdf.*;
 import com.itextpdf.text.pdf.draw.LineSeparator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.example.sep26management.application.dto.response.DispatchNoteResponse;
 import org.example.sep26management.infrastructure.persistence.entity.*;
 import org.example.sep26management.infrastructure.persistence.repository.*;
 import org.springframework.stereotype.Service;
@@ -24,10 +23,12 @@ import java.util.List;
  * DispatchPdfService — Tạo Phiếu Xuất Kho PDF và upload lên Cloudinary.
  *
  * Flow:
- *   confirmDispatch() → generateAndUploadPdf(soId) → lưu URL vào sales_orders.dispatch_pdf_url
+ * confirmDispatch() → generateAndUploadPdf(soId) → lưu URL vào
+ * sales_orders.dispatch_pdf_url
  *
  * Endpoint tải về:
- *   GET /v1/outbound/sales-orders/{soId}/dispatch-pdf → redirect URL hoặc trả presigned URL
+ * GET /v1/outbound/sales-orders/{soId}/dispatch-pdf → redirect URL hoặc trả
+ * presigned URL
  */
 @Service
 @RequiredArgsConstructor
@@ -45,11 +46,11 @@ public class DispatchPdfService {
     private final Cloudinary cloudinary;
 
     // ─── Màu sắc ───────────────────────────────────────────────
-    private static final BaseColor HEADER_BG   = new BaseColor(0xD6, 0xEA, 0xF8); // #D6EAF8
+    private static final BaseColor HEADER_BG = new BaseColor(0xD6, 0xEA, 0xF8); // #D6EAF8
     private static final BaseColor CATEGORY_BG = new BaseColor(0xF2, 0xF3, 0xF4); // #F2F3F4
-    private static final BaseColor TOTAL_BG    = new BaseColor(0xEB, 0xF5, 0xFB); // #EBF5FB
-    private static final BaseColor BORDER_CLR  = new BaseColor(0xAE, 0xD6, 0xF1); // #AED6F1
-    private static final BaseColor TITLE_CLR   = new BaseColor(0x1A, 0x52, 0x76); // #1A5276
+    private static final BaseColor TOTAL_BG = new BaseColor(0xEB, 0xF5, 0xFB); // #EBF5FB
+    private static final BaseColor BORDER_CLR = new BaseColor(0xAE, 0xD6, 0xF1); // #AED6F1
+    private static final BaseColor TITLE_CLR = new BaseColor(0x1A, 0x52, 0x76); // #1A5276
 
     // ─── Fonts ─────────────────────────────────────────────────
     // Dùng BaseFont để hỗ trợ tiếng Việt (Unicode)
@@ -91,11 +92,9 @@ public class DispatchPdfService {
                     pdfBytes,
                     ObjectUtils.asMap(
                             "resource_type", "raw",
-                            "folder",        "dispatch_notes",
-                            "public_id",     "dispatch_note_SO_" + soId + "_" + System.currentTimeMillis(),
-                            "format",        "pdf"
-                    )
-            );
+                            "folder", "dispatch_notes",
+                            "public_id", "dispatch_note_SO_" + soId + "_" + System.currentTimeMillis(),
+                            "format", "pdf"));
 
             String pdfUrl = (String) uploadResult.get("secure_url");
             log.info("Dispatch PDF uploaded for soId={}: {}", soId, pdfUrl);
@@ -127,7 +126,8 @@ public class DispatchPdfService {
                     }
                     return generateAndUploadPdf(soId);
                 })
-                .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.BusinessException("Sales Order not found: " + soId));
+                .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.BusinessException(
+                        "Sales Order not found: " + soId));
     }
 
     // ─── Build PDF bytes ───────────────────────────────────────
@@ -165,16 +165,17 @@ public class DispatchPdfService {
 
     // ── Header ──────────────────────────────────────────────────
 
-    private void addHeader(Document doc, SalesOrderEntity so, CustomerEntity customer, WarehouseEntity warehouse) throws Exception {
-        Font logoFont   = getFontBold(16, TITLE_CLR);
-        Font titleFont  = getFontBold(16, BaseColor.BLACK);
-        Font labelFont  = getFontBold(9,  BaseColor.BLACK);
-        Font valueFont  = getFont(9, BaseColor.BLACK);
+    private void addHeader(Document doc, SalesOrderEntity so, CustomerEntity customer, WarehouseEntity warehouse)
+            throws Exception {
+        Font logoFont = getFontBold(16, TITLE_CLR);
+        Font titleFont = getFontBold(16, BaseColor.BLACK);
+        Font labelFont = getFontBold(9, BaseColor.BLACK);
+        Font valueFont = getFont(9, BaseColor.BLACK);
 
         // Logo + Title row
         PdfPTable headerTable = new PdfPTable(2);
         headerTable.setWidthPercentage(100);
-        headerTable.setWidths(new float[]{30f, 70f});
+        headerTable.setWidths(new float[] { 30f, 70f });
 
         // Logo cell
         PdfPCell logoCell = new PdfPCell(new Phrase("SHEENYCOS", logoFont));
@@ -211,18 +212,19 @@ public class DispatchPdfService {
 
         PdfPTable infoTable = new PdfPTable(2);
         infoTable.setWidthPercentage(100);
-        infoTable.setWidths(new float[]{45f, 55f});
+        infoTable.setWidths(new float[] { 45f, 55f });
         infoTable.setSpacingAfter(6);
 
-        addInfoRow(infoTable, "Ngày ĐH:", dispatchDateStr,   "Mã KH:",   customerCode, labelFont, valueFont);
-        addInfoRow(infoTable, "Số phiếu:", so.getSoCode(),   "Tên KH:",  customerName, labelFont, valueFont);
-        addInfoRow(infoTable, "Ghi chú:", so.getNote() != null ? so.getNote() : "", "Địa chỉ:", customerAddr, labelFont, valueFont);
+        addInfoRow(infoTable, "Ngày ĐH:", dispatchDateStr, "Mã KH:", customerCode, labelFont, valueFont);
+        addInfoRow(infoTable, "Số phiếu:", so.getSoCode(), "Tên KH:", customerName, labelFont, valueFont);
+        addInfoRow(infoTable, "Ghi chú:", so.getNote() != null ? so.getNote() : "", "Địa chỉ:", customerAddr, labelFont,
+                valueFont);
 
         doc.add(infoTable);
     }
 
     private void addInfoRow(PdfPTable table, String lbl1, String val1, String lbl2, String val2,
-                            Font labelFont, Font valueFont) {
+            Font labelFont, Font valueFont) {
         Paragraph p1 = new Paragraph();
         p1.add(new Chunk(lbl1 + " ", labelFont));
         p1.add(new Chunk(val1, valueFont));
@@ -246,13 +248,14 @@ public class DispatchPdfService {
     // ── Items Table ──────────────────────────────────────────────
 
     private void addItemsTable(Document doc, List<PickingTaskItemEntity> passItems) throws Exception {
-        Font thFont    = getFontBold(7.5f, BaseColor.BLACK);
-        Font cellFont  = getFont(7.5f, BaseColor.BLACK);
-        Font catFont   = getFontBold(8f, BaseColor.BLACK);
+        Font thFont = getFontBold(7.5f, BaseColor.BLACK);
+        Font cellFont = getFont(7.5f, BaseColor.BLACK);
+        Font catFont = getFontBold(8f, BaseColor.BLACK);
         Font totalFont = getFontBold(8f, BaseColor.BLACK);
 
-        String[] headers = {"Stt", "Mã hàng", "Tên hàng", "Quy\ncách", "Dvt", "Thùng", "Chai lẻ", "Ghi chú", "Mã đóng gói", "NSX", "NHH"};
-        float[]  widths  = {4f,    9f,         30f,         5f,          5f,    6f,      5f,         7f,        11f,           10f,   10f};
+        String[] headers = { "Stt", "Mã hàng", "Tên hàng", "Quy\ncách", "Dvt", "Thùng", "Chai lẻ", "Ghi chú",
+                "Mã đóng gói", "NSX", "NHH" };
+        float[] widths = { 4f, 9f, 30f, 5f, 5f, 6f, 5f, 7f, 11f, 10f, 10f };
 
         PdfPTable table = new PdfPTable(headers.length);
         table.setWidthPercentage(100);
@@ -300,29 +303,33 @@ public class DispatchPdfService {
             for (PickingTaskItemEntity item : catItems) {
                 SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
                 InventoryLotEntity lot = item.getLotId() != null
-                        ? inventoryLotRepository.findById(item.getLotId()).orElse(null) : null;
+                        ? inventoryLotRepository.findById(item.getLotId()).orElse(null)
+                        : null;
 
                 int qty = item.getPickedQty() != null && item.getPickedQty().intValue() > 0
-                        ? item.getPickedQty().intValue() : item.getRequiredQty().intValue();
+                        ? item.getPickedQty().intValue()
+                        : item.getRequiredQty().intValue();
                 totalThung += qty;
 
-                String skuCode  = sku != null ? sku.getSkuCode() : "";
-                String skuName  = sku != null ? sku.getSkuName() : "";
+                String skuCode = sku != null ? sku.getSkuCode() : "";
+                String skuName = sku != null ? sku.getSkuName() : "";
                 String packCode = sku != null ? sku.getSkuCode() : "";
-                String mfgDate  = lot != null && lot.getManufactureDate() != null
-                        ? lot.getManufactureDate().format(DateTimeFormatter.ofPattern("dd/MM/yy")) : "";
-                String expDate  = lot != null && lot.getExpiryDate() != null
-                        ? lot.getExpiryDate().format(DateTimeFormatter.ofPattern("dd/MM/yy")) : "";
+                String mfgDate = lot != null && lot.getManufactureDate() != null
+                        ? lot.getManufactureDate().format(DateTimeFormatter.ofPattern("dd/MM/yy"))
+                        : "";
+                String expDate = lot != null && lot.getExpiryDate() != null
+                        ? lot.getExpiryDate().format(DateTimeFormatter.ofPattern("dd/MM/yy"))
+                        : "";
 
                 String[] rowData = {
                         String.valueOf(stt++),
                         skuCode,
                         skuName,
-                        "",           // Quy cách — lấy từ SKU nếu có
+                        "", // Quy cách — lấy từ SKU nếu có
                         "Thùng",
                         String.valueOf(qty),
-                        "",           // Chai lẻ
-                        "",           // Ghi chú
+                        "", // Chai lẻ
+                        "", // Ghi chú
                         packCode,
                         mfgDate,
                         expDate
@@ -381,14 +388,14 @@ public class DispatchPdfService {
     // ── Signature Section ────────────────────────────────────────
 
     private void addSignatureSection(Document doc) throws Exception {
-        Font thFont   = getFontBold(8f, BaseColor.BLACK);
+        Font thFont = getFontBold(8f, BaseColor.BLACK);
         Font cellFont = getFont(8f, BaseColor.BLACK);
 
         PdfPTable sigTable = new PdfPTable(3);
         sigTable.setWidthPercentage(100);
-        sigTable.setWidths(new float[]{30f, 50f, 20f});
+        sigTable.setWidths(new float[] { 30f, 50f, 20f });
 
-        String[] sigHeaders = {"Nhân sự", "Ký tên xác nhận", "Họ và tên"};
+        String[] sigHeaders = { "Nhân sự", "Ký tên xác nhận", "Họ và tên" };
         for (String h : sigHeaders) {
             PdfPCell cell = new PdfPCell(new Phrase(h, thFont));
             cell.setBackgroundColor(HEADER_BG);
@@ -399,7 +406,7 @@ public class DispatchPdfService {
             sigTable.addCell(cell);
         }
 
-        String[] roles = {"Người lập phiếu", "Kế toán xác nhận", "Người giao hàng", "Người nhận hàng"};
+        String[] roles = { "Người lập phiếu", "Kế toán xác nhận", "Người giao hàng", "Người nhận hàng" };
         for (String role : roles) {
             PdfPCell roleCell = new PdfPCell(new Phrase(role, cellFont));
             roleCell.setPadding(8);
@@ -429,10 +436,13 @@ public class DispatchPdfService {
             SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
             if (sku != null && sku.getSkuName() != null) {
                 String name = sku.getSkuName().toLowerCase();
-                if (name.contains("khuyến mãi") || name.contains("kèm")) return "Hàng kèm khuyến mãi";
-                if (name.contains("tặng"))  return "Hàng khuyến mãi";
+                if (name.contains("khuyến mãi") || name.contains("kèm"))
+                    return "Hàng kèm khuyến mãi";
+                if (name.contains("tặng"))
+                    return "Hàng khuyến mãi";
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
         return "Hàng xuất kho";
     }
 }

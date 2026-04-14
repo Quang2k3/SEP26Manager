@@ -39,6 +39,8 @@ public class OutboundService {
     private final NotificationService notificationService;
     private final UserJpaRepository userRepository;
     private final ReservationJpaRepository reservationRepository;
+    private final ReceivingOrderJpaRepository receivingOrderRepo;
+    private final ReceivingItemJpaRepository receivingItemRepo;
 
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
@@ -578,6 +580,68 @@ public class OutboundService {
                     ? customerRepository.findById(so.getCustomerId()).orElse(null) : null;
             return ApiResponse.success("OK", buildSalesOrderResponse(so, items, customer, null));
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // BACKORDER GRN (One-Click)
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional
+    public ApiResponse<Map<String, Object>> createBackorderGrn(Long soId, Long userId, String ip, String ua) {
+        SalesOrderEntity so = soRepository.findById(soId)
+                .orElseThrow(() -> new ResourceNotFoundException("Sales Order not found"));
+
+        if (!"WAITING_STOCK".equals(so.getStatus())) {
+            throw new BusinessException("Chỉ có thể tạo phiếu nhập hàng bù khi trạng thái đơn là WAITING_STOCK.");
+        }
+
+        List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
+        List<ReceivingItemEntity> grnItems = new ArrayList<>();
+
+        String receivingCode = "GRN-" + so.getSoCode() + "-B" + (System.currentTimeMillis() % 10000);
+        ReceivingOrderEntity order = ReceivingOrderEntity.builder()
+                .warehouseId(so.getWarehouseId())
+                .sourceType("BACKORDER")
+                .sourceReferenceCode(so.getSoCode())
+                .note("Phiếu nhập hàng bù tự động cho SO: " + so.getSoCode())
+                .status("DRAFT")
+                .createdBy(userId)
+                .receivingCode(receivingCode)
+                .build();
+
+        ReceivingOrderEntity savedOrder = receivingOrderRepo.save(order);
+
+        for (SalesOrderItemEntity item : items) {
+            BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("sales_orders", so.getSoId(), item.getSkuId());
+            if (ownReserved == null) ownReserved = BigDecimal.ZERO;
+            
+            BigDecimal missing = item.getOrderedQty().subtract(ownReserved);
+            if (missing.compareTo(BigDecimal.ZERO) > 0) {
+                ReceivingItemEntity ri = ReceivingItemEntity.builder()
+                        .receivingOrder(savedOrder)
+                        .skuId(item.getSkuId())
+                        .expectedQty(missing)
+                        .receivedQty(BigDecimal.ZERO)
+                        .build();
+                grnItems.add(ri);
+            }
+        }
+
+        if (grnItems.isEmpty()) {
+            // Throw exception or just return error
+            throw new BusinessException("Không phát hiện thiếu hàng để tạo phiếu bù (Tất cả SKU đều đã được Allocate đủ).");
+        }
+
+        receivingItemRepo.saveAll(grnItems);
+
+        auditLogService.logAction(userId, "BACKORDER_GRN_CREATED", "SALES_ORDER", soId,
+                "Created backorder GRN " + receivingCode + " for SO " + so.getSoCode(), ip, ua);
+
+        notificationService.notifyRole("QC", "receiving_pending_qc",
+                savedOrder.getReceivingId(), receivingCode, "Phiếu nhập hàng bù mới cho " + so.getSoCode());
+
+        return ApiResponse.success("Tạo phiếu nhập hàng bù thành công", 
+                Map.of("receivingId", savedOrder.getReceivingId(), "receivingCode", receivingCode));
     }
 
     // ─────────────────────────────────────────────────────────────
