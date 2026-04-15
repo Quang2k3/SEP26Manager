@@ -69,6 +69,11 @@ public class PutawayTaskService {
         Page<PutawayTaskEntity> tasksPage;
         if (assignedTo != null && status != null) {
             tasksPage = putawayTaskRepo.findByAssignedToAndStatusOrderByCreatedAtDesc(assignedTo, status, pageable);
+        } else if (assignedTo != null && warehouseId != null) {
+            // BUG FIX: when status is null but assignedTo is provided
+            tasksPage = putawayTaskRepo.findByAssignedToAndWarehouseIdOrderByCreatedAtDesc(assignedTo, warehouseId, pageable);
+        } else if (assignedTo != null) {
+            tasksPage = putawayTaskRepo.findByAssignedToOrderByCreatedAtDesc(assignedTo, pageable);
         } else if (status != null && warehouseId != null) {
             tasksPage = putawayTaskRepo.findByWarehouseIdAndStatusOrderByCreatedAtDesc(warehouseId, status, pageable);
         } else if (warehouseId != null) {

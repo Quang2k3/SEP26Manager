@@ -14,6 +14,11 @@ public interface PutawayTaskJpaRepository extends JpaRepository<PutawayTaskEntit
     Page<PutawayTaskEntity> findByAssignedToAndStatusOrderByCreatedAtDesc(Long userId, String status,
                                                                           Pageable pageable);
 
+    Page<PutawayTaskEntity> findByAssignedToAndWarehouseIdOrderByCreatedAtDesc(Long userId, Long warehouseId,
+                                                                          Pageable pageable);
+
+    Page<PutawayTaskEntity> findByAssignedToOrderByCreatedAtDesc(Long userId, Pageable pageable);
+
     Page<PutawayTaskEntity> findByWarehouseIdAndStatusOrderByCreatedAtDesc(Long warehouseId, String status,
                                                                            Pageable pageable);
 

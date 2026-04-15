@@ -116,7 +116,10 @@ public class GrnService {
         grnRepo.save(grn);
 
         receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
-            order.setStatus("GRN_CREATED");
+            order.setStatus("GRN_REJECTED");
+            order.setRejectReason(reason);
+            order.setRejectedBy(managerId);
+            order.setRejectedAt(LocalDateTime.now());
             receivingOrderRepo.save(order);
         });
 
@@ -177,6 +180,7 @@ public class GrnService {
                 .grnId(grn.getGrnId())
                 .fromLocationId(stagingLocationId)
                 .status("PENDING")
+                .assignedTo(userId)   // Keeper nào post GRN thì chỉ Keeper đó mới thấy và cất hàng
                 .createdBy(userId)
                 .build();
         task = putawayTaskRepo.save(task);
