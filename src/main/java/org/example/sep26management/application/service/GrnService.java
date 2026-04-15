@@ -180,8 +180,8 @@ public class GrnService {
                 .grnId(grn.getGrnId())
                 .fromLocationId(stagingLocationId)
                 .status("PENDING")
-                .assignedTo(userId)   // Keeper nào post GRN thì chỉ Keeper đó mới thấy và cất hàng
-                .createdBy(userId)
+                .assignedTo(grn.getCreatedBy()) // Keeper tạo GRN sẽ là người cất hàng
+                .createdBy(userId) // Người thao tác (Manager)
                 .build();
         task = putawayTaskRepo.save(task);
         log.info("Created PutawayTask {} for GRN {} (receivingId={})",
