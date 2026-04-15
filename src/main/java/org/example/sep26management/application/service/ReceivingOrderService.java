@@ -377,13 +377,11 @@ public class ReceivingOrderService {
 
                         // [FIX] Tính damagedQty từ incident data thay vì dùng condition trên DB row
                         // (Tính riêng theo từng Lot)
-                        String expectedNoteSuffix = "(Lot: "
-                                        + (bestItem.getLotNumber() == null ? "" : bestItem.getLotNumber()) + ")";
+                        // [FIX] Tính damagedQty từ incident data bằng cách match chính xác skuId và lotNumber
                         BigDecimal failQty = allIncidentItems.stream()
                                         .filter(i -> ("DAMAGE".equals(i.getReasonCode()) || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
                                                         && skuId.equals(i.getSkuId())
-                                                        && i.getNote() != null
-                                                        && i.getNote().contains(expectedNoteSuffix))
+                                                        && java.util.Objects.equals(bestItem.getLotNumber(), i.getLotNumber()))
                                         .map(IncidentItemEntity::getDamagedQty)
                                         .filter(java.util.Objects::nonNull)
                                         .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -393,8 +391,7 @@ public class ReceivingOrderService {
                                         ? allIncidentItems.stream()
                                                         .filter(i -> ("DAMAGE".equals(i.getReasonCode()) || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
                                                                         && skuId.equals(i.getSkuId())
-                                                                        && i.getNote() != null
-                                                                        && i.getNote().contains(expectedNoteSuffix))
+                                                                        && java.util.Objects.equals(bestItem.getLotNumber(), i.getLotNumber()))
                                                         .map(IncidentItemEntity::getAttachmentUrl)
                                                         .filter(u -> u != null && !u.isBlank())
                                                         .findFirst().orElse(null)

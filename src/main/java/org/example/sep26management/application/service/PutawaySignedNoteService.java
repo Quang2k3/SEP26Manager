@@ -8,9 +8,14 @@ import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskEntity;
 import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskJpaRepository;
+import org.example.sep26management.infrastructure.persistence.entity.PutawayAllocationEntity;
+import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskItemEntity;
+import org.example.sep26management.infrastructure.persistence.repository.PutawayAllocationJpaRepository;
+import org.example.sep26management.infrastructure.persistence.repository.PutawayTaskItemJpaRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -30,6 +35,8 @@ import java.util.Map;
 public class PutawaySignedNoteService {
 
     private final PutawayTaskJpaRepository putawayTaskRepo;
+    private final PutawayTaskItemJpaRepository putawayTaskItemRepo;
+    private final PutawayAllocationJpaRepository allocationRepo;
     private final Cloudinary cloudinary;
 
     private static final List<String> ALLOWED = Arrays.asList("jpg", "jpeg", "png", "webp", "heic");
@@ -42,7 +49,22 @@ public class PutawaySignedNoteService {
         // [ONE-TIME LOCK] Chặn upload lần 2
         if (task.getSignedNoteUrl() != null && !task.getSignedNoteUrl().isBlank()) {
             throw new BusinessException(
-                    "Đã có ảnh phiếu cất hàng. Mỗi task chỉ được upload 1 lần — không thể ghi đ財.");
+                    "Đã có ảnh phiếu cất hàng. Mỗi task chỉ được upload 1 lần — không thể ghi đè.");
+        }
+
+        // [VALIDATION] Chặn upload nếu chưa phân bổ hết số lượng
+        List<PutawayAllocationEntity> reservations = allocationRepo.findByPutawayTaskIdAndStatus(taskId, "RESERVED");
+        List<PutawayTaskItemEntity> rawTaskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
+        for (PutawayTaskItemEntity item : rawTaskItems) {
+            BigDecimal allocated = reservations.stream()
+                    .filter(a -> item.getPutawayTaskItemId().equals(a.getPutawayTaskItemId()))
+                    .map(PutawayAllocationEntity::getAllocatedQty)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal remaining = item.getQuantity().subtract(item.getPutawayQty()).subtract(allocated);
+            if (remaining.compareTo(BigDecimal.ZERO) > 0) {
+                throw new BusinessException("Chưa phân bổ hết hàng! Vui lòng đặt chỗ cho tất cả số lượng cần cất trước khi in phiếu / scan xác nhận chữ ký.");
+            }
         }
 
         if (file == null || file.isEmpty()) {
