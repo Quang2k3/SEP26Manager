@@ -377,11 +377,14 @@ public class ReceivingOrderService {
 
                         // [FIX] Tính damagedQty từ incident data thay vì dùng condition trên DB row
                         // (Tính riêng theo từng Lot)
-                        // [FIX] Tính damagedQty từ incident data bằng cách match chính xác skuId và lotNumber
+                        // [FIX] Tính damagedQty từ incident data bằng cách match chính xác skuId và
+                        // lotNumber
                         BigDecimal failQty = allIncidentItems.stream()
-                                        .filter(i -> ("DAMAGE".equals(i.getReasonCode()) || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
+                                        .filter(i -> ("DAMAGE".equals(i.getReasonCode())
+                                                        || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
                                                         && skuId.equals(i.getSkuId())
-                                                        && java.util.Objects.equals(bestItem.getLotNumber(), i.getLotNumber()))
+                                                        && java.util.Objects.equals(bestItem.getLotNumber(),
+                                                                        i.getLotNumber()))
                                         .map(IncidentItemEntity::getDamagedQty)
                                         .filter(java.util.Objects::nonNull)
                                         .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -389,9 +392,12 @@ public class ReceivingOrderService {
                         // Lấy attachmentUrl từ incident DAMAGE items
                         String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0
                                         ? allIncidentItems.stream()
-                                                        .filter(i -> ("DAMAGE".equals(i.getReasonCode()) || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
+                                                        .filter(i -> ("DAMAGE".equals(i.getReasonCode())
+                                                                        || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
                                                                         && skuId.equals(i.getSkuId())
-                                                                        && java.util.Objects.equals(bestItem.getLotNumber(), i.getLotNumber()))
+                                                                        && java.util.Objects.equals(
+                                                                                        bestItem.getLotNumber(),
+                                                                                        i.getLotNumber()))
                                                         .map(IncidentItemEntity::getAttachmentUrl)
                                                         .filter(u -> u != null && !u.isBlank())
                                                         .findFirst().orElse(null)
@@ -1071,10 +1077,11 @@ public class ReceivingOrderService {
                                 continue;
                         }
                         processedKeys.add(key);
-                        
+
                         Long skuId = dbItem.getSkuId();
                         boolean isUnexpected = false;
-                        if (dbItem.getExpectedQty() == null || dbItem.getExpectedQty().compareTo(BigDecimal.ZERO) == 0) {
+                        if (dbItem.getExpectedQty() == null
+                                        || dbItem.getExpectedQty().compareTo(BigDecimal.ZERO) == 0) {
                                 boolean hasLotAgnostic = dbItems.stream()
                                                 .anyMatch(i -> i.getSkuId().equals(skuId)
                                                                 && (i.getLotNumber() == null
@@ -1093,7 +1100,7 @@ public class ReceivingOrderService {
 
                         BigDecimal totalScanned = passQty.add(failQty);
                         dbItem.setReceivedQty(totalScanned);
-                        
+
                         // [FIX] Chỉ cộng vào tổng SKU nếu KHÔNG phải là hàng ngoài phiếu
                         // Để không làm sai lệch tính toán SHORTAGE/OVERAGE của những lô hàng đúng
                         if (!isUnexpected) {
@@ -1102,7 +1109,7 @@ public class ReceivingOrderService {
 
                         // Fetch attachmentUrl + reasonCode (defect tags) from FAIL scan lines
                         String lotNumber = dbItem.getLotNumber();
-                        
+
                         List<ScanLineItem> failScanLines = lines.stream()
                                         .filter(l -> l.getSkuId() != null && l.getSkuId().equals(skuId)
                                                         && "FAIL".equals(l.getCondition())
@@ -1140,7 +1147,8 @@ public class ReceivingOrderService {
                                         } else {
                                                 for (ScanLineItem failScanLine : failScanLines) {
                                                         String qcReasonCode = failScanLine.getReasonCode();
-                                                        String extraNote = "Hàng lạ lô/ngoài phiếu (Lot: " + lotNumber + ") — Lỗi: " + failScanLine.getQty();
+                                                        String extraNote = "Hàng lạ lô/ngoài phiếu (Lot: " + lotNumber
+                                                                        + ") — Lỗi: " + failScanLine.getQty();
                                                         if (qcReasonCode != null && !qcReasonCode.isBlank()) {
                                                                 extraNote = qcReasonCode + " | " + extraNote;
                                                         }
@@ -1148,7 +1156,9 @@ public class ReceivingOrderService {
                                                                         .skuId(skuId)
                                                                         .damagedQty(failScanLine.getQty())
                                                                         .expectedQty(BigDecimal.ZERO)
-                                                                        .actualQty(totalScanned) // Can just use the totalScanned or passQty + failQty
+                                                                        .actualQty(totalScanned) // Can just use the
+                                                                                                 // totalScanned or
+                                                                                                 // passQty + failQty
                                                                         .reasonCode("UNEXPECTED_ITEM")
                                                                         .note(extraNote)
                                                                         .attachmentUrl(failScanLine.getAttachmentUrl())
@@ -1166,8 +1176,9 @@ public class ReceivingOrderService {
                                 // Xử lý hàng hỏng (Tính riêng theo từng Lot)
                                 if (failQty.compareTo(BigDecimal.ZERO) > 0) {
                                         hasIssues = true;
-                                        BigDecimal skuExpectedQty = aggExpectedBySkuId.getOrDefault(skuId, BigDecimal.ZERO);
-                                        
+                                        BigDecimal skuExpectedQty = aggExpectedBySkuId.getOrDefault(skuId,
+                                                        BigDecimal.ZERO);
+
                                         for (ScanLineItem failScanLine : failScanLines) {
                                                 String qcReasonCode = failScanLine.getReasonCode();
                                                 String dmgNote;
@@ -1199,7 +1210,8 @@ public class ReceivingOrderService {
                         receivingItemRepo.save(dbItem);
                 }
 
-                // ── STEP 1b: Phát hiện thiếu/thừa so với giấy tờ (expectedQty vs scannedQty) ──
+                // ── STEP 1b: Phát hiện thiếu/thừa so với giấy tờ (expectedQty vs scannedQty)
+                // ──
                 // Case: Keeper tạo phiếu expectedQty=3 nhưng thực tế chỉ scan được 2,
                 // QC cũng chỉ đếm được 2 → QC khớp Keeper (cả 2 = 2) → STEP 0 pass.
                 // Nhưng thực nhận (2) ≠ giấy tờ (3) → cần tạo/gộp incident SHORTAGE.
@@ -1209,7 +1221,8 @@ public class ReceivingOrderService {
                         BigDecimal scannedQty = aggScannedBySkuId.getOrDefault(skuId, BigDecimal.ZERO);
 
                         // Chỉ check khi expectedQty > 0 (bỏ qua hàng ngoài phiếu có expected=0)
-                        if (expectedQty.compareTo(BigDecimal.ZERO) <= 0) continue;
+                        if (expectedQty.compareTo(BigDecimal.ZERO) <= 0)
+                                continue;
 
                         // So sánh expectedQty vs scannedQty
                         if (expectedQty.compareTo(scannedQty) != 0) {
@@ -1230,16 +1243,20 @@ public class ReceivingOrderService {
 
                                 // Không gộp với DAMAGE → tạo item SHORTAGE/OVERAGE mới
                                 String reasonCode = diff.compareTo(BigDecimal.ZERO) < 0
-                                                ? "SHORTAGE" : "OVERAGE";
+                                                ? "SHORTAGE"
+                                                : "OVERAGE";
                                 hasIssues = true;
-                                
+
                                 final Long finalSkuIdDisc = skuId;
                                 String representativeLot = dbItems.stream()
-                                                .filter(i -> finalSkuIdDisc.equals(i.getSkuId()) && i.getLotNumber() != null && !i.getLotNumber().isEmpty())
+                                                .filter(i -> finalSkuIdDisc.equals(i.getSkuId())
+                                                                && i.getLotNumber() != null
+                                                                && !i.getLotNumber().isEmpty())
                                                 .map(ReceivingItemEntity::getLotNumber)
                                                 .findFirst().orElse(null);
                                 java.time.LocalDate representativeExpiry = dbItems.stream()
-                                                .filter(i -> finalSkuIdDisc.equals(i.getSkuId()) && i.getExpiryDate() != null)
+                                                .filter(i -> finalSkuIdDisc.equals(i.getSkuId())
+                                                                && i.getExpiryDate() != null)
                                                 .map(ReceivingItemEntity::getExpiryDate)
                                                 .findFirst().orElse(null);
 
@@ -1286,7 +1303,8 @@ public class ReceivingOrderService {
                                                         : mismatchLot.equals(i.getLotNumber())))
                                         .findFirst();
 
-                        java.time.LocalDate extraExpiryDate = existingItem.map(ReceivingItemEntity::getExpiryDate).orElse(null);
+                        java.time.LocalDate extraExpiryDate = existingItem.map(ReceivingItemEntity::getExpiryDate)
+                                        .orElse(null);
 
                         hasIssues = true;
 
@@ -1339,10 +1357,10 @@ public class ReceivingOrderService {
                         // [FIX] Nếu item DAMAGE cũng có shortage/overage (expectedQty ≠ actualQty)
                         // thì chuyển sang discrepancy để FE hiển thị đúng phán quyết
                         // VD: expected=3, actual=2, fail=1 → DAMAGE + SHORTAGE → gộp thành DISCREPANCY
-                        boolean damageHasQtyMismatch = damageItems.stream().anyMatch(i ->
-                                        i.getExpectedQty() != null && i.getActualQty() != null
-                                        && i.getExpectedQty().compareTo(BigDecimal.ZERO) > 0
-                                        && i.getExpectedQty().compareTo(i.getActualQty()) != 0);
+                        boolean damageHasQtyMismatch = damageItems.stream()
+                                        .anyMatch(i -> i.getExpectedQty() != null && i.getActualQty() != null
+                                                        && i.getExpectedQty().compareTo(BigDecimal.ZERO) > 0
+                                                        && i.getExpectedQty().compareTo(i.getActualQty()) != 0);
                         if (damageHasQtyMismatch && discrepancyItems.isEmpty()) {
                                 // Chuyển tất cả DAMAGE items sang discrepancy
                                 discrepancyItems = new ArrayList<>(damageItems);
@@ -1847,15 +1865,6 @@ public class ReceivingOrderService {
                                 grnResponse);
         }
 
-        // ─── Post (deprecated — đã chuyển sang GRN flow) ──────────────────────────
-
-        @Transactional
-        public ApiResponse<ReceivingOrderResponse> post(Long id, Long accountantId) {
-                // BE-C4 FIX: Đổi UnsupportedOperationException → BusinessException (HTTP 400)
-                throw new org.example.sep26management.infrastructure.exception.BusinessException(
-                                "Thao tác post đã chuyển sang luồng GRN. "
-                                                + "Vui lòng dùng: POST /v1/grns/{grnId}/post");
-        }
 
         // ─── Private helpers ───────────────────────────────────────────────────────
 
