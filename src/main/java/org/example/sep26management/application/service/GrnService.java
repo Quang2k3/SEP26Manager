@@ -116,7 +116,7 @@ public class GrnService {
         grnRepo.save(grn);
 
         receivingOrderRepo.findById(grn.getReceivingId()).ifPresent(order -> {
-            order.setStatus("GRN_REJECTED");
+            order.setStatus("CANCELLED");
             order.setRejectReason(reason);
             order.setRejectedBy(managerId);
             order.setRejectedAt(LocalDateTime.now());
