@@ -168,6 +168,17 @@ public class PutawayTaskService {
         PutawayTaskEntity task = findTask(taskId);
         validateTaskStatus(task);
 
+        // ── Ownership guard: task đang IN_PROGRESS bởi Keeper khác thì block ────
+        // PENDING/OPEN: bất kỳ Keeper nào cũng có thể claim
+        // IN_PROGRESS:  chỉ Keeper đã claim (assignedTo) mới được allocate tiếp
+        if ("IN_PROGRESS".equals(task.getStatus())
+                && task.getAssignedTo() != null
+                && !task.getAssignedTo().equals(userId)) {
+            throw new RuntimeException(
+                    "Task " + taskId + " đang được xử lý bởi nhân viên khác (userId=" + task.getAssignedTo() + "). "
+                            + "Bạn không thể cất hàng vào task này.");
+        }
+
         List<PutawayTaskItemEntity> taskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
         List<PutawayAllocationResponse> results = new ArrayList<>();
 
@@ -245,6 +256,12 @@ public class PutawayTaskService {
     public ApiResponse<PutawayTaskResponse> confirmAll(Long taskId, Long userId) {
         PutawayTaskEntity task = findTask(taskId);
         validateTaskStatus(task);
+
+        // ── Ownership guard: chỉ Keeper đã claim task mới được confirm ─────────
+        if (task.getAssignedTo() != null && !task.getAssignedTo().equals(userId)) {
+            throw new RuntimeException(
+                    "Chỉ nhân viên đã xử lý task này (userId=" + task.getAssignedTo() + ") mới có thể xác nhận cất hàng.");
+        }
 
         List<PutawayAllocationEntity> reservations = allocationRepo.findByPutawayTaskIdAndStatus(taskId, "RESERVED");
         if (reservations.isEmpty()) {

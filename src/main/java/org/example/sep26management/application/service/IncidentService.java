@@ -328,9 +328,9 @@ public class IncidentService {
                     newOrderStatus = "QC_APPROVED";
                     wsMessage = "Hàng hỏng hoàn NCC, hàng hợp lệ tiếp tục tạo GRN";
                 } else {
-                    // Không còn hàng hợp lệ nào → REJECTED
-                    newOrderStatus = "REJECTED";
-                    wsMessage = "Toàn bộ hàng hoàn về NCC — đơn bị từ chối";
+                    // Không còn hàng hợp lệ nào → RETURNED_TO_SUPPLIER (không tạo GRN)
+                    newOrderStatus = "RETURNED_TO_SUPPLIER";
+                    wsMessage = "Toàn bộ hàng hoàn về NCC — đơn đóng, không tạo GRN";
                 }
             } else {
                 // Có ít nhất 1 ACCEPT → QC_APPROVED
@@ -347,10 +347,10 @@ public class IncidentService {
                 if ("PENDING_INCIDENT".equals(order.getStatus())) {
                     order.setStatus(finalStatus);
                     order.setUpdatedAt(java.time.LocalDateTime.now());
-                    if ("REJECTED".equals(finalStatus)) {
+                    if ("RETURNED_TO_SUPPLIER".equals(finalStatus)) {
                         order.setRejectedBy(managerId);
                         order.setRejectedAt(java.time.LocalDateTime.now());
-                        order.setRejectReason("Manager quyết định hoàn toàn bộ hàng. Incident: "
+                        order.setRejectReason("Manager quyết định hoàn toàn bộ hàng về NCC. Incident: "
                                 + incident.getIncidentCode());
                     }
 
@@ -645,23 +645,42 @@ public class IncidentService {
             log.info("Auto-generated Backorder Sub-PO {} for missing SKUs", backorderPO.getReceivingCode());
         }
 
-        // BE-C3 FIX: Bất kể là nợ giao bù hay chốt thiếu, số lượng HÀNG ĐÃ NHẬN (vd: 1990/2000)
-        // PHẢI được release vào kho rảnh rỗi. Việc giữ PENDING_INCIDENT sẽ làm ngâm vốn/kệ hàng.
-        // Hàng bù (10) sẽ được Supplier chở tới trong lô sau (mã PO mới hoặc Sub-PO).
-        order.setStatus("QC_APPROVED");
+        // BE-C3 FIX (RETURN_ALL): Sau khi xử lý tất cả items, tính tổng receivedQty còn lại.
+        // Nếu toàn bộ đã bị RETURN_DAMAGE (receivedQty = 0) → không còn hàng nào để GRN
+        // → set RETURNED_TO_SUPPLIER thay vì QC_APPROVED để tránh Keeper nhầm tưởng đơn còn hàng.
+        // Nếu vẫn còn qty hợp lệ (partial return) → QC_APPROVED như bình thường.
+        java.math.BigDecimal totalRemainingAfterAllActions = receivingItemRepo
+                .findByReceivingOrderReceivingId(order.getReceivingId())
+                .stream()
+                .map(ri -> ri.getReceivedQty() != null ? ri.getReceivedQty() : java.math.BigDecimal.ZERO)
+                .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+
+        boolean allReturnedToSupplier = totalRemainingAfterAllActions.compareTo(java.math.BigDecimal.ZERO) == 0;
+        String finalOrderStatus = allReturnedToSupplier ? "RETURNED_TO_SUPPLIER" : "QC_APPROVED";
+        order.setStatus(finalOrderStatus);
+        if (allReturnedToSupplier) {
+            order.setRejectReason("Manager quyết định hoàn toàn bộ hàng về NCC. Incident: "
+                    + incident.getIncidentCode());
+        }
         receivingOrderRepo.save(order);
-        
-        log.info("Discrepancy Incident {} fully resolved (hasWaitBackorder={}) — order {} unblocked for GRN",
-                incident.getIncidentCode(), hasWaitBackorder, order.getReceivingCode());
+
+        log.info("Discrepancy Incident {} fully resolved (hasWaitBackorder={}, allReturnedToSupplier={}) — order {} → {}",
+                incident.getIncidentCode(), hasWaitBackorder, allReturnedToSupplier,
+                order.getReceivingCode(), finalOrderStatus);
 
         // ── Realtime: notify theo trạng thái kết quả ─────────────────────────
-        if (hasWaitBackorder) {
+        if (allReturnedToSupplier) {
+            // Toàn bộ hàng hoàn NCC → đơn đóng, Keeper không cần tạo GRN
+            notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_updated",
+                    order.getReceivingId(), order.getReceivingCode(),
+                    order.getReceivingCode() + " — Toàn bộ hàng đã hoàn về NCC. Đơn đóng, không tạo GRN.");
+        } else if (hasWaitBackorder) {
             // Vẫn còn nợ → notify MANAGER + KEEPER để đội Mua Hàng theo dõi
             notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
                     incident.getIncidentId(), incident.getIncidentCode(),
                     order.getReceivingCode() + " — Chốt nhập phần thực tế, phần thiếu sẽ tạo phiếu chờ bù");
         } else {
-            // Xử lý dứt điểm → QC xong
+            // Xử lý dứt điểm → QC xong, còn hàng để GRN
             notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "receiving_pending_qc",
                     order.getReceivingId(), order.getReceivingCode(),
                     "Discrepancy đã xử lý — đơn chờ tạo GRN nhập kho");
