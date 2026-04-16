@@ -16,6 +16,10 @@ public class CreateOutboundRequest {
     // Tự inject từ JWT — FE không truyền
     private Long warehouseId;
 
+    @Schema(description = "Mã phiếu xuất kho (Keeper tự nhập từ đơn đặt hàng)", example = "PO-2026-0001")
+    @NotBlank(message = "Mã phiếu xuất kho là bắt buộc")
+    private String documentCode;
+
     @Schema(description = "Loại đơn xuất kho", example = "SALES_ORDER",
             allowableValues = {"SALES_ORDER", "INTERNAL_TRANSFER"})
     @NotNull(message = "Order type is required")
