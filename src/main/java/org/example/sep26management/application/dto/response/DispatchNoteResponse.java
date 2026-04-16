@@ -24,6 +24,9 @@ public class DispatchNoteResponse {
     private String customerName;
     /** Địa chỉ giao hàng của khách hàng */
     private String customerAddress;
+    private String customerCode;
+    private String documentCode;
+    private String note;
     private LocalDateTime dispatchDate;
 
     private List<DispatchNoteItem> items;

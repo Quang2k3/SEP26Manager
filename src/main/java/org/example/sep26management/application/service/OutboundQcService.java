@@ -919,9 +919,12 @@ public class OutboundQcService {
 
         return ApiResponse.success("Dispatch note generated", DispatchNoteResponse.builder()
                 .dispatchNoteCode("DN-" + so.getSoCode())
+                .documentCode(so.getSoCode())
                 .warehouseName(warehouse.getWarehouseName())
                 .customerName(customerName)
+                .customerCode(customer.getCustomerCode())
                 .customerAddress(customerAddress)
+                .note(so.getNote())
                 .dispatchDate(LocalDateTime.now())
                 .items(noteItems)
                 .totalItems(noteItems.size())
