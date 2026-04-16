@@ -43,6 +43,15 @@ public class OutboundService {
     private final ReceivingItemJpaRepository receivingItemRepo;
 
     // ─────────────────────────────────────────────────────────────
+    // SCRUM-xxx: Check Duplicate
+    // ─────────────────────────────────────────────────────────────
+    public boolean checkDuplicateCode(String code) {
+        if (code == null || code.trim().isEmpty()) return false;
+        String trimmed = code.trim();
+        return soRepository.existsBySoCode(trimmed) || transferRepository.existsByTransferCode(trimmed);
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
     // ─────────────────────────────────────────────────────────────
 
