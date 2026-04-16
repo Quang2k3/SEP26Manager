@@ -78,6 +78,7 @@ public class CustomerController {
         private String customerName;
         private String email;
         private String phone;
+        @NotBlank(message = "address is required")
         private String address;
     }
 
