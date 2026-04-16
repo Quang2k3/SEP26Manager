@@ -63,6 +63,7 @@ public class CustomerController {
                 .customerName(request.getCustomerName().trim())
                 .email(request.getEmail())
                 .phone(request.getPhone())
+                .address(request.getAddress())
                 .active(true)
                 .build();
 
@@ -77,6 +78,7 @@ public class CustomerController {
         private String customerName;
         private String email;
         private String phone;
+        private String address;
     }
 
     /**
