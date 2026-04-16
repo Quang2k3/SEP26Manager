@@ -72,8 +72,14 @@ public class OutboundController {
     private final PickSignedNoteService pickSignedNoteService;
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
-    // createOutbound(request, createdBy, ip, ua) — warehouseId injected vào request
     // ─────────────────────────────────────────────────────────────
+    @GetMapping("/check-duplicate")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Kiểm tra trùng lặp mã phiếu xuất", description = "Kiểm tra xem mã phiếu xuất đã tồn tại trong Sales Order hoặc Internal Transfer chưa.")
+    public ResponseEntity<ApiResponse<Boolean>> checkDuplicateCode(@RequestParam String code) {
+        return ResponseEntity.ok(ApiResponse.success("Success", outboundService.checkDuplicateCode(code)));
+    }
+
     @PostMapping
     @PreAuthorize("hasRole('KEEPER')")
     @Operation(summary = "Tạo lệnh xuất kho (DRAFT)", description = "Tạo một lệnh xuất kho mới (Sales Order hoặc Internal Transfer).\n\n"
