@@ -907,8 +907,10 @@ public class OutboundQcService {
 
         WarehouseEntity warehouse = warehouseRepository.findById(so.getWarehouseId())
                 .orElseThrow(() -> new ResourceNotFoundException("Warehouse not found"));
-        String customerName = customerRepository.findById(so.getCustomerId())
-                .map(CustomerEntity::getCustomerName).orElse("N/A");
+        CustomerEntity customer = customerRepository.findById(so.getCustomerId())
+                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+        String customerName = customer.getCustomerName() != null ? customer.getCustomerName() : "N/A";
+        String customerAddress = customer.getAddress() != null ? customer.getAddress() : "";
         String createdByName = userRepository.findById(so.getCreatedBy())
                 .map(UserEntity::getFullName).orElse("N/A");
 
@@ -919,6 +921,7 @@ public class OutboundQcService {
                 .dispatchNoteCode("DN-" + so.getSoCode())
                 .warehouseName(warehouse.getWarehouseName())
                 .customerName(customerName)
+                .customerAddress(customerAddress)
                 .dispatchDate(LocalDateTime.now())
                 .items(noteItems)
                 .totalItems(noteItems.size())
@@ -1047,6 +1050,8 @@ public class OutboundQcService {
                 .skuCode(sku != null ? sku.getSkuCode() : "N/A")
                 .skuName(sku != null ? sku.getSkuName() : "N/A")
                 .unit(sku != null ? sku.getUnit() : "")
+                .unitsPerCarton(sku != null ? sku.getUnitsPerCarton() : null)
+                .weightPerCartonKg(sku != null ? sku.getWeightPerCartonKg() : null)
                 .lotNumber(lotNumber).manufactureDate(manufactureDate).expiryDate(expiryDate)
                 .locationCode(locationRepository.findById(item.getFromLocationId())
                         .map(LocationEntity::getLocationCode).orElse("N/A"))

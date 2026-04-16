@@ -3,6 +3,7 @@ package org.example.sep26management.application.dto.response;
 import lombok.Builder;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -21,6 +22,8 @@ public class DispatchNoteResponse {
 
     private String warehouseName;
     private String customerName;
+    /** Địa chỉ giao hàng của khách hàng */
+    private String customerAddress;
     private LocalDateTime dispatchDate;
 
     private List<DispatchNoteItem> items;
@@ -39,6 +42,10 @@ public class DispatchNoteResponse {
         private String manufactureDate;
         private String expiryDate;
         private String locationCode;
-        private java.math.BigDecimal quantity;
+        private BigDecimal quantity;
+        /** Quy cách: số chai/lon trong 1 thùng — lấy từ sku.unitsPerCarton */
+        private Integer unitsPerCarton;
+        /** Trọng lượng 1 thùng (kg) — lấy từ sku.weightPerCartonKg */
+        private BigDecimal weightPerCartonKg;
     }
-}
+}

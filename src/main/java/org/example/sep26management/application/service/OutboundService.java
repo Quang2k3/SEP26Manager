@@ -80,7 +80,14 @@ public class OutboundService {
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 req.getWarehouseId(), req.getItems());
 
-        String code = generateDocCode("EXP-SAL", req.getWarehouseId(), true);
+        // [FIX] Sử dụng mã phiếu do Keeper nhập thay vì auto-generate
+        String code = req.getDocumentCode().trim();
+        if (soRepository.existsBySoCode(code)) {
+            throw new BusinessException("Mã phiếu xuất '" + code + "' đã tồn tại. Vui lòng nhập mã khác.");
+        }
+        if (transferRepository.existsByTransferCode(code)) {
+            throw new BusinessException("Mã phiếu '" + code + "' đã được sử dụng cho lệnh chuyển kho. Vui lòng nhập mã khác.");
+        }
 
         SalesOrderEntity so = SalesOrderEntity.builder()
                 .warehouseId(req.getWarehouseId())
@@ -133,7 +140,14 @@ public class OutboundService {
         List<OutboundResponse.StockWarning> warnings = checkStockAvailability(
                 req.getWarehouseId(), req.getItems());
 
-        String code = generateDocCode("EXP-INT", req.getWarehouseId(), false);
+        // [FIX] Sử dụng mã phiếu do Keeper nhập thay vì auto-generate
+        String code = req.getDocumentCode().trim();
+        if (transferRepository.existsByTransferCode(code)) {
+            throw new BusinessException("Mã phiếu chuyển kho '" + code + "' đã tồn tại. Vui lòng nhập mã khác.");
+        }
+        if (soRepository.existsBySoCode(code)) {
+            throw new BusinessException("Mã phiếu '" + code + "' đã được sử dụng cho đơn bán hàng. Vui lòng nhập mã khác.");
+        }
 
         TransferEntity transfer = TransferEntity.builder()
                 .fromWarehouseId(req.getWarehouseId())
@@ -648,27 +662,7 @@ public class OutboundService {
     // Private helpers
     // ─────────────────────────────────────────────────────────────
 
-    private String generateDocCode(String prefix, Long warehouseId, boolean isSales) {
-        String date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
-        LocalDateTime endOfDay = startOfDay.plusDays(1);
-        long seq = isSales
-                ? soRepository.countTodayByWarehouse(warehouseId, startOfDay, endOfDay) + 1
-                : transferRepository.countTodayByWarehouse(warehouseId, startOfDay, endOfDay) + 1;
-        
-        String code;
-        boolean exists;
-        // Check for uniqueness to gracefully handle cases where previous orders in the sequence were deleted
-        do {
-            code = String.format("%s-%s-%04d", prefix, date, seq);
-            exists = isSales ? soRepository.existsBySoCode(code) : transferRepository.existsByTransferCode(code);
-            if (exists) {
-                seq++;
-            }
-        } while (exists);
-        
-        return code;
-    }
+    // [REMOVED] generateDocCode — mã phiếu xuất kho giờ do Keeper nhập thủ công từ đơn đặt hàng
 
     private void validateRequiredFieldsByType(CreateOutboundRequest req) {
         if (req.getOrderType() == OutboundType.SALES_ORDER) {
