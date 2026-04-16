@@ -42,7 +42,6 @@ public class DispatchPdfService {
     private final WarehouseJpaRepository warehouseRepository;
     private final UserJpaRepository userRepository;
     private final PickingTaskItemJpaRepository pickingTaskItemRepository;
-    private final InventoryLotJpaRepository inventoryLotRepository;
     private final Cloudinary cloudinary;
 
     // ─── Màu sắc ───────────────────────────────────────────────
@@ -254,7 +253,7 @@ public class DispatchPdfService {
         Font totalFont = getFontBold(8f, BaseColor.BLACK);
 
         String[] headers = { "Stt", "Mã hàng", "Tên hàng", "Quy\ncách", "Dvt", "Thùng", "Chai lẻ", "Ghi chú",
-                "Mã đóng gói", "NSX", "NHH" };
+                "Mã đóng gói", "Tổng chai", "Tải trọng" };
         float[] widths = { 4f, 9f, 30f, 5f, 5f, 6f, 5f, 7f, 11f, 10f, 10f };
 
         PdfPTable table = new PdfPTable(headers.length);
@@ -302,9 +301,7 @@ public class DispatchPdfService {
 
             for (PickingTaskItemEntity item : catItems) {
                 SkuEntity sku = skuRepository.findById(item.getSkuId()).orElse(null);
-                InventoryLotEntity lot = item.getLotId() != null
-                        ? inventoryLotRepository.findById(item.getLotId()).orElse(null)
-                        : null;
+
 
                 int qty = item.getPickedQty() != null && item.getPickedQty().intValue() > 0
                         ? item.getPickedQty().intValue()
@@ -314,25 +311,24 @@ public class DispatchPdfService {
                 String skuCode = sku != null ? sku.getSkuCode() : "";
                 String skuName = sku != null ? sku.getSkuName() : "";
                 String packCode = sku != null ? sku.getSkuCode() : "";
-                String mfgDate = lot != null && lot.getManufactureDate() != null
-                        ? lot.getManufactureDate().format(DateTimeFormatter.ofPattern("dd/MM/yy"))
-                        : "";
-                String expDate = lot != null && lot.getExpiryDate() != null
-                        ? lot.getExpiryDate().format(DateTimeFormatter.ofPattern("dd/MM/yy"))
-                        : "";
+                String quyCachStr = sku != null && sku.getUnitsPerCarton() != null ? String.valueOf(sku.getUnitsPerCarton()) : "";
+                int unitsPerCarton = sku != null && sku.getUnitsPerCarton() != null ? sku.getUnitsPerCarton() : 1;
+                java.math.BigDecimal weightPerCartonKg = sku != null && sku.getWeightPerCartonKg() != null ? sku.getWeightPerCartonKg() : java.math.BigDecimal.ZERO;
+                int tongChai = qty * unitsPerCarton;
+                java.math.BigDecimal taiTrong = weightPerCartonKg.multiply(java.math.BigDecimal.valueOf(qty));
 
                 String[] rowData = {
                         String.valueOf(stt++),
                         skuCode,
                         skuName,
-                        "", // Quy cách — lấy từ SKU nếu có
+                        quyCachStr,
                         "Thùng",
                         String.valueOf(qty),
                         "", // Chai lẻ
                         "", // Ghi chú
                         packCode,
-                        mfgDate,
-                        expDate
+                        String.valueOf(tongChai),
+                        String.format(java.util.Locale.US, "%.2f", taiTrong)
                 };
 
                 for (int i = 0; i < rowData.length; i++) {
