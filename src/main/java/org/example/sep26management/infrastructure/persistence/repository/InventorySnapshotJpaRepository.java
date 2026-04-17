@@ -22,6 +22,9 @@ public interface InventorySnapshotJpaRepository
 
         // ── Single-location queries (used by BinService.getBinDetail) ────────────
 
+        List<InventorySnapshotEntity> findByWarehouseIdAndSkuId(Long warehouseId, Long skuId);
+
+
         /** Single location — total occupied qty */
         @Query("SELECT COALESCE(SUM(s.quantity), 0) FROM InventorySnapshotEntity s WHERE s.locationId = :locationId")
         BigDecimal sumQuantityByLocationId(@Param("locationId") Long locationId);

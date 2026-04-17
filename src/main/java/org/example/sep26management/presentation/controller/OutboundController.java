@@ -643,6 +643,14 @@ public class OutboundController {
         return ResponseEntity.ok(response);
     }
 
+    @PutMapping("/pick-list/{taskId}/report-shortage")
+    @Operation(summary = "Xử lý bão bù (Smart Auto-Healing) hàng thiếu trong Outbound", description = "Máy quét báo thiếu hàng thật sự, backend tự động trừ kho, truy vết bin mới và sửa task lấy hàng.")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> reportShortage(
+            @PathVariable Long taskId,
+            @Valid @RequestBody org.example.sep26management.application.dto.request.PickListShortageRequest request) {
+        return ResponseEntity.ok(pickListService.autoHealShortage(taskId, request, getUserId()));
+    }
+
     // ─── THÊM VÀO OutboundController.java — sau endpoint finalize-qc ─────────────
 // Dán 2 endpoint này vào sau dòng:
 //   public ResponseEntity<ApiResponse<QcSummaryResponse>> finalizeQc(...)
