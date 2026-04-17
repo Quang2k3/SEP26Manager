@@ -16,6 +16,8 @@ public class SearchSkuRequest {
 
     private String keyword;
 
+    private Long warehouseId;
+
     @Builder.Default
     private int page = 0;
 

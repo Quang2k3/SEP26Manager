@@ -43,6 +43,7 @@ public class SkuService {
     private final AuditLogService auditLogService;
     private final SkuThresholdJpaRepository skuThresholdRepository;
     private final WarehouseJpaRepository warehouseRepository;
+    private final org.example.sep26management.infrastructure.persistence.repository.InventorySnapshotJpaRepository inventorySnapshotRepo;
 
     // ─────────────────────────────────────────────────────────────
     // UC-268: View SKU Detail
@@ -81,7 +82,17 @@ public class SkuService {
 
         List<SkuResponse> content = page.getContent()
                 .stream()
-                .map(skuMapper::toResponse)
+                .map(sku -> {
+                    SkuResponse response = skuMapper.toResponse(sku);
+                    if (request.getWarehouseId() != null) {
+                        java.math.BigDecimal totalQty = inventorySnapshotRepo.sumQuantityByWarehouseAndSku(request.getWarehouseId(), sku.getSkuId());
+                        java.math.BigDecimal reservedQty = inventorySnapshotRepo.sumReservedByWarehouseAndSku(request.getWarehouseId(), sku.getSkuId());
+                        if (totalQty == null) totalQty = java.math.BigDecimal.ZERO;
+                        if (reservedQty == null) reservedQty = java.math.BigDecimal.ZERO;
+                        response.setAvailableQty(totalQty.subtract(reservedQty).max(java.math.BigDecimal.ZERO));
+                    }
+                    return response;
+                })
                 .toList();
 
         PageResponse<SkuResponse> pageResponse = PageResponse.<SkuResponse>builder()
