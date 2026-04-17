@@ -45,6 +45,8 @@ public class AllocateStockService {
     private final IncidentItemJpaRepository incidentItemJpaRepository;
     private final NotificationService notificationService;
     private final PickingTaskItemJpaRepository pickingTaskItemRepository;
+    private final ReceivingOrderJpaRepository receivingOrderRepo;
+    private final ReceivingItemJpaRepository receivingItemRepo;
 
     @Transactional
     public ApiResponse<AllocateStockResponse> allocateStock(
@@ -322,6 +324,8 @@ public class AllocateStockService {
         List<CreateIncidentRequest.IncidentItemDto> incidentItems = new ArrayList<>();
         StringBuilder desc = new StringBuilder("Thiếu tồn kho khi phân bổ lệnh xuất " + documentCode + ": ");
 
+        boolean autoApproveBackorder = false;
+
         for (SkuQtyPair pair : required) {
             // SL đã allocate được cho đơn này (reservation OPEN)
             BigDecimal allocated = allocatedBySkuMap.getOrDefault(pair.skuId, BigDecimal.ZERO);
@@ -335,6 +339,12 @@ public class AllocateStockService {
                 BigDecimal totalRes   = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, pair.skuId);
                 if (totalQty == null) totalQty = BigDecimal.ZERO;
                 if (totalRes == null) totalRes = BigDecimal.ZERO;
+                
+                BigDecimal actualAvailable = totalQty.subtract(totalRes).max(BigDecimal.ZERO);
+                if (actualAvailable.compareTo(BigDecimal.ZERO) == 0) {
+                    autoApproveBackorder = true;
+                }
+
                 // tồn thực trong kho = allocated (đang giữ cho đơn này) + phần tự do
                 BigDecimal totalInStock = totalQty; // tổng tồn vật lý
                 String skuCode = skuRepository.findById(pair.skuId).map(s -> s.getSkuCode()).orElse("SKU#" + pair.skuId);
@@ -409,6 +419,62 @@ public class AllocateStockService {
         notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "incident_open",
                 saved.getIncidentId(), saved.getIncidentCode(),
                 documentCode + " — thiếu tồn kho");
+
+        if (autoApproveBackorder && orderType == OutboundType.SALES_ORDER) {
+            saved.setStatus("RESOLVED");
+            saved.setDescription(saved.getDescription() + "\n[System Auto]: Tồn kho khả dụng về 0, hệ thống tự động duyệt chờ nhập bù.");
+            incidentJpaRepository.save(saved);
+
+            SalesOrderEntity so = soRepository.findById(documentId).orElse(null);
+            if (so != null) {
+                so.setStatus("WAITING_STOCK");
+                so.setUpdatedAt(LocalDateTime.now());
+                soRepository.save(so);
+
+                // Create Backorder GRN
+                List<SalesOrderItemEntity> items = soItemRepository.findBySoId(documentId);
+                List<ReceivingItemEntity> grnItems = new ArrayList<>();
+                String receivingCode = "GRN-" + so.getSoCode() + "-B" + (System.currentTimeMillis() % 10000);
+                
+                ReceivingOrderEntity grnOrder = ReceivingOrderEntity.builder()
+                        .warehouseId(so.getWarehouseId())
+                        .sourceType("BACKORDER")
+                        .sourceReferenceCode(so.getSoCode())
+                        .note("Phiếu nhập hàng bù tự động cho SO: " + so.getSoCode())
+                        .status("DRAFT")
+                        .createdBy(userId)
+                        .receivingCode(receivingCode)
+                        .build();
+
+                ReceivingOrderEntity savedGrn = receivingOrderRepo.save(grnOrder);
+
+                for (SalesOrderItemEntity item : items) {
+                    BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("sales_orders", so.getSoId(), item.getSkuId());
+                    if (ownReserved == null) ownReserved = BigDecimal.ZERO;
+                    
+                    BigDecimal missing = item.getOrderedQty().subtract(ownReserved);
+                    if (missing.compareTo(BigDecimal.ZERO) > 0) {
+                        ReceivingItemEntity ri = ReceivingItemEntity.builder()
+                                .receivingOrder(savedGrn)
+                                .skuId(item.getSkuId())
+                                .expectedQty(missing)
+                                .receivedQty(BigDecimal.ZERO)
+                                .build();
+                        grnItems.add(ri);
+                    }
+                }
+
+                if (!grnItems.isEmpty()) {
+                    receivingItemRepo.saveAll(grnItems);
+                    auditLogService.logAction(userId, "BACKORDER_GRN_CREATED", "SALES_ORDER", so.getSoId(),
+                            "Created backorder GRN " + receivingCode + " for SO " + so.getSoCode(), ip, ua);
+                    notificationService.notifyRole("QC", "receiving_pending_qc",
+                            savedGrn.getReceivingId(), receivingCode, "Phiếu nhập hàng bù tự động mới cho " + so.getSoCode());
+                }
+
+                log.info("SO {} auto-approved to WAIT_BACKORDER and generated GRN {}", so.getSoCode(), receivingCode);
+            }
+        }
 
         return ApiResponse.success("Shortage incident reported successfully.", incidentService.toResponse(saved));
     }

@@ -54,6 +54,9 @@ public class SkuResponse {
     @Schema(description = "Trạng Thái", example = "true")
     private Boolean active;
 
+    @Schema(description = "Số lượng tồn kho khả dụng", example = "100.0")
+    private BigDecimal availableQty;
+
     // Category info
     @Schema(description = "ID Danh Mục", example = "10")
     private Long categoryId;

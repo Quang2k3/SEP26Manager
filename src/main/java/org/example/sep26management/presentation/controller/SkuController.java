@@ -75,12 +75,21 @@ public class SkuController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Tìm kiếm SKU", description = "Tìm kiếm SKU theo keyword (partial, case-insensitive trên skuCode + skuName). Phân trang.")
     public ResponseEntity<ApiResponse<PageResponse<SkuResponse>>> searchSku(
+            Authentication authentication,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
+        Long warehouseId = null;
+        try {
+            warehouseId = extractWarehouseId(authentication);
+        } catch (Exception e) {
+            log.warn("Cannot extract warehouseId for SKU search: {}", e.getMessage());
+        }
+
         SearchSkuRequest request = SearchSkuRequest.builder()
                 .keyword(keyword)
+                .warehouseId(warehouseId)
                 .page(page)
                 .size(size)
                 .build();
