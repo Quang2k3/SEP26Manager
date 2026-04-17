@@ -210,6 +210,22 @@ public interface InventorySnapshotJpaRepository
                 java.math.BigDecimal getAvailableQty();
         }
 
+        @Query(value = """
+            SELECT DISTINCT l.location_code
+            FROM inventory_snapshot s
+            JOIN locations l ON l.location_id = s.location_id
+            WHERE s.warehouse_id = :warehouseId
+              AND s.sku_id = :skuId
+              AND (s.quantity > 0 OR s.reserved_qty > 0)
+              AND l.active = true
+              AND l.is_staging = false
+              AND l.is_defect = false
+              AND l.location_type = 'BIN'
+            """, nativeQuery = true)
+        List<String> findActiveBinLocationsByWarehouseAndSku(
+                @Param("warehouseId") Long warehouseId,
+                @Param("skuId") Long skuId);
+
         // ── Increment reserved (BR-OUT-17 / BR-WXE-20) ───────────────────────────
 
         @Modifying

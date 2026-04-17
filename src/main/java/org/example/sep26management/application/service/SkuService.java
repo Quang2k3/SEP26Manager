@@ -456,6 +456,19 @@ public class SkuService {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Fetch active bin locations for a barcode
+    // ─────────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public List<String> getSkuLocationsByBarcode(String barcode, Long warehouseId) {
+        log.info("Looking up active bin locations for barcode: {} in warehouse: {}", barcode, warehouseId);
+
+        return skuJpaRepository.findActiveByBarcodeWithCategory(barcode)
+                .map(sku -> inventorySnapshotRepo.findActiveBinLocationsByWarehouseAndSku(warehouseId, sku.getSkuId()))
+                .orElseGet(List::of);
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Lookup SKU by SKU code
     // ─────────────────────────────────────────────────────────────
 

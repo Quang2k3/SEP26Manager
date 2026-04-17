@@ -368,6 +368,23 @@ public class SkuController {
     }
 
     /**
+     * GET /v1/skus/barcode/{barcode}/locations
+     * Lấy các vị trí (BIN code) đang chứa barcode này.
+     */
+    @GetMapping("/barcode/{barcode}/locations")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Tìm vị trí lưu kho của barcode", description = "Lấy các vị trí BIN đang chứa SKU thuộc barcode này (phục vụ quét hàng ngoài luồng).")
+    public ResponseEntity<ApiResponse<List<String>>> getLocationsByBarcode(
+            @PathVariable String barcode, Authentication authentication) {
+
+        log.info("GET /v1/skus/barcode/{}/locations — barcode locations lookup", barcode);
+        Long warehouseId = extractWarehouseId(authentication);
+        List<String> locations = skuService.getSkuLocationsByBarcode(barcode, warehouseId);
+
+        return ResponseEntity.ok(ApiResponse.success("OK", locations));
+    }
+
+    /**
      * Lookup SKU by SKU code.
      * <p>
      * GET /v1/skus/code/{skuCode}
