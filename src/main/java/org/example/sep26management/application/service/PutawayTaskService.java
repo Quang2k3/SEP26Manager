@@ -206,8 +206,7 @@ public class PutawayTaskService {
             BigDecimal totalUsed = itemPutawayQty.add(alreadyAllocated).add(alloc.getQty());
             if (totalUsed.compareTo(itemTaskQty) > 0) {
                 BigDecimal remaining = itemTaskQty.subtract(itemPutawayQty).subtract(alreadyAllocated);
-                throw new RuntimeException("Cannot allocate " + alloc.getQty() + " units of Task Item " + alloc.getPutawayTaskItemId()
-                        + ". Remaining to allocate: " + remaining);
+                throw new RuntimeException("Số lượng cất vượt quá yêu cầu lệnh! Thừa hàng, yêu cầu kiểm tra và cất đúng số lượng (Chỉ cất thêm tối đa: " + remaining + ").");
             }
 
             // SELECT FOR UPDATE: khóa bin row trước check capacity
@@ -276,32 +275,7 @@ public class PutawayTaskService {
 
         List<PutawayTaskItemEntity> rawTaskItems = putawayTaskItemRepo.findByPutawayTaskPutawayTaskId(taskId);
 
-        // [FIX] Validate theo từng item riêng biệt (putawayTaskItemId), KHÔNG groupItems
-        for (PutawayTaskItemEntity item : rawTaskItems) {
-            BigDecimal allocated = reservations.stream()
-                    .filter(a -> item.getPutawayTaskItemId().equals(a.getPutawayTaskItemId()))
-                    .map(PutawayAllocationEntity::getAllocatedQty)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            BigDecimal remaining = item.getQuantity().subtract(item.getPutawayQty()).subtract(allocated);
-            if (remaining.compareTo(BigDecimal.ZERO) > 0) {
-                String skuCode = skuRepo.findById(item.getSkuId())
-                        .map(sku -> sku.getSkuCode()).orElse("SKU " + item.getSkuId());
-                String lotInfo = "";
-                if (item.getLotId() != null) {
-                    lotInfo = inventoryLotRepo.findById(item.getLotId())
-                            .map(lot -> " (Lô: " + lot.getLotNumber() + ")")
-                            .orElse(" (Lot #" + item.getLotId() + ")");
-                } else if (item.getReceivingItemId() != null) {
-                    lotInfo = receivingItemRepo.findById(item.getReceivingItemId())
-                            .filter(rcv -> rcv.getLotNumber() != null && !rcv.getLotNumber().isBlank())
-                            .map(rcv -> " (Lô: " + rcv.getLotNumber() + ")")
-                            .orElse("");
-                }
-                throw new RuntimeException("Chưa phân bổ hết hàng! " + skuCode + lotInfo
-                        + " còn " + remaining + " units chưa được allocate. Hãy allocate hết rồi mới confirm.");
-            }
-        }
+        // Validation cho phép partial putaway: không bắt buộc phải phân bổ đủ 100% khi submit.
 
         for (PutawayAllocationEntity alloc : reservations) {
             // [FIX] Match theo putawayTaskItemId — chính xác tới từng item
