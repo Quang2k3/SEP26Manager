@@ -375,58 +375,87 @@ public class ReceivingOrderService {
                                 continue;
                         }
 
-                        // [FIX] Tính damagedQty từ incident data thay vì dùng condition trên DB row
-                        // (Tính riêng theo từng Lot)
-                        // [FIX] Tính damagedQty từ incident data bằng cách match chính xác skuId và
-                        // lotNumber
-                        BigDecimal failQty = allIncidentItems.stream()
-                                        .filter(i -> ("DAMAGE".equals(i.getReasonCode())
-                                                        || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
+                        // Lấy danh sách các sự cố liên quan đến SKU và Lô này
+                        java.util.List<IncidentItemEntity> relatedIncidents = allIncidentItems.stream()
+                                        .filter(i -> ("DAMAGE".equals(i.getReasonCode()) || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
                                                         && skuId.equals(i.getSkuId())
-                                                        && java.util.Objects.equals(bestItem.getLotNumber(),
-                                                                        i.getLotNumber()))
+                                                        && java.util.Objects.equals(bestItem.getLotNumber(), i.getLotNumber()))
+                                        .collect(Collectors.toList());
+
+                        BigDecimal totalFailQty = relatedIncidents.stream()
                                         .map(IncidentItemEntity::getDamagedQty)
                                         .filter(java.util.Objects::nonNull)
                                         .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                        // Lấy attachmentUrl từ incident DAMAGE items
-                        String attachmentUrl = failQty.compareTo(BigDecimal.ZERO) > 0
-                                        ? allIncidentItems.stream()
-                                                        .filter(i -> ("DAMAGE".equals(i.getReasonCode())
-                                                                        || "UNEXPECTED_ITEM".equals(i.getReasonCode()))
-                                                                        && skuId.equals(i.getSkuId())
-                                                                        && java.util.Objects.equals(
-                                                                                        bestItem.getLotNumber(),
-                                                                                        i.getLotNumber()))
-                                                        .map(IncidentItemEntity::getAttachmentUrl)
-                                                        .filter(u -> u != null && !u.isBlank())
-                                                        .findFirst().orElse(null)
-                                        : null;
+                        BigDecimal passQty = totalQty.subtract(totalFailQty);
 
-                        ReceivingItemResponse resp = toItemResponse(bestItem, skuMap);
-                        resp.setExpectedQty(totalExpected);
-                        resp.setReceivedQty(totalQty);
-                        resp.setDamagedQty(failQty);
-                        resp.setAttachmentUrl(attachmentUrl);
-                        // Lot is preserved correctly via bestItem
-                        resp.setLotNumber(bestItem.getLotNumber());
-                        resp.setManufactureDate(bestItem.getManufactureDate());
-                        resp.setExpiryDate(bestItem.getExpiryDate());
-
-                        // [FIX] Set condition chính xác: chỉ FAIL nếu toàn bộ là hỏng
-                        if (failQty.compareTo(BigDecimal.ZERO) > 0) {
-                                BigDecimal passQty = totalQty.subtract(failQty);
-                                if (passQty.compareTo(BigDecimal.ZERO) <= 0) {
-                                        resp.setCondition("FAIL"); // Toàn bộ hỏng
-                                } else {
-                                        resp.setCondition("PASS"); // Có cả pass lẫn fail → để PASS, frontend dùng
-                                                                   // damagedQty để tách
-                                }
-                        } else {
+                        if (relatedIncidents.isEmpty() || totalFailQty.compareTo(BigDecimal.ZERO) == 0) {
+                                // Không có lỗi -> 1 dòng nguyên vẹn
+                                ReceivingItemResponse resp = toItemResponse(bestItem, skuMap);
+                                resp.setExpectedQty(totalExpected);
+                                resp.setReceivedQty(totalQty);
+                                resp.setDamagedQty(BigDecimal.ZERO);
                                 resp.setCondition("PASS");
-                        }
+                                resp.setLotNumber(bestItem.getLotNumber());
+                                resp.setManufactureDate(bestItem.getManufactureDate());
+                                resp.setExpiryDate(bestItem.getExpiryDate());
+                                itemResponses.add(resp);
+                        } else {
+                                // Có lỗi -> Yêu cầu tách riêng mỗi lỗi 1 dòng + 1 dòng chạy hàng PASS (nếu có)
+                                boolean expectedAssigned = false;
 
-                        itemResponses.add(resp);
+                                // 1. Dòng cho hàng PASS (nếu số lượng tốt > 0)
+                                if (passQty.compareTo(BigDecimal.ZERO) > 0) {
+                                        ReceivingItemResponse passResp = toItemResponse(bestItem, skuMap);
+                                        passResp.setExpectedQty(totalExpected); // Gán toàn bộ số mong đợi cho dòng đầu
+                                        expectedAssigned = true;
+                                        
+                                        passResp.setReceivedQty(passQty);
+                                        passResp.setDamagedQty(BigDecimal.ZERO);
+                                        passResp.setCondition("PASS");
+                                        passResp.setReasonCode(null); // Không có mã lỗi
+                                        
+                                        passResp.setLotNumber(bestItem.getLotNumber());
+                                        passResp.setManufactureDate(bestItem.getManufactureDate());
+                                        passResp.setExpiryDate(bestItem.getExpiryDate());
+                                        itemResponses.add(passResp);
+                                }
+
+                                // 2. Tách từng sự cố một thành các dòng (row) riêng biệt
+                                for (IncidentItemEntity inc : relatedIncidents) {
+                                        if (inc.getDamagedQty() == null || inc.getDamagedQty().compareTo(BigDecimal.ZERO) <= 0) continue;
+                                        
+                                        ReceivingItemResponse failResp = toItemResponse(bestItem, skuMap);
+                                        
+                                        // Fake receivingItemId để FE (React Key) không bị trùng khi map
+                                        if (failResp.getReceivingItemId() != null && inc.getIncidentItemId() != null) {
+                                                failResp.setReceivingItemId(failResp.getReceivingItemId() + inc.getIncidentItemId() * 1000000L);
+                                        }
+
+                                        // Nếu chưa ai giữ expectedQty thì dòng fail này sẽ giữ để không làm mất
+                                        if (!expectedAssigned) {
+                                                failResp.setExpectedQty(totalExpected);
+                                                expectedAssigned = true;
+                                        } else {
+                                                failResp.setExpectedQty(BigDecimal.ZERO);
+                                        }
+                                        
+                                        failResp.setReceivedQty(inc.getDamagedQty());
+                                        failResp.setDamagedQty(inc.getDamagedQty());
+                                        failResp.setCondition("FAIL");
+                                        
+                                        // Khôi phục tag/note và URL ảnh từ chính dòng sự cố này
+                                        failResp.setReasonCode(inc.getNote());
+                                        failResp.setNote(inc.getNote() != null ? inc.getNote() : bestItem.getNote());
+                                        failResp.setAttachmentUrl(inc.getAttachmentUrl());
+                                        
+                                        failResp.setLotNumber(bestItem.getLotNumber());
+                                        failResp.setManufactureDate(bestItem.getManufactureDate());
+                                        failResp.setExpiryDate(bestItem.getExpiryDate());
+                                        
+                                        itemResponses.add(failResp);
+                                }
+                        }
                 }
 
                 int totalLines = itemResponses.size();
