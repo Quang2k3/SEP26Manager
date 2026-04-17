@@ -469,11 +469,13 @@ public class PickListService {
             });
         }
 
-        // Cập nhật pickedQty — không vượt quá requiredQty
-        java.math.BigDecimal capped = pickedQty.min(item.getRequiredQty());
-        item.setPickedQty(capped);
+        // Cập nhật pickedQty — ném lỗi nếu quét thừa hàng
+        if (pickedQty.compareTo(item.getRequiredQty()) > 0) {
+            throw new BusinessException("Số lượng lấy vượt quá yêu cầu lệnh! Thừa hàng, yêu cầu kiểm tra và trả lại vị trí cũ.");
+        }
+        item.setPickedQty(pickedQty);
         pickingTaskItemRepository.save(item);
-        log.info("scanPickItem: taskId={} itemId={} pickedQty={}", taskId, itemId, capped);
+        log.info("scanPickItem: taskId={} itemId={} pickedQty={}", taskId, itemId, pickedQty);
 
         // [FIX REALTIME] Push SSE snapshot toàn bộ pick items → web nhận ngay, không cần poll
         if (sessionId != null && !sessionId.isBlank()) {
