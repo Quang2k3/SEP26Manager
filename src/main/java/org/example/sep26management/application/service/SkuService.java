@@ -89,7 +89,10 @@ public class SkuService {
                         java.math.BigDecimal reservedQty = inventorySnapshotRepo.sumReservedByWarehouseAndSku(request.getWarehouseId(), sku.getSkuId());
                         if (totalQty == null) totalQty = java.math.BigDecimal.ZERO;
                         if (reservedQty == null) reservedQty = java.math.BigDecimal.ZERO;
-                        response.setAvailableQty(totalQty.subtract(reservedQty).max(java.math.BigDecimal.ZERO));
+                        
+                        java.math.BigDecimal available = totalQty.subtract(reservedQty).max(java.math.BigDecimal.ZERO);
+                        response.setAvailableQty(available);
+                        response.setSkuName(response.getSkuName() + " (Tồn: " + available.toPlainString() + ")");
                     }
                     return response;
                 })
