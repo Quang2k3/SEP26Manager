@@ -55,6 +55,9 @@ public class PickListResponse {
     @Schema(description = "Ngày/Giờ tạo", example = "2026-03-08T10:00:00")
     private LocalDateTime generatedAt;
 
+    @Schema(description = "Ảnh upload có chữ ký xác nhận cất lại hàng sai", example = "https://cloudinary...")
+    private String mispickResolutionNoteUrl;
+
     @Getter
     @Setter
     @NoArgsConstructor

@@ -55,6 +55,7 @@ public class PickListService {
     private final ReservationJpaRepository reservationRepository;
     private final NotificationService notificationService;
     private final SseEmitterRegistry sseRegistry;
+    private final com.cloudinary.Cloudinary cloudinary;
 
     @Transactional
     public ApiResponse<PickListResponse> generatePickList(
@@ -280,6 +281,7 @@ public class PickListService {
                 .assignedTo(task.getAssignedTo())
                 .assignedQcId(task.getAssignedQcId())
                 .items(responseItems)
+                .mispickResolutionNoteUrl(task.getMispickResolutionNoteUrl())
                 .build());
     }
 
@@ -611,5 +613,48 @@ public class PickListService {
         resultData.put("restockedItems", restockedItems);
 
         return ApiResponse.success("Đã huỷ lấy hàng và giải phóng tồn kho thành công.", resultData);
+    }
+
+    public ApiResponse<java.util.Map<String, String>> uploadMispickResolutionNote(Long taskId, org.springframework.web.multipart.MultipartFile file) {
+        PickingTaskEntity task = pickingTaskRepository.findById(taskId)
+                .orElseThrow(() -> new BusinessException("Pick List không tồn tại: " + taskId));
+
+        if (file == null || file.isEmpty())
+            throw new BusinessException("Vui lòng chọn ảnh phiếu lấy hàng đã ký.");
+
+        try {
+            String publicId = "mispick_notes/task_" + taskId + "_" + System.currentTimeMillis();
+
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> result = cloudinary.uploader().upload(
+                    file.getBytes(),
+                    com.cloudinary.utils.ObjectUtils.asMap(
+                            "public_id",     publicId,
+                            "resource_type", "image",
+                            "overwrite",     true,
+                            "quality",       "auto",
+                            "fetch_format",  "auto"
+                    )
+            );
+
+            String url = (String) result.get("secure_url");
+            if (url == null) throw new BusinessException("Upload thất bại. Vui lòng thử lại.");
+
+            task.setMispickResolutionNoteUrl(url);
+            pickingTaskRepository.save(task);
+
+            log.info("Mispick resolution note uploaded for taskId={}: {}", taskId, url);
+
+            return ApiResponse.success("Đã lưu ảnh bằng chứng cất lại hàng thành công.", java.util.Map.of(
+                    "taskId", String.valueOf(taskId),
+                    "url",    url
+            ));
+
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Upload mispick resolution note failed for taskId={}: {}", taskId, e.getMessage(), e);
+            throw new BusinessException("Không thể upload ảnh: " + e.getMessage());
+        }
     }
 }

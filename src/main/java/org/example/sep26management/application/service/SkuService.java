@@ -467,7 +467,7 @@ public class SkuService {
                 .orElseGet(() -> skuJpaRepository.findActiveBySkuCodeWithCategory(barcode).orElse(null));
 
         if (sku != null) {
-            return inventorySnapshotRepo.findActiveBinLocationsByWarehouseAndSkuAndLot(warehouseId, sku.getSkuId(), lotNumber);
+            return inventorySnapshotRepo.findOptimalBinLocationByWarehouseAndSkuAndLot(warehouseId, sku.getSkuId(), lotNumber);
         }
         return List.of();
     }

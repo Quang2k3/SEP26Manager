@@ -61,6 +61,9 @@ public class PickingTaskEntity {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "mispick_resolution_note_url", length = 1000)
+    private String mispickResolutionNoteUrl;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

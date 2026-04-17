@@ -229,6 +229,34 @@ public interface InventorySnapshotJpaRepository
                 @Param("skuId") Long skuId,
                 @Param("lotNumber") String lotNumber);
 
+        @Query(value = """
+            SELECT l.location_code
+            FROM inventory_snapshot s
+            JOIN locations l ON l.location_id = s.location_id
+            LEFT JOIN inventory_lots il ON il.lot_id = s.lot_id
+            WHERE s.warehouse_id = :warehouseId
+              AND s.sku_id = :skuId
+              AND (:lotNumber IS NULL OR il.lot_number = :lotNumber)
+              AND (s.quantity > 0 OR s.reserved_qty > 0)
+              AND l.active = true
+              AND l.is_staging = false
+              AND l.is_defect = false
+              AND l.location_type = 'BIN'
+            GROUP BY l.location_code, l.location_id, l.max_weight_kg
+            ORDER BY (
+                COALESCE((SELECT SUM(s2.quantity * sk2.weight) 
+                 FROM inventory_snapshot s2 
+                 JOIN skus sk2 ON s2.sku_id = sk2.sku_id 
+                 WHERE s2.location_id = l.location_id), 0) 
+                 / COALESCE(NULLIF(l.max_weight_kg, 0), 999999)
+            ) ASC
+            LIMIT 1
+            """, nativeQuery = true)
+        List<String> findOptimalBinLocationByWarehouseAndSkuAndLot(
+                @Param("warehouseId") Long warehouseId,
+                @Param("skuId") Long skuId,
+                @Param("lotNumber") String lotNumber);
+
         // ── Increment reserved (BR-OUT-17 / BR-WXE-20) ───────────────────────────
 
         @Modifying
