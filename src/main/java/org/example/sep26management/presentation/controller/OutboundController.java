@@ -70,6 +70,7 @@ public class OutboundController {
     private final SignedNoteService signedNoteService;
     private final Cloudinary cloudinary;
     private final PickSignedNoteService pickSignedNoteService;
+    private final org.springframework.data.redis.core.StringRedisTemplate stringRedisTemplate;
     // ─────────────────────────────────────────────────────────────
     // SCRUM-505: Create
     // ─────────────────────────────────────────────────────────────
@@ -349,6 +350,25 @@ public class OutboundController {
     public ResponseEntity<ApiResponse<Object>> cancelPickTask(
             @PathVariable Long taskId, HttpServletRequest http) {
         return ResponseEntity.ok(pickListService.cancelPickTask(taskId, getUserId(), getIp(http), ua(http)));
+    }
+
+    // ─── LƯU TRỮ VÀ LẤY MISPICK TỪ REDIS ──────────────
+    @PutMapping("/pick-list/{taskId}/mispicks")
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Lưu danh sách Mispick tạm vào Redis")
+    public ResponseEntity<ApiResponse<Void>> saveMispickQueue(
+            @PathVariable Long taskId,
+            @RequestBody String json) {
+        stringRedisTemplate.opsForValue().set("OUTBOUND:MISPICK:" + taskId, json, java.time.Duration.ofHours(24));
+        return ResponseEntity.ok(ApiResponse.success("Mispick saved to Redis", null));
+    }
+
+    @GetMapping("/pick-list/{taskId}/mispicks")
+    @PreAuthorize("hasAnyRole('KEEPER','MANAGER')")
+    @Operation(summary = "Lấy danh sách Mispick tạm từ Redis")
+    public ResponseEntity<ApiResponse<String>> getMispickQueue(@PathVariable Long taskId) {
+        String json = stringRedisTemplate.opsForValue().get("OUTBOUND:MISPICK:" + taskId);
+        return ResponseEntity.ok(ApiResponse.success("Success", json != null ? json : "[]"));
     }
 
     @PostMapping("/pick-list/{taskId}/scan-url")
