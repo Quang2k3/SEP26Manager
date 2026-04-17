@@ -113,7 +113,7 @@ public class PutawayTaskService {
     @Transactional(readOnly = true)
     public ApiResponse<PutawayTaskResponse> getTaskByGrnId(Long grnId) {
         PutawayTaskEntity task = putawayTaskRepo.findByGrnId(grnId)
-                .orElseThrow(() -> new RuntimeException("No putaway task found for GRN: " + grnId));
+                .orElseThrow(() -> new org.example.sep26management.exception.ResourceNotFoundException("No putaway task found for GRN: " + grnId));
         return getTask(task.getPutawayTaskId());
     }
 
