@@ -111,9 +111,10 @@ public class PutawayTaskService {
     }
 
     @Transactional(readOnly = true)
-    public ApiResponse<PutawayTaskResponse> getTaskByGrnId(Long grnId) {
-        PutawayTaskEntity task = putawayTaskRepo.findByGrnId(grnId)
-                .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.ResourceNotFoundException("No putaway task found for GRN: " + grnId));
+    public ApiResponse<PutawayTaskResponse> getTaskByGrnId(Long id) {
+        PutawayTaskEntity task = putawayTaskRepo.findByGrnId(id)
+                .orElseGet(() -> putawayTaskRepo.findByReceivingId(id)
+                        .orElseThrow(() -> new org.example.sep26management.infrastructure.exception.ResourceNotFoundException("No putaway task found for GRN or ReceivingID: " + id)));
         return getTask(task.getPutawayTaskId());
     }
 
