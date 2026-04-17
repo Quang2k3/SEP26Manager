@@ -625,6 +625,14 @@ public class OutboundController {
         return ResponseEntity.ok(pickSignedNoteService.uploadPickSignedNote(soId, photo));
     }
 
+    @PostMapping(value = "/pick-list/{taskId}/mispick-photo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload ảnh bằng chứng cất lại hàng (Mispick Resolution Note)", description = "Điện thoại scan QR → chụp ảnh phiếu xử lý mispick đã ký → lên hệ thống.")
+    public ResponseEntity<ApiResponse<Map<String, String>>> uploadMispickPhoto(
+            @PathVariable Long taskId,
+            @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
+        return ResponseEntity.ok(pickListService.uploadMispickResolutionNote(taskId, photo));
+    }
+
     // ─── THÊM VÀO OutboundController.java — sau endpoint finalize-qc ─────────────
 // Dán 2 endpoint này vào sau dòng:
 //   public ResponseEntity<ApiResponse<QcSummaryResponse>> finalizeQc(...)
