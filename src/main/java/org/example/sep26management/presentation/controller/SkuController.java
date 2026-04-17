@@ -375,11 +375,13 @@ public class SkuController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Tìm vị trí lưu kho của barcode", description = "Lấy các vị trí BIN đang chứa SKU thuộc barcode này (phục vụ quét hàng ngoài luồng).")
     public ResponseEntity<ApiResponse<List<String>>> getLocationsByBarcode(
-            @PathVariable String barcode, Authentication authentication) {
+            @PathVariable String barcode, 
+            @RequestParam(required = false) String lotNumber,
+            Authentication authentication) {
 
-        log.info("GET /v1/skus/barcode/{}/locations — barcode locations lookup", barcode);
+        log.info("GET /v1/skus/barcode/{}/locations?lotNumber={} — barcode locations lookup", barcode, lotNumber);
         Long warehouseId = extractWarehouseId(authentication);
-        List<String> locations = skuService.getSkuLocationsByBarcode(barcode, warehouseId);
+        List<String> locations = skuService.getSkuLocationsByBarcode(barcode, lotNumber, warehouseId);
 
         return ResponseEntity.ok(ApiResponse.success("OK", locations));
     }

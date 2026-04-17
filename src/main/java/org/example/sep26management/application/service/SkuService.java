@@ -460,12 +460,16 @@ public class SkuService {
     // ─────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public List<String> getSkuLocationsByBarcode(String barcode, Long warehouseId) {
-        log.info("Looking up active bin locations for barcode: {} in warehouse: {}", barcode, warehouseId);
+    public List<String> getSkuLocationsByBarcode(String barcode, String lotNumber, Long warehouseId) {
+        log.info("Looking up active bin locations for barcode/skuCode: {} in warehouse: {}", barcode, warehouseId);
 
-        return skuJpaRepository.findActiveByBarcodeWithCategory(barcode)
-                .map(sku -> inventorySnapshotRepo.findActiveBinLocationsByWarehouseAndSku(warehouseId, sku.getSkuId()))
-                .orElseGet(List::of);
+        SkuEntity sku = skuJpaRepository.findActiveByBarcodeWithCategory(barcode)
+                .orElseGet(() -> skuJpaRepository.findActiveBySkuCodeWithCategory(barcode).orElse(null));
+
+        if (sku != null) {
+            return inventorySnapshotRepo.findActiveBinLocationsByWarehouseAndSkuAndLot(warehouseId, sku.getSkuId(), lotNumber);
+        }
+        return List.of();
     }
 
     // ─────────────────────────────────────────────────────────────
