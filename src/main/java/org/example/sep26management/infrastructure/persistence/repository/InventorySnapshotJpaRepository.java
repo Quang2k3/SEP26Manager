@@ -214,17 +214,20 @@ public interface InventorySnapshotJpaRepository
             SELECT DISTINCT l.location_code
             FROM inventory_snapshot s
             JOIN locations l ON l.location_id = s.location_id
+            LEFT JOIN inventory_lots il ON il.lot_id = s.lot_id
             WHERE s.warehouse_id = :warehouseId
               AND s.sku_id = :skuId
+              AND (:lotNumber IS NULL OR il.lot_number = :lotNumber)
               AND (s.quantity > 0 OR s.reserved_qty > 0)
               AND l.active = true
               AND l.is_staging = false
               AND l.is_defect = false
               AND l.location_type = 'BIN'
             """, nativeQuery = true)
-        List<String> findActiveBinLocationsByWarehouseAndSku(
+        List<String> findActiveBinLocationsByWarehouseAndSkuAndLot(
                 @Param("warehouseId") Long warehouseId,
-                @Param("skuId") Long skuId);
+                @Param("skuId") Long skuId,
+                @Param("lotNumber") String lotNumber);
 
         // ── Increment reserved (BR-OUT-17 / BR-WXE-20) ───────────────────────────
 
