@@ -615,12 +615,13 @@ public class PickListService {
         return ApiResponse.success("Đã huỷ lấy hàng và giải phóng tồn kho thành công.", resultData);
     }
 
-    public ApiResponse<java.util.Map<String, String>> uploadMispickResolutionNote(Long taskId, org.springframework.web.multipart.MultipartFile file) {
+    @Transactional
+    public ApiResponse<java.util.Map<String, String>> uploadMispickResolutionNote(Long taskId, org.springframework.web.multipart.MultipartFile file, String mispickJson) {
         PickingTaskEntity task = pickingTaskRepository.findById(taskId)
                 .orElseThrow(() -> new BusinessException("Pick List không tồn tại: " + taskId));
 
         if (file == null || file.isEmpty())
-            throw new BusinessException("Vui lòng chọn ảnh phiếu lấy hàng đã ký.");
+            throw new BusinessException("Vui lòng chọn ảnh kiện hàng bị lấy nhầm.");
 
         try {
             String publicId = "mispick_notes/task_" + taskId + "_" + System.currentTimeMillis();
@@ -645,7 +646,76 @@ public class PickListService {
 
             log.info("Mispick resolution note uploaded for taskId={}: {}", taskId, url);
 
-            return ApiResponse.success("Đã lưu ảnh bằng chứng cất lại hàng thành công.", java.util.Map.of(
+            // ─── Xử lý Auto-Relocation dựa trên Mispick JSON ───
+            if (mispickJson != null && !mispickJson.isBlank() && !mispickJson.equals("[]")) {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    java.util.List<java.util.Map<String, Object>> mispickQueue = mapper.readValue(
+                            mispickJson, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+                    
+                    for (java.util.Map<String, Object> entry : mispickQueue) {
+                        String barcode = (String) entry.get("barcode");
+                        String lotNumber = (String) entry.get("lotNumber");
+                        Object qtyObj = entry.get("qty");
+                        java.math.BigDecimal qty = qtyObj != null ? new java.math.BigDecimal(qtyObj.toString()) : java.math.BigDecimal.ONE;
+
+                        // 1. Tìm SKU
+                        org.example.sep26management.infrastructure.persistence.entity.SkuEntity sku = skuRepository.findBySkuCode(barcode).orElse(null);
+                        if (sku == null) {
+                            sku = skuRepository.findByBarcode(barcode).orElse(null);
+                        }
+                        if (sku == null) continue;
+
+                        Long warehouseId = task.getWarehouseId();
+
+                        // 2. Lookup Source Location ID (Thuật toán "Lớn nhất gánh team")
+                        Long sourceLocationId = snapshotRepository.findLargestSourceLocationIdForRelocation(
+                                warehouseId, sku.getSkuId(), lotNumber);
+
+                        List<String> optimalBinCodes = snapshotRepository.findOptimalBinLocationByWarehouseAndSkuAndLot(
+                                warehouseId, sku.getSkuId(), lotNumber);
+
+                        if (sourceLocationId != null && !optimalBinCodes.isEmpty()) {
+                            String targetBinCode = optimalBinCodes.get(0);
+                            org.example.sep26management.infrastructure.persistence.entity.LocationEntity targetLoc = 
+                                    locationRepository.findByLocationCode(targetBinCode).orElse(null);
+                            
+                            if (targetLoc != null && !targetLoc.getLocationId().equals(sourceLocationId)) {
+                                Long lotId = lotNumber != null ? lotRepository.findByLotNumber(lotNumber).map(l -> l.getLotId()).orElse(null) : null;
+                                
+                                // Trừ Source
+                                snapshotRepository.upsertInventory(warehouseId, sku.getSkuId(), lotId, sourceLocationId, qty.negate());
+                                // Cộng Target (Bin mới)
+                                snapshotRepository.upsertInventory(warehouseId, sku.getSkuId(), lotId, targetLoc.getLocationId(), qty);
+                                
+                                // Ghi Audit Log - Relocation - Minus
+                                txnRepository.save(org.example.sep26management.infrastructure.persistence.entity.InventoryTransactionEntity.builder()
+                                        .warehouseId(warehouseId).skuId(sku.getSkuId()).lotId(lotId)
+                                        .locationId(sourceLocationId).quantity(qty.negate())
+                                        .txnType("RELOCATION").referenceTable("picking_tasks").referenceId(taskId)
+                                        .reasonCode("MISPICK_AUTO_RELOCATION_MINUS").createdBy(task.getAssignedTo() == null ? 1L : task.getAssignedTo())
+                                        .build());
+                                
+                                // Ghi Audit Log - Relocation - Plus
+                                txnRepository.save(org.example.sep26management.infrastructure.persistence.entity.InventoryTransactionEntity.builder()
+                                        .warehouseId(warehouseId).skuId(sku.getSkuId()).lotId(lotId)
+                                        .locationId(targetLoc.getLocationId()).quantity(qty)
+                                        .txnType("RELOCATION").referenceTable("picking_tasks").referenceId(taskId)
+                                        .reasonCode("MISPICK_AUTO_RELOCATION_PLUS").createdBy(task.getAssignedTo() == null ? 1L : task.getAssignedTo())
+                                        .build());
+                                        
+                                log.info("Auto-Relocated SKU: {}, Qty: {}, From: {}, To: {}", 
+                                        sku.getSkuCode(), qty, sourceLocationId, targetLoc.getLocationId());
+                            }
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.error("Failed to parse or execute auto-relocation for mispickJson: {}", ex.getMessage(), ex);
+                    // Lỗi background không throw để tránh làm đứt mạch upload ảnh của người dùng
+                }
+            }
+
+            return ApiResponse.success("Đã lưu ảnh bằng chứng cất lại hàng và hoàn tất hạch toán kho thành công.", java.util.Map.of(
                     "taskId", String.valueOf(taskId),
                     "url",    url
             ));

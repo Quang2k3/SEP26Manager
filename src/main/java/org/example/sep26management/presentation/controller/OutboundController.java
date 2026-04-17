@@ -630,7 +630,17 @@ public class OutboundController {
     public ResponseEntity<ApiResponse<Map<String, String>>> uploadMispickPhoto(
             @PathVariable Long taskId,
             @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
-        return ResponseEntity.ok(pickListService.uploadMispickResolutionNote(taskId, photo));
+        
+        // 1. Đọc Mispick Queue từ Redis
+        String mispickJson = stringRedisTemplate.opsForValue().get("OUTBOUND:MISPICK:" + taskId);
+        
+        // 2. Chuyển xuống Service xử lý Auto-Relocation + Upload Ảnh
+        ApiResponse<Map<String, String>> response = pickListService.uploadMispickResolutionNote(taskId, photo, mispickJson);
+        
+        // 3. Xoá Cache Redis
+        stringRedisTemplate.delete("OUTBOUND:MISPICK:" + taskId);
+        
+        return ResponseEntity.ok(response);
     }
 
     // ─── THÊM VÀO OutboundController.java — sau endpoint finalize-qc ─────────────

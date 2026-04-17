@@ -257,6 +257,25 @@ public interface InventorySnapshotJpaRepository
                 @Param("skuId") Long skuId,
                 @Param("lotNumber") String lotNumber);
 
+        // ── Auto-Relocation Helper: Tìm Bin có số lượng tồn kho LỚN NHẤT ───────────
+        @Query(value = """
+            SELECT s.location_id
+            FROM inventory_snapshot s
+            JOIN locations l ON l.location_id = s.location_id
+            LEFT JOIN inventory_lots il ON il.lot_id = s.lot_id
+            WHERE s.warehouse_id = :warehouseId
+              AND s.sku_id = :skuId
+              AND (:lotNumber IS NULL OR il.lot_number = :lotNumber)
+              AND s.quantity > 0
+              AND l.location_type = 'BIN'
+            ORDER BY s.quantity DESC
+            LIMIT 1
+            """, nativeQuery = true)
+        Long findLargestSourceLocationIdForRelocation(
+                @Param("warehouseId") Long warehouseId,
+                @Param("skuId") Long skuId,
+                @Param("lotNumber") String lotNumber);
+
         // ── Increment reserved (BR-OUT-17 / BR-WXE-20) ───────────────────────────
 
         @Modifying
