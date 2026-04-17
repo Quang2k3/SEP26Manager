@@ -206,8 +206,7 @@ public class PutawayTaskService {
             BigDecimal totalUsed = itemPutawayQty.add(alreadyAllocated).add(alloc.getQty());
             if (totalUsed.compareTo(itemTaskQty) > 0) {
                 BigDecimal remaining = itemTaskQty.subtract(itemPutawayQty).subtract(alreadyAllocated);
-                throw new RuntimeException("Cannot allocate " + alloc.getQty() + " units of Task Item " + alloc.getPutawayTaskItemId()
-                        + ". Remaining to allocate: " + remaining);
+                throw new RuntimeException("Số lượng cất vượt quá yêu cầu lệnh! Thừa hàng, yêu cầu kiểm tra và cất đúng số lượng (Chỉ cất thêm tối đa: " + remaining + ").");
             }
 
             // SELECT FOR UPDATE: khóa bin row trước check capacity
