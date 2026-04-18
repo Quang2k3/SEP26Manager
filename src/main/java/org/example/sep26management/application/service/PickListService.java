@@ -708,7 +708,7 @@ public class PickListService {
                     }
                 } catch (Exception ex) {
                     log.error("Failed to parse or execute auto-relocation for mispickJson: {}", ex.getMessage(), ex);
-                    // Lỗi background không throw để tránh làm đứt mạch upload ảnh của người dùng
+                    throw new BusinessException("Lỗi Cập nhật Kho tự động (Auto-Relocate): " + ex.getMessage());
                 }
             }
 
