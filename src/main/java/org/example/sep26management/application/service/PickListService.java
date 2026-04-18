@@ -56,6 +56,8 @@ public class PickListService {
     private final NotificationService notificationService;
     private final SseEmitterRegistry sseRegistry;
     private final com.cloudinary.Cloudinary cloudinary;
+    private final IncidentJpaRepository incidentRepo;
+    private final IncidentItemJpaRepository incidentItemRepo;
 
     @Transactional
     public ApiResponse<PickListResponse> generatePickList(
@@ -615,12 +617,13 @@ public class PickListService {
         return ApiResponse.success("Đã huỷ lấy hàng và giải phóng tồn kho thành công.", resultData);
     }
 
-    public ApiResponse<java.util.Map<String, String>> uploadMispickResolutionNote(Long taskId, org.springframework.web.multipart.MultipartFile file) {
+    @Transactional
+    public ApiResponse<java.util.Map<String, String>> uploadMispickResolutionNote(Long taskId, org.springframework.web.multipart.MultipartFile file, String mispickJson) {
         PickingTaskEntity task = pickingTaskRepository.findById(taskId)
                 .orElseThrow(() -> new BusinessException("Pick List không tồn tại: " + taskId));
 
         if (file == null || file.isEmpty())
-            throw new BusinessException("Vui lòng chọn ảnh phiếu lấy hàng đã ký.");
+            throw new BusinessException("Vui lòng chọn ảnh kiện hàng bị lấy nhầm.");
 
         try {
             String publicId = "mispick_notes/task_" + taskId + "_" + System.currentTimeMillis();
@@ -645,7 +648,67 @@ public class PickListService {
 
             log.info("Mispick resolution note uploaded for taskId={}: {}", taskId, url);
 
-            return ApiResponse.success("Đã lưu ảnh bằng chứng cất lại hàng thành công.", java.util.Map.of(
+            // ─── Xử lý Auto-Relocation dựa trên Mispick JSON ───
+            if (mispickJson != null && !mispickJson.isBlank() && !mispickJson.equals("[]")) {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    java.util.List<java.util.Map<String, Object>> mispickQueue = mapper.readValue(
+                            mispickJson, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+                    
+                    for (java.util.Map<String, Object> entry : mispickQueue) {
+                        String barcode = (String) entry.get("barcode");
+                        String lotNumber = (String) entry.get("lotNumber");
+                        Object qtyObj = entry.get("qty");
+                        java.math.BigDecimal qty = qtyObj != null ? new java.math.BigDecimal(qtyObj.toString()) : java.math.BigDecimal.ONE;
+
+                        // 1. Tìm SKU
+                        org.example.sep26management.infrastructure.persistence.entity.SkuEntity sku = skuRepository.findBySkuCode(barcode).orElse(null);
+                        if (sku == null) {
+                            sku = skuRepository.findByBarcode(barcode).orElse(null);
+                        }
+                        if (sku == null) continue;
+
+                        Long warehouseId = task.getWarehouseId();
+
+                        // 2. Tìm Optimal Bin Target để cất (Thêm +1)
+                        List<String> optimalBinCodes = snapshotRepository.findOptimalBinLocationByWarehouseAndSkuAndLot(
+                                warehouseId, sku.getSkuId(), lotNumber);
+
+                        if (!optimalBinCodes.isEmpty()) {
+                            String targetBinCode = optimalBinCodes.get(0);
+                            org.example.sep26management.infrastructure.persistence.entity.LocationEntity targetLoc = 
+                                    locationRepository.findByLocationCode(targetBinCode).orElse(null);
+                            
+                            if (targetLoc != null) {
+                                Long lotId = lotNumber != null ? lotRepository.findByLotNumber(lotNumber).map(l -> l.getLotId()).orElse(null) : null;
+                                
+                                // Hệ thống GHI NHẬN TĂNG (Found Stock / Suspense Accounting) tại Bin cất mới.
+                                // Không tự ý trừ ở bất kì Bin nào khác để bảo Toàn vật lý. 
+                                // Nếu kho bị hụt ở Bin cũ, cơ chế Báo Cáo Shortage của thủ kho sẽ tự trừ (-1).
+                                snapshotRepository.upsertInventory(warehouseId, sku.getSkuId(), lotId, targetLoc.getLocationId(), qty);
+                                
+                                // Ghi Audit Log - Positive Adjustment (Mispick Found)
+                                txnRepository.save(org.example.sep26management.infrastructure.persistence.entity.InventoryTransactionEntity.builder()
+                                        .warehouseId(warehouseId).skuId(sku.getSkuId()).lotId(lotId)
+                                        .locationId(targetLoc.getLocationId()).quantity(qty)
+                                        .txnType("ADJUSTMENT")
+                                        .referenceTable("picking_tasks").referenceId(taskId)
+                                        .reasonCode("MISPICK_FOUND_ADJUSTMENT")
+                                        .createdBy(task.getAssignedTo() == null ? 1L : task.getAssignedTo())
+                                        .build());
+                                        
+                                log.info("Suspense Accounting (Mispick): SKU {} (+{}) at Target: {}", 
+                                        sku.getSkuCode(), qty, targetLoc.getLocationId());
+                            }
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.error("Failed to parse or execute auto-relocation for mispickJson: {}", ex.getMessage(), ex);
+                    // Lỗi background không throw để tránh làm đứt mạch upload ảnh của người dùng
+                }
+            }
+
+            return ApiResponse.success("Đã lưu ảnh bằng chứng cất lại hàng và hoàn tất hạch toán kho thành công.", java.util.Map.of(
                     "taskId", String.valueOf(taskId),
                     "url",    url
             ));
@@ -656,5 +719,158 @@ public class PickListService {
             log.error("Upload mispick resolution note failed for taskId={}: {}", taskId, e.getMessage(), e);
             throw new BusinessException("Không thể upload ảnh: " + e.getMessage());
         }
+    }
+
+    @Transactional
+    public ApiResponse<java.util.Map<String, Object>> autoHealShortage(
+            Long taskId, org.example.sep26management.application.dto.request.PickListShortageRequest request, Long userId) {
+
+        PickingTaskEntity task = pickingTaskRepository.findById(taskId)
+                .orElseThrow(() -> new BusinessException("Task không tồn tại: " + taskId));
+
+        Long warehouseId = task.getWarehouseId();
+        int healedCount = 0;
+        int failedCount = 0;
+
+        for (var shortage : request.getShortages()) {
+            PickingTaskItemEntity currentItem = pickingTaskItemRepository.findById(shortage.getTaskItemId())
+                    .orElse(null);
+            if (currentItem == null) continue;
+
+            org.example.sep26management.infrastructure.persistence.entity.SkuEntity sku = skuRepository.findById(shortage.getSkuId()).orElse(null);
+            if (sku == null) continue;
+
+            BigDecimal missingQty = shortage.getMissingQty();
+            Long lotId = shortage.getLotNumber() != null ? lotRepository.findByLotNumber(shortage.getLotNumber()).map(l -> l.getLotId()).orElse(null) : currentItem.getLotId();
+
+            // 1. Deduct kho vật lý (Hợp thức hoá mất hàng)
+            snapshotRepository.upsertInventory(warehouseId, sku.getSkuId(), lotId, currentItem.getFromLocationId(), missingQty.negate());
+
+            txnRepository.save(InventoryTransactionEntity.builder()
+                    .warehouseId(warehouseId).skuId(sku.getSkuId()).lotId(lotId)
+                    .locationId(currentItem.getFromLocationId()).quantity(missingQty.negate())
+                    .txnType("ADJUSTMENT")
+                    .referenceTable("picking_tasks").referenceId(taskId)
+                    .reasonCode("SHORTAGE_AUTO_ADJUSTMENT")
+                    .createdBy(userId)
+                    .build());
+
+            log.info("Auto-Heal Deduction: SKU {} (-{}) at Loc {}", sku.getSkuCode(), missingQty, currentItem.getFromLocationId());
+
+            // Reduce task quantity because it's missing physically here
+            currentItem.setRequiredQty(currentItem.getRequiredQty().subtract(missingQty));
+            if (currentItem.getRequiredQty().compareTo(BigDecimal.ZERO) <= 0) {
+                currentItem.setRequiredQty(BigDecimal.ZERO);
+            }
+            pickingTaskItemRepository.save(currentItem);
+
+            // 2. Try to allocate new Bin!
+            List<InventorySnapshotEntity> snapshots = snapshotRepository.findByWarehouseIdAndSkuId(warehouseId, sku.getSkuId());
+            boolean allocated = false;
+
+            if (snapshots != null) {
+                // Descending by Available Qty
+                snapshots.sort((a, b) -> {
+                    BigDecimal availA = a.getQuantity().subtract(a.getReservedQty() != null ? a.getReservedQty() : BigDecimal.ZERO);
+                    BigDecimal availB = b.getQuantity().subtract(b.getReservedQty() != null ? b.getReservedQty() : BigDecimal.ZERO);
+                    return availB.compareTo(availA);
+                });
+
+                for (InventorySnapshotEntity snap : snapshots) {
+                    if (allocated) break;
+                    if (snap.getLocationId().equals(currentItem.getFromLocationId())) continue;
+
+                    org.example.sep26management.infrastructure.persistence.entity.LocationEntity loc = locationRepository.findById(snap.getLocationId()).orElse(null);
+                    if (loc == null || !loc.isActive() || loc.isStaging() || loc.isDefect() || !org.example.sep26management.application.enums.LocationType.BIN.equals(loc.getLocationType())) {
+                        continue;
+                    }
+
+                    if (shortage.getLotNumber() != null && snap.getLotId() != null) {
+                        org.example.sep26management.infrastructure.persistence.entity.InventoryLotEntity lotEnt = lotRepository.findById(snap.getLotId()).orElse(null);
+                        if (lotEnt == null || !shortage.getLotNumber().equals(lotEnt.getLotNumber())) continue;
+                    }
+
+                    BigDecimal available = snap.getQuantity().subtract(snap.getReservedQty() != null ? snap.getReservedQty() : BigDecimal.ZERO);
+                    if (available.compareTo(missingQty) >= 0) {
+                        // Found enough stock!
+                        snap.setReservedQty((snap.getReservedQty() != null ? snap.getReservedQty() : BigDecimal.ZERO).add(missingQty));
+                        snapshotRepository.save(snap);
+
+                        ReservationEntity res = ReservationEntity.builder()
+                                .warehouseId(warehouseId).skuId(sku.getSkuId()).lotId(snap.getLotId())
+                                .locationId(snap.getLocationId()).reservedQty(missingQty)
+                                .referenceTable(task.getSoId() != null ? "sales_orders" : "transfers")
+                                .referenceId(task.getSoId() != null ? task.getSoId() : task.getTransferId())
+                                .status("OPEN")
+                                .build();
+                        reservationRepository.save(res);
+
+                        PickingTaskItemEntity newItem = PickingTaskItemEntity.builder()
+                                .pickingTaskId(taskId)
+                                .skuId(sku.getSkuId())
+                                .lotId(snap.getLotId())
+                                .fromLocationId(snap.getLocationId())
+                                .requiredQty(missingQty)
+                                .pickedQty(BigDecimal.ZERO)
+                                .build();
+                        pickingTaskItemRepository.save(newItem);
+
+                        log.info("Auto-Heal Allocated: SKU {} (+{}) at Loc {}", sku.getSkuCode(), missingQty, snap.getLocationId());
+                        healedCount++;
+                        allocated = true;
+                    }
+                }
+            }
+
+            if (!allocated) {
+                log.warn("Auto-Heal FAILED (Warehouse Exhausted) for SKU {} missing {}", sku.getSkuCode(), missingQty);
+                failedCount++;
+                
+                // Create Incident
+                String incidentCode = "SHT-" + System.currentTimeMillis() % 1_000_000;
+                IncidentEntity incident = IncidentEntity.builder()
+                        .warehouseId(warehouseId)
+                        .incidentCode(incidentCode)
+                        .incidentType(org.example.sep26management.application.enums.IncidentType.SHORTAGE)
+                        .category(org.example.sep26management.application.enums.IncidentCategory.INVENTORY_DISCREPANCY)
+                        .severity("HIGH")
+                        .occurredAt(LocalDateTime.now())
+                        .description("Tự động báo cáo thiếu hàng do hết tồn kho bù vào (Auto-Heal Failed). Task ID: " + taskId)
+                        .reportedBy(userId)
+                        .status("OPEN")
+                        .soId(task.getSoId())
+                        .build();
+                IncidentEntity savedIncident = incidentRepo.save(incident);
+
+                IncidentItemEntity incidentItem = IncidentItemEntity.builder()
+                        .incident(savedIncident)
+                        .skuId(sku.getSkuId())
+                        .lotNumber(shortage.getLotNumber())
+                        .expectedQty(missingQty)
+                        .actualQty(BigDecimal.ZERO)
+                        .reasonCode("OUT_OF_STOCK")
+                        .note("Thiếu " + missingQty + " (Auto-Heal không tìm thấy Bin khác)")
+                        .build();
+                incidentItemRepo.save(incidentItem);
+                
+                // Set SO status to WAITING_STOCK
+                if (task.getSoId() != null) {
+                    soRepository.findById(task.getSoId()).ifPresent(so -> {
+                        so.setStatus("WAITING_STOCK");
+                        soRepository.save(so);
+                    });
+                } else if (task.getTransferId() != null) {
+                    transferRepository.findById(task.getTransferId()).ifPresent(tr -> {
+                        tr.setStatus("WAITING_STOCK");
+                        transferRepository.save(tr);
+                    });
+                }
+            }
+        }
+
+        java.util.Map<String, Object> res = new java.util.HashMap<>();
+        res.put("healed", healedCount);
+        res.put("exhausted", failedCount);
+        return ApiResponse.success("Đã bù " + healedCount + " mã thành công, thiếu " + failedCount + " (Hết kho)", res);
     }
 }

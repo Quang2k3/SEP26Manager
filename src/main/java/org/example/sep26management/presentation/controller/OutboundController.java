@@ -630,7 +630,25 @@ public class OutboundController {
     public ResponseEntity<ApiResponse<Map<String, String>>> uploadMispickPhoto(
             @PathVariable Long taskId,
             @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
-        return ResponseEntity.ok(pickListService.uploadMispickResolutionNote(taskId, photo));
+        
+        // 1. Đọc Mispick Queue từ Redis
+        String mispickJson = stringRedisTemplate.opsForValue().get("OUTBOUND:MISPICK:" + taskId);
+        
+        // 2. Chuyển xuống Service xử lý Auto-Relocation + Upload Ảnh
+        ApiResponse<Map<String, String>> response = pickListService.uploadMispickResolutionNote(taskId, photo, mispickJson);
+        
+        // 3. Xoá Cache Redis
+        stringRedisTemplate.delete("OUTBOUND:MISPICK:" + taskId);
+        
+        return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/pick-list/{taskId}/report-shortage")
+    @Operation(summary = "Xử lý bão bù (Smart Auto-Healing) hàng thiếu trong Outbound", description = "Máy quét báo thiếu hàng thật sự, backend tự động trừ kho, truy vết bin mới và sửa task lấy hàng.")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> reportShortage(
+            @PathVariable Long taskId,
+            @Valid @RequestBody org.example.sep26management.application.dto.request.PickListShortageRequest request) {
+        return ResponseEntity.ok(pickListService.autoHealShortage(taskId, request, getUserId()));
     }
 
     // ─── THÊM VÀO OutboundController.java — sau endpoint finalize-qc ─────────────

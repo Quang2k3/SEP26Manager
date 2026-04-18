@@ -22,6 +22,9 @@ public interface InventorySnapshotJpaRepository
 
         // ── Single-location queries (used by BinService.getBinDetail) ────────────
 
+        List<InventorySnapshotEntity> findByWarehouseIdAndSkuId(Long warehouseId, Long skuId);
+
+
         /** Single location — total occupied qty */
         @Query("SELECT COALESCE(SUM(s.quantity), 0) FROM InventorySnapshotEntity s WHERE s.locationId = :locationId")
         BigDecimal sumQuantityByLocationId(@Param("locationId") Long locationId);
@@ -253,6 +256,25 @@ public interface InventorySnapshotJpaRepository
             LIMIT 1
             """, nativeQuery = true)
         List<String> findOptimalBinLocationByWarehouseAndSkuAndLot(
+                @Param("warehouseId") Long warehouseId,
+                @Param("skuId") Long skuId,
+                @Param("lotNumber") String lotNumber);
+
+        // ── Auto-Relocation Helper: Tìm Bin có số lượng tồn kho LỚN NHẤT ───────────
+        @Query(value = """
+            SELECT s.location_id
+            FROM inventory_snapshot s
+            JOIN locations l ON l.location_id = s.location_id
+            LEFT JOIN inventory_lots il ON il.lot_id = s.lot_id
+            WHERE s.warehouse_id = :warehouseId
+              AND s.sku_id = :skuId
+              AND (:lotNumber IS NULL OR il.lot_number = :lotNumber)
+              AND s.quantity > 0
+              AND l.location_type = 'BIN'
+            ORDER BY s.quantity DESC
+            LIMIT 1
+            """, nativeQuery = true)
+        Long findLargestSourceLocationIdForRelocation(
                 @Param("warehouseId") Long warehouseId,
                 @Param("skuId") Long skuId,
                 @Param("lotNumber") String lotNumber);
