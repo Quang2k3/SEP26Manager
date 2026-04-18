@@ -26,6 +26,10 @@ public interface IncidentJpaRepository extends JpaRepository<IncidentEntity, Lon
 
     Page<IncidentEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
+    // ── Lọc Sự Cố Theo Cá Nhân (Dùng cho Keeper Tự Xử Lý Lỗi) ────
+    Page<IncidentEntity> findByReportedByAndStatusAndCategoryOrderByCreatedAtDesc(
+            Long reportedBy, String status, IncidentCategory category, Pageable pageable);
+
     // ── Outbound QC / Dispatch — dùng so_id column (thêm V20) ────
 
     /**

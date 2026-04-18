@@ -337,10 +337,14 @@ public class OutboundController {
     @PatchMapping("/pick-list/{taskId}/confirm-picked")
     @PreAuthorize("hasRole('KEEPER')")
     @Operation(summary = "Keeper xác nhận đã lấy đủ hàng",
-            description = "Chuyển picking task OPEN/IN_PROGRESS → PICKED. Bắt buộc trước khi bắt đầu QC.")
+            description = "Chuyển picking task OPEN/IN_PROGRESS → PICKED. Tự động ghi lại Mispick (nếu quét thừa) thành Sự cố (Incident) chờ xử lý.")
     public ResponseEntity<ApiResponse<PickListResponse>> confirmPicked(
             @PathVariable Long taskId, HttpServletRequest http) {
-        return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http)));
+            
+        // Đọc Mispick Queue từ Redis để gửi qua Service xử lý phân thân Incident
+        String mispickJson = stringRedisTemplate.opsForValue().get("OUTBOUND:MISPICK:" + taskId);
+        
+        return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http), mispickJson));
     }
 
     @DeleteMapping("/pick-list/{taskId}")
@@ -623,28 +627,6 @@ public class OutboundController {
             @PathVariable Long soId,
             @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
         return ResponseEntity.ok(pickSignedNoteService.uploadPickSignedNote(soId, photo));
-    }
-
-    @PostMapping(value = "/pick-list/{taskId}/mispick-photo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Upload ảnh bằng chứng cất lại hàng (Mispick Resolution Note)", description = "Điện thoại scan QR → chụp ảnh phiếu xử lý mispick đã ký → lên hệ thống.")
-    public ResponseEntity<ApiResponse<Map<String, String>>> uploadMispickPhoto(
-            @PathVariable Long taskId,
-            @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
-        try {
-            // 1. Đọc Mispick Queue từ Redis
-            String mispickJson = stringRedisTemplate.opsForValue().get("OUTBOUND:MISPICK:" + taskId);
-            
-            // 2. Chuyển xuống Service xử lý Auto-Relocation + Upload Ảnh
-            ApiResponse<Map<String, String>> response = pickListService.uploadMispickResolutionNote(taskId, photo, mispickJson, getUserId());
-            
-            // 3. Xoá Cache Redis
-            stringRedisTemplate.delete("OUTBOUND:MISPICK:" + taskId);
-            
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error("Lỗi uploadMispickPhoto taskId={}: {}", taskId, e.getMessage(), e);
-            return ResponseEntity.status(500).body(ApiResponse.error("Lỗi Server 500: " + e.getMessage()));
-        }
     }
 
     @PutMapping("/pick-list/{taskId}/report-shortage")

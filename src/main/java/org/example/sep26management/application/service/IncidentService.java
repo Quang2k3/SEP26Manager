@@ -40,6 +40,7 @@ public class IncidentService {
     private final UserJpaRepository userRepo;
     private final SkuJpaRepository skuRepo;
     private final NotificationService notificationService;
+    private final com.cloudinary.Cloudinary cloudinary;
 
     // ─── Create Incident (Keeper báo sự cố Gate Check) ──────────────────────
 
@@ -97,6 +98,7 @@ public class IncidentService {
                                                                      org.example.sep26management.application.enums.IncidentCategory category,
                                                                      Long soId,
                                                                      Long receivingId,
+                                                                     Long reportedBy,
                                                                      int page, int size) {
         // [FIX] receivingId filter — inbound QC incidents
         if (receivingId != null) {
@@ -125,7 +127,9 @@ public class IncidentService {
         Pageable pageable = PageRequest.of(page, size);
         Page<IncidentEntity> incidentsPage;
 
-        if (status != null && !status.isBlank() && category != null) {
+        if (reportedBy != null && status != null && !status.isBlank() && category != null) {
+            incidentsPage = incidentRepo.findByReportedByAndStatusAndCategoryOrderByCreatedAtDesc(reportedBy, status, category, pageable);
+        } else if (status != null && !status.isBlank() && category != null) {
             incidentsPage = incidentRepo.findByStatusAndCategoryOrderByCreatedAtDesc(status, category, pageable);
         } else if (status != null && !status.isBlank()) {
             incidentsPage = incidentRepo.findByStatusOrderByCreatedAtDesc(status, pageable);
@@ -693,6 +697,49 @@ public class IncidentService {
 
     private String appendNote(String existing, String newNote) {
         return existing != null ? existing + " | " + newNote : newNote;
+    }
+
+    // ─── Resolve Overage Incident (Keeper upload ảnh trả hàng thừa) ─────────
+
+    @Transactional
+    public ApiResponse<IncidentResponse> resolveOverageIncident(Long id, org.springframework.web.multipart.MultipartFile file, Long userId) {
+        IncidentEntity incident = incidentRepo.findById(id)
+                .orElseThrow(() -> new RuntimeException("Incident not found: " + id));
+
+        if (!"OPEN".equals(incident.getStatus())) {
+            throw new RuntimeException("Incident is not in OPEN status. Current: " + incident.getStatus());
+        }
+        
+        if (!org.example.sep26management.application.enums.IncidentType.OVERAGE.equals(incident.getIncidentType())) {
+            throw new RuntimeException("Chỉ dùng để xử lý cất trả hàng thừa (OVERAGE).");
+        }
+
+        // Upload ảnh lên Cloudinary
+        String attachmentUrl = null;
+        try {
+            String publicId = "mispick_" + incident.getIncidentCode();
+            java.util.Map<String, Object> result = cloudinary.uploader().upload(file.getBytes(),
+                    com.cloudinary.utils.ObjectUtils.asMap("public_id", publicId, "resource_type", "image",
+                            "quality", "auto:good", "fetch_format", "auto"));
+            attachmentUrl = (String) result.get("secure_url");
+        } catch (Exception e) {
+            throw new RuntimeException("Upload ảnh thất bại: " + e.getMessage());
+        }
+
+        // Cập nhật attachmentUrl cho tất cả IncidentItem
+        List<IncidentItemEntity> items = incidentItemRepo.findByIncidentIncidentId(incident.getIncidentId());
+        for (IncidentItemEntity item : items) {
+            item.setAttachmentUrl(attachmentUrl);
+            item.setNote(appendNote(item.getNote(), "[Keeper]: Đã hoàn tất cất trả hàng thừa (Mispick)"));
+            incidentItemRepo.save(item);
+        }
+
+        incident.setStatus("RESOLVED");
+        incidentRepo.save(incident);
+
+        log.info("Overage Incident {} resolved by Keeper {}", incident.getIncidentCode(), userId);
+
+        return ApiResponse.success("Đã xác nhận trả hàng về kệ", toResponse(incident));
     }
 
     // ─── Check if receiving order has pending incidents ──────────────────────

@@ -86,9 +86,10 @@ public class IncidentController {
             @RequestParam(required = false) Long soId,
             // [FIX] receivingId filter — dùng cho GateCheck "Xử lý sự cố" inbound
             @RequestParam(required = false) Long receivingId,
+            @RequestParam(required = false) Long reportedBy,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
-        return incidentService.listIncidents(status, category, soId, receivingId, page, size);
+        return incidentService.listIncidents(status, category, soId, receivingId, reportedBy, page, size);
     }
 
     /** GET /v1/incidents/{id} */
@@ -121,6 +122,23 @@ public class IncidentController {
             @PathVariable Long id,
             Authentication auth) {
         return incidentService.approveIncident(id, extractUserId(auth));
+    }
+
+    /** POST /v1/incidents/{id}/resolve-overage — Keeper xử lý hoàn trả hàng nhặt thừa */
+    @PostMapping(value = "/{id}/resolve-overage", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('KEEPER')")
+    @Operation(summary = "Xử lý cất trả hàng lấy thừa (Keeper)",
+            description = "**Chỉ dùng cho OVERAGE incident phát sinh lúc Picking.**\n\n"
+                    + "Keeper chụp ảnh đã cất hàng thừa lên kệ.\n\n"
+                    + "**Data yêu cầu:**\n"
+                    + "- `@PathVariable id`: Incident ID.\n"
+                    + "- `photo`: MultipartFile ảnh\n\n"
+                    + "→ Status: `OPEN` → `RESOLVED`")
+    public ApiResponse<IncidentResponse> resolveOverage(
+            @PathVariable Long id,
+            @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo,
+            Authentication auth) {
+        return incidentService.resolveOverageIncident(id, photo, extractUserId(auth));
     }
 
     /** POST /v1/incidents/{id}/reject — Manager từ chối nhận xe */
