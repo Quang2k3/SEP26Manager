@@ -618,7 +618,7 @@ public class PickListService {
     }
 
     @Transactional
-    public ApiResponse<java.util.Map<String, String>> uploadMispickResolutionNote(Long taskId, org.springframework.web.multipart.MultipartFile file, String mispickJson) {
+    public ApiResponse<java.util.Map<String, String>> uploadMispickResolutionNote(Long taskId, org.springframework.web.multipart.MultipartFile file, String mispickJson, Long userId) {
         PickingTaskEntity task = pickingTaskRepository.findById(taskId)
                 .orElseThrow(() -> new BusinessException("Pick List không tồn tại: " + taskId));
 
@@ -698,7 +698,7 @@ public class PickListService {
                                         .txnType("ADJUSTMENT")
                                         .referenceTable("picking_tasks").referenceId(taskId)
                                         .reasonCode("MISPICK_FOUND_ADJUSTMENT")
-                                        .createdBy(task.getAssignedTo() == null ? 1L : task.getAssignedTo())
+                                        .createdBy(userId != null ? userId : (task.getAssignedTo() == null ? 1L : task.getAssignedTo()))
                                         .build());
                                         
                                 log.info("Suspense Accounting (Mispick): SKU {} (+{}) at Target: {}", 

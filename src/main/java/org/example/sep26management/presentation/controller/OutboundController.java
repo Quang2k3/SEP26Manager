@@ -635,7 +635,7 @@ public class OutboundController {
             String mispickJson = stringRedisTemplate.opsForValue().get("OUTBOUND:MISPICK:" + taskId);
             
             // 2. Chuyển xuống Service xử lý Auto-Relocation + Upload Ảnh
-            ApiResponse<Map<String, String>> response = pickListService.uploadMispickResolutionNote(taskId, photo, mispickJson);
+            ApiResponse<Map<String, String>> response = pickListService.uploadMispickResolutionNote(taskId, photo, mispickJson, getUserId());
             
             // 3. Xoá Cache Redis
             stringRedisTemplate.delete("OUTBOUND:MISPICK:" + taskId);
