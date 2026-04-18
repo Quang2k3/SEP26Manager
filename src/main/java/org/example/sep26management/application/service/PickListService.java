@@ -741,7 +741,7 @@ public class PickListService {
             if (sku == null) continue;
 
             BigDecimal missingQty = shortage.getMissingQty();
-            Long lotId = shortage.getLotNumber() != null ? lotRepository.findByLotNumber(shortage.getLotNumber()).map(l -> l.getLotId()).orElse(null) : currentItem.getLotId();
+            Long lotId = shortage.getLotNumber() != null ? lotRepository.findBySkuIdAndLotNumber(sku.getSkuId(), shortage.getLotNumber()).map(l -> l.getLotId()).orElse(null) : currentItem.getLotId();
 
             // 1. Deduct kho vật lý (Hợp thức hoá mất hàng)
             snapshotRepository.upsertInventory(warehouseId, sku.getSkuId(), lotId, currentItem.getFromLocationId(), missingQty.negate());
@@ -781,7 +781,7 @@ public class PickListService {
                     if (snap.getLocationId().equals(currentItem.getFromLocationId())) continue;
 
                     org.example.sep26management.infrastructure.persistence.entity.LocationEntity loc = locationRepository.findById(snap.getLocationId()).orElse(null);
-                    if (loc == null || !loc.isActive() || loc.isStaging() || loc.isDefect() || !org.example.sep26management.application.enums.LocationType.BIN.equals(loc.getLocationType())) {
+                    if (loc == null || !Boolean.TRUE.equals(loc.getActive()) || Boolean.TRUE.equals(loc.getIsStaging()) || Boolean.TRUE.equals(loc.getIsDefect()) || !org.example.sep26management.application.enums.LocationType.BIN.equals(loc.getLocationType())) {
                         continue;
                     }
 
@@ -798,7 +798,7 @@ public class PickListService {
 
                         ReservationEntity res = ReservationEntity.builder()
                                 .warehouseId(warehouseId).skuId(sku.getSkuId()).lotId(snap.getLotId())
-                                .locationId(snap.getLocationId()).reservedQty(missingQty)
+                                .locationId(snap.getLocationId()).quantity(missingQty)
                                 .referenceTable(task.getSoId() != null ? "sales_orders" : "transfers")
                                 .referenceId(task.getSoId() != null ? task.getSoId() : null)
                                 .status("OPEN")
@@ -832,7 +832,7 @@ public class PickListService {
                         .warehouseId(warehouseId)
                         .incidentCode(incidentCode)
                         .incidentType(org.example.sep26management.application.enums.IncidentType.SHORTAGE)
-                        .category(org.example.sep26management.application.enums.IncidentCategory.INVENTORY_DISCREPANCY)
+                        .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
                         .severity("HIGH")
                         .occurredAt(LocalDateTime.now())
                         .description("Tự động báo cáo thiếu hàng do hết tồn kho bù vào (Auto-Heal Failed). Task ID: " + taskId)
