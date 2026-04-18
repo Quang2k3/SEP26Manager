@@ -680,7 +680,7 @@ public class PickListService {
                                     locationRepository.findByLocationCode(targetBinCode).orElse(null);
                             
                             if (targetLoc != null) {
-                                Long lotId = lotNumber != null ? lotRepository.findByLotNumber(lotNumber).map(l -> l.getLotId()).orElse(null) : null;
+                                Long lotId = lotNumber != null ? lotRepository.findBySkuIdAndLotNumber(sku.getSkuId(), lotNumber).map(l -> l.getLotId()).orElse(null) : null;
                                 
                                 // Hệ thống GHI NHẬN TĂNG (Found Stock / Suspense Accounting) tại Bin cất mới.
                                 // Không tự ý trừ ở bất kì Bin nào khác để bảo Toàn vật lý. 
