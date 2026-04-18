@@ -284,7 +284,6 @@ public class PickListService {
                 .assignedTo(task.getAssignedTo())
                 .assignedQcId(task.getAssignedQcId())
                 .items(responseItems)
-                .mispickResolutionNoteUrl(task.getMispickResolutionNoteUrl())
                 .build());
     }
 
@@ -301,7 +300,7 @@ public class PickListService {
      * confirmDispatch sau này chỉ còn task → COMPLETED, SO → DISPATCHED.
      */
     @Transactional
-    public ApiResponse<PickListResponse> confirmPicked(Long taskId, Long userId, String ip, String ua, String mispickJson) {
+    public ApiResponse<PickListResponse> confirmPicked(Long taskId, Long userId, String ip, String ua) {
         try {
             log.info("confirmPicked: taskId={}, userId={}", taskId, userId);
 
@@ -409,10 +408,7 @@ public class PickListService {
                 });
             }
 
-            // 7) Xử lý Mispick → Hiện tại frontend đã in phiếu ra giấy để xử lý bằng tay ngoài thực tế. BE không tự động tạo incident nữa.
-            if (mispickJson != null && !mispickJson.isBlank() && !mispickJson.equals("[]")) {
-                log.info("Mispick info received for taskId={}, but automated Incident creation is disabled. Data: {}", taskId, mispickJson);
-            }
+
 
             auditLogService.logAction(userId, "PICKING_CONFIRMED", "picking_tasks", taskId,
                     "Pick task " + taskId + " confirmed PICKED — tồn kho đã trừ trực tiếp từ BIN", ip, ua);
@@ -741,10 +737,30 @@ public class PickListService {
             }
             pickingTaskItemRepository.save(currentItem);
 
-            // 2. Try to allocate new Bin!
-            List<InventorySnapshotEntity> snapshots = snapshotRepository.findByWarehouseIdAndSkuId(warehouseId, sku.getSkuId());
-            boolean allocated = false;
+            // 2. Reduce old ReservationEntity
+            List<org.example.sep26management.infrastructure.persistence.entity.ReservationEntity> oldRess = reservationRepository.findOpenByWarehouseSkuLocation(warehouseId, sku.getSkuId(), currentItem.getFromLocationId());
+            BigDecimal resToDeduct = missingQty;
+            for (org.example.sep26management.infrastructure.persistence.entity.ReservationEntity r : oldRess) {
+                if (resToDeduct.compareTo(BigDecimal.ZERO) <= 0) break;
+                if (!r.getReferenceTable().equals(task.getSoId() != null ? "sales_orders" : "transfers")) continue;
+                if (task.getSoId() != null && !task.getSoId().equals(r.getReferenceId())) continue;
 
+                BigDecimal rQty = r.getQuantity();
+                if (rQty.compareTo(resToDeduct) <= 0) {
+                    resToDeduct = resToDeduct.subtract(rQty);
+                    r.setQuantity(BigDecimal.ZERO);
+                    r.setStatus("CLOSED");
+                } else {
+                    r.setQuantity(rQty.subtract(resToDeduct));
+                    resToDeduct = BigDecimal.ZERO;
+                }
+                reservationRepository.save(r);
+            }
+
+            // 3. Try to allocate new Bin!
+            BigDecimal remainingMissingQty = missingQty;
+            List<InventorySnapshotEntity> snapshots = snapshotRepository.findByWarehouseIdAndSkuId(warehouseId, sku.getSkuId());
+            
             if (snapshots != null) {
                 // Descending by Available Qty
                 snapshots.sort((a, b) -> {
@@ -754,7 +770,7 @@ public class PickListService {
                 });
 
                 for (InventorySnapshotEntity snap : snapshots) {
-                    if (allocated) break;
+                    if (remainingMissingQty.compareTo(BigDecimal.ZERO) <= 0) break;
                     if (snap.getLocationId().equals(currentItem.getFromLocationId())) continue;
 
                     org.example.sep26management.infrastructure.persistence.entity.LocationEntity loc = locationRepository.findById(snap.getLocationId()).orElse(null);
@@ -766,19 +782,21 @@ public class PickListService {
                         org.example.sep26management.infrastructure.persistence.entity.InventoryLotEntity lotEnt = lotRepository.findById(snap.getLotId()).orElse(null);
                         // Khi quét lỗi thiếu, Frontend có truyền shortage.getLotNumber(). Tuy nhiên để dự phòng Lot đổi thì vẫn cho chạy bình thường.
                         if (lotEnt != null && !shortage.getLotNumber().equals(lotEnt.getLotNumber())) {
-                            // Cố gắng tìm đúng lô (nếu user yêu cầu tìm lô)
+                            // Cố gắng tìm đúng lô nhưng không bỏ qua nếu khác lô để đảm bảo lấp đầy
                         }
                     }
 
                     BigDecimal available = snap.getQuantity().subtract(snap.getReservedQty() != null ? snap.getReservedQty() : BigDecimal.ZERO);
-                    if (available.compareTo(missingQty) >= 0) {
-                        // Found enough stock!
-                        snap.setReservedQty((snap.getReservedQty() != null ? snap.getReservedQty() : BigDecimal.ZERO).add(missingQty));
+                    if (available.compareTo(BigDecimal.ZERO) > 0) {
+                        BigDecimal toAllocate = remainingMissingQty.min(available);
+
+                        // Found partial or full stock!
+                        snap.setReservedQty((snap.getReservedQty() != null ? snap.getReservedQty() : BigDecimal.ZERO).add(toAllocate));
                         snapshotRepository.save(snap);
 
                         ReservationEntity res = ReservationEntity.builder()
                                 .warehouseId(warehouseId).skuId(sku.getSkuId()).lotId(snap.getLotId())
-                                .locationId(snap.getLocationId()).quantity(missingQty)
+                                .locationId(snap.getLocationId()).quantity(toAllocate)
                                 .referenceTable(task.getSoId() != null ? "sales_orders" : "transfers")
                                 .referenceId(task.getSoId() != null ? task.getSoId() : null)
                                 .status("OPEN")
@@ -790,20 +808,20 @@ public class PickListService {
                                 .skuId(sku.getSkuId())
                                 .lotId(snap.getLotId())
                                 .fromLocationId(snap.getLocationId())
-                                .requiredQty(missingQty)
+                                .requiredQty(toAllocate)
                                 .pickedQty(BigDecimal.ZERO)
                                 .build();
                         pickingTaskItemRepository.save(newItem);
 
-                        log.info("Auto-Heal Allocated: SKU {} (+{}) at Loc {} into current Task {}", sku.getSkuCode(), missingQty, snap.getLocationId(), taskId);
+                        log.info("Auto-Heal Allocated: SKU {} (+{}) at Loc {} into current Task {}", sku.getSkuCode(), toAllocate, snap.getLocationId(), taskId);
+                        remainingMissingQty = remainingMissingQty.subtract(toAllocate);
                         healedCount++;
-                        allocated = true;
                     }
                 }
             }
 
-            if (!allocated) {
-                log.warn("Auto-Heal FAILED (Warehouse Exhausted) for SKU {} missing {}", sku.getSkuCode(), missingQty);
+            if (remainingMissingQty.compareTo(BigDecimal.ZERO) > 0) {
+                log.warn("Auto-Heal FAILED (Warehouse Exhausted) for SKU {} missing {}", sku.getSkuCode(), remainingMissingQty);
                 failedCount++;
                 
                 // Create Incident
@@ -826,10 +844,10 @@ public class PickListService {
                         .incident(savedIncident)
                         .skuId(sku.getSkuId())
                         .lotNumber(shortage.getLotNumber())
-                        .expectedQty(missingQty)
+                        .expectedQty(remainingMissingQty)
                         .actualQty(BigDecimal.ZERO)
                         .reasonCode("OUT_OF_STOCK")
-                        .note("Thiếu " + missingQty + " (Auto-Heal không tìm thấy Bin khác)")
+                        .note("Thiếu " + remainingMissingQty + " (Auto-Heal không tìm thấy Bin khác)")
                         .build();
                 incidentItemRepo.save(incidentItem);
                 

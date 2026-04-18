@@ -337,14 +337,11 @@ public class OutboundController {
     @PatchMapping("/pick-list/{taskId}/confirm-picked")
     @PreAuthorize("hasRole('KEEPER')")
     @Operation(summary = "Keeper xác nhận đã lấy đủ hàng",
-            description = "Chuyển picking task OPEN/IN_PROGRESS → PICKED. Tự động ghi lại Mispick (nếu quét thừa) thành Sự cố (Incident) chờ xử lý.")
+            description = "Chuyển picking task OPEN/IN_PROGRESS → PICKED.")
     public ResponseEntity<ApiResponse<PickListResponse>> confirmPicked(
             @PathVariable Long taskId, HttpServletRequest http) {
-            
-        // Đọc Mispick Queue từ Redis để gửi qua Service xử lý phân thân Incident
-        String mispickJson = stringRedisTemplate.opsForValue().get("OUTBOUND:MISPICK:" + taskId);
-        
-        return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http), mispickJson));
+                    
+        return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http)));
     }
 
     @DeleteMapping("/pick-list/{taskId}")
@@ -627,6 +624,16 @@ public class OutboundController {
             @PathVariable Long soId,
             @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
         return ResponseEntity.ok(pickSignedNoteService.uploadPickSignedNote(soId, photo));
+    }
+
+    @PostMapping(value = "/pick-list/{taskId}/mispick-photo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload biên bản trả hàng thừa (Mispick Restock Note)", description = "Sau khi đối soát cất hàng thừa, upload biên bản đã ký lên Desktop Dashboard.")
+    public ResponseEntity<ApiResponse<Map<String, String>>> uploadMispickPhoto(
+            @PathVariable Long taskId,
+            @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
+        // Chỉ lưu ảnh, việc update DB JSON mispickJson đã được thực hiện ở confirmPicked
+        ApiResponse<Map<String, String>> response = pickListService.uploadMispickResolutionNote(taskId, photo, null, getUserId());
+        return ResponseEntity.ok(response);
     }
 
     @PutMapping("/pick-list/{taskId}/report-shortage")
