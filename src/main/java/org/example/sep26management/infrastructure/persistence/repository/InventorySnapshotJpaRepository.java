@@ -316,9 +316,9 @@ public interface InventorySnapshotJpaRepository
         @Transactional
         @Query(value = """
             INSERT INTO inventory_snapshot (warehouse_id, sku_id, lot_id, location_id, quantity, reserved_qty, last_updated)
-            VALUES (:warehouseId, :skuId, :lotId, :locationId, :qty, 0, NOW())
+            VALUES (:warehouseId, :skuId, :lotId, :locationId, GREATEST(0, :qty), 0, NOW())
             ON CONFLICT (warehouse_id, sku_id, lot_id_safe, location_id)
-            DO UPDATE SET quantity = inventory_snapshot.quantity + EXCLUDED.quantity, last_updated = NOW()
+            DO UPDATE SET quantity = GREATEST(0, inventory_snapshot.quantity + EXCLUDED.quantity), last_updated = NOW()
             """, nativeQuery = true)
         void upsertInventory(
                 @Param("warehouseId") Long warehouseId,
