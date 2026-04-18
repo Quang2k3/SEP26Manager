@@ -772,6 +772,9 @@ public class PickListService {
             Long lotId = shortage.getLotNumber() != null ? lotRepository.findBySkuIdAndLotNumber(sku.getSkuId(), shortage.getLotNumber()).map(l -> l.getLotId()).orElse(null) : currentItem.getLotId();
 
             // 1. Deduct kho vật lý (Hợp thức hoá mất hàng)
+            // Fix: Phải giải phóng (trừ) reserved_qty trước khi trừ quantity vật lý
+            // vì constraint DB yêu cầu reserved_qty <= quantity
+            snapshotRepository.incrementReservedByLocationAndSku(currentItem.getFromLocationId(), sku.getSkuId(), lotId, missingQty.negate());
             snapshotRepository.upsertInventory(warehouseId, sku.getSkuId(), lotId, currentItem.getFromLocationId(), missingQty.negate());
 
             txnRepository.save(InventoryTransactionEntity.builder()
