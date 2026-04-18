@@ -58,6 +58,7 @@ public class PickListService {
     private final com.cloudinary.Cloudinary cloudinary;
     private final IncidentJpaRepository incidentRepo;
     private final IncidentItemJpaRepository incidentItemRepo;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Transactional
     public ApiResponse<PickListResponse> generatePickList(
@@ -300,7 +301,7 @@ public class PickListService {
      * confirmDispatch sau này chỉ còn task → COMPLETED, SO → DISPATCHED.
      */
     @Transactional
-    public ApiResponse<PickListResponse> confirmPicked(Long taskId, Long userId, String ip, String ua) {
+    public ApiResponse<PickListResponse> confirmPicked(Long taskId, Long userId, String ip, String ua, String mispickJson) {
         try {
             log.info("confirmPicked: taskId={}, userId={}", taskId, userId);
 
@@ -406,6 +407,65 @@ public class PickListService {
                     soRepository.save(so);
                     log.info("SO {} → QC_SCAN after confirmPicked", so.getSoCode());
                 });
+            }
+
+            // 7) Xử lý Mispick → Ghi Incident OPEN cho Keeper
+            if (mispickJson != null && !mispickJson.isBlank()) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode mispickArr = objectMapper.readTree(mispickJson);
+                    if (mispickArr.isArray() && mispickArr.size() > 0) {
+                        for (com.fasterxml.jackson.databind.JsonNode node : mispickArr) {
+                            String barcode = node.path("barcode").asText();
+                            String lotNumber = node.path("lotNumber").asText();
+                            int mismatchQty = node.path("qty").asInt(1);
+                            String eType = node.path("errorType").asText("OVERAGE");
+                            String locs = node.path("locations").toString();
+
+                            String desc = "Keeper quét thừa hàng so với yêu cầu.\n"
+                                    + "- Lỗi: " + eType + "\n"
+                                    + "- SL dư: " + mismatchQty + "\n"
+                                    + "- Đề xuất cycle count tại: " + locs;
+
+                            String incidentCode = "INC-R-" + System.currentTimeMillis();
+                            IncidentEntity inc = IncidentEntity.builder()
+                                    .warehouseId(warehouseId)
+                                    .soId(task.getSoId()) // Gắn với Sales Order để truy vết
+                                    .incidentCode(incidentCode)
+                                    .incidentType(org.example.sep26management.application.enums.IncidentType.OVERAGE)
+                                    .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
+                                    .severity("LOW") 
+                                    .description(desc)
+                                    .reportedBy(userId) // Keeper tự làm tự chịu
+                                    .status("OPEN")
+                                    .build();
+                            
+                            IncidentEntity savedInc = incidentRepo.save(inc);
+
+                            // Tạo IncidentItem mapping
+                            IncidentItemEntity iItem = new IncidentItemEntity();
+                            iItem.setIncident(savedInc);
+                            
+                            // Map SKU
+                            if (!barcode.isBlank()) {
+                                skuRepository.findByBarcode(barcode).ifPresent(s -> {
+                                    iItem.setSkuId(s.getSkuId());
+                                    if (lotNumber != null && !lotNumber.isBlank() && !"null".equals(lotNumber)) {
+                                        lotRepository.findBySkuIdAndLotNumber(s.getSkuId(), lotNumber)
+                                                .ifPresent(l -> iItem.setLotNumber(l.getLotNumber()));
+                                    }
+                                });
+                            }
+                            iItem.setDamagedQty(BigDecimal.valueOf(mismatchQty));
+                            iItem.setReasonCode("OVERAGE");
+                            iItem.setNote(eType);
+                            incidentItemRepo.save(iItem);
+
+                            log.info("Created Overage Incident {} for Keeper {}", incidentCode, userId);
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.error("Failed to parse mispickJson for taskId={}", taskId, ex);
+                }
             }
 
             auditLogService.logAction(userId, "PICKING_CONFIRMED", "picking_tasks", taskId,
