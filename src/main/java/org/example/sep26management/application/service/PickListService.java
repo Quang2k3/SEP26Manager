@@ -800,7 +800,7 @@ public class PickListService {
                                 .warehouseId(warehouseId).skuId(sku.getSkuId()).lotId(snap.getLotId())
                                 .locationId(snap.getLocationId()).reservedQty(missingQty)
                                 .referenceTable(task.getSoId() != null ? "sales_orders" : "transfers")
-                                .referenceId(task.getSoId() != null ? task.getSoId() : task.getTransferId())
+                                .referenceId(task.getSoId() != null ? task.getSoId() : null)
                                 .status("OPEN")
                                 .build();
                         reservationRepository.save(res);
@@ -858,11 +858,6 @@ public class PickListService {
                     soRepository.findById(task.getSoId()).ifPresent(so -> {
                         so.setStatus("WAITING_STOCK");
                         soRepository.save(so);
-                    });
-                } else if (task.getTransferId() != null) {
-                    transferRepository.findById(task.getTransferId()).ifPresent(tr -> {
-                        tr.setStatus("WAITING_STOCK");
-                        transferRepository.save(tr);
                     });
                 }
             }
