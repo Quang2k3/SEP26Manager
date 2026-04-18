@@ -769,7 +769,7 @@ public class PickListService {
             if (sku == null) continue;
 
             BigDecimal missingQty = shortage.getMissingQty();
-            Long lotId = shortage.getLotNumber() != null ? lotRepository.findBySkuIdAndLotNumber(sku.getSkuId(), shortage.getLotNumber()).map(l -> l.getLotId()).orElse(null) : currentItem.getLotId();
+            Long lotId = currentItem.getLotId();
 
             // 1. Deduct kho vật lý (Hợp thức hoá mất hàng)
             // Fix: Phải giải phóng (trừ) reserved_qty trước khi trừ quantity vật lý
