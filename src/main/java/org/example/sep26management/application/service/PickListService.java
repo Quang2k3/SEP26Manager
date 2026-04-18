@@ -760,10 +760,6 @@ public class PickListService {
         int healedCount = 0;
         int failedCount = 0;
 
-        // Tạo 1 ticket (PickingTaskEntity) mới cho toàn bộ các item sẽ được lấy bù.
-        // Điều này giúp Picker hiện tại không bị kẹt lại task, mà task bù sẽ do nhân viên rảnh nhận sau.
-        PickingTaskEntity compensationTask = null;
-
         for (var shortage : request.getShortages()) {
             PickingTaskItemEntity currentItem = pickingTaskItemRepository.findById(shortage.getTaskItemId())
                     .orElse(null);
@@ -843,20 +839,8 @@ public class PickListService {
                                 .build();
                         reservationRepository.save(res);
 
-                        if (compensationTask == null) {
-                            compensationTask = PickingTaskEntity.builder()
-                                    .warehouseId(warehouseId)
-                                    .soId(task.getSoId())
-                                    .shipmentId(task.getShipmentId())
-                                    .status("OPEN")
-                                    .priority(task.getPriority() != null ? task.getPriority() : 3)
-                                    .assignedTo(null) // Để bất khả kiến cho nhân viên rảnh tiếp theo
-                                    .build();
-                            pickingTaskRepository.save(compensationTask);
-                        }
-
                         PickingTaskItemEntity newItem = PickingTaskItemEntity.builder()
-                                .pickingTaskId(compensationTask.getPickingTaskId())
+                                .pickingTaskId(taskId)
                                 .skuId(sku.getSkuId())
                                 .lotId(snap.getLotId())
                                 .fromLocationId(snap.getLocationId())
@@ -865,7 +849,7 @@ public class PickListService {
                                 .build();
                         pickingTaskItemRepository.save(newItem);
 
-                        log.info("Auto-Heal Allocated: SKU {} (+{}) at Loc {} into Task {}", sku.getSkuCode(), missingQty, snap.getLocationId(), compensationTask.getPickingTaskId());
+                        log.info("Auto-Heal Allocated: SKU {} (+{}) at Loc {} into current Task {}", sku.getSkuCode(), missingQty, snap.getLocationId(), taskId);
                         healedCount++;
                         allocated = true;
                     }
