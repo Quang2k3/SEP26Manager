@@ -445,15 +445,23 @@ public class PickListService {
                             IncidentItemEntity iItem = new IncidentItemEntity();
                             iItem.setIncident(savedInc);
                             
-                            // Map SKU
+                            // Map SKU: Try barcode first, fallback to skuCode
                             if (!barcode.isBlank()) {
-                                skuRepository.findByBarcode(barcode).ifPresent(s -> {
-                                    iItem.setSkuId(s.getSkuId());
+                                org.example.sep26management.infrastructure.persistence.entity.SkuEntity skuEnt = 
+                                    skuRepository.findByBarcode(barcode)
+                                    .orElseGet(() -> skuRepository.findBySkuCode(barcode).orElse(null));
+                                
+                                if (skuEnt != null) {
+                                    iItem.setSkuId(skuEnt.getSkuId());
                                     if (lotNumber != null && !lotNumber.isBlank() && !"null".equals(lotNumber)) {
-                                        lotRepository.findBySkuIdAndLotNumber(s.getSkuId(), lotNumber)
+                                        lotRepository.findBySkuIdAndLotNumber(skuEnt.getSkuId(), lotNumber)
                                                 .ifPresent(l -> iItem.setLotNumber(l.getLotNumber()));
                                     }
-                                });
+                                } else {
+                                    throw new BusinessException("Không tìm thấy sản phẩm với mã: " + barcode);
+                                }
+                            } else {
+                                throw new BusinessException("Thiếu thông tin mã vạch trong danh sách hàng thừa.");
                             }
                             iItem.setDamagedQty(BigDecimal.valueOf(mismatchQty));
                             iItem.setReasonCode("OVERAGE");
@@ -463,8 +471,11 @@ public class PickListService {
                             log.info("Created Overage Incident {} for Keeper {}", incidentCode, userId);
                         }
                     }
+                } catch (BusinessException be) {
+                    throw be;
                 } catch (Exception ex) {
                     log.error("Failed to parse mispickJson for taskId={}", taskId, ex);
+                    throw new BusinessException("Lỗi dữ liệu hàng thừa: " + ex.getMessage());
                 }
             }
 

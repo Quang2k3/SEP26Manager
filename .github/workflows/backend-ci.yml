@@ -73,7 +73,7 @@ jobs:
 
       - name: Verify deployment
         run: |
-          Start-Sleep -Seconds 30
+          Start-Sleep -Seconds 10
           try {
             $response = Invoke-WebRequest -Uri http://localhost:8080/actuator/health -UseBasicParsing
             if ($response.StatusCode -eq 200) {
