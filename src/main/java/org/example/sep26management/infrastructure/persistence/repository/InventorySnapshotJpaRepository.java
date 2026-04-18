@@ -247,7 +247,7 @@ public interface InventorySnapshotJpaRepository
               AND l.location_type = 'BIN'
             GROUP BY l.location_code, l.location_id, l.max_weight_kg
             ORDER BY (
-                COALESCE((SELECT SUM(s2.quantity * sk2.weight) 
+                COALESCE((SELECT SUM(s2.quantity * sk2.weight_per_carton_kg) 
                  FROM inventory_snapshot s2 
                  JOIN skus sk2 ON s2.sku_id = sk2.sku_id 
                  WHERE s2.location_id = l.location_id), 0) 
