@@ -409,74 +409,9 @@ public class PickListService {
                 });
             }
 
-            // 7) Xử lý Mispick → Ghi Incident OPEN cho Keeper
-            if (mispickJson != null && !mispickJson.isBlank()) {
-                try {
-                    com.fasterxml.jackson.databind.JsonNode mispickArr = objectMapper.readTree(mispickJson);
-                    if (mispickArr.isArray() && mispickArr.size() > 0) {
-                        for (com.fasterxml.jackson.databind.JsonNode node : mispickArr) {
-                            String barcode = node.path("barcode").asText();
-                            String lotNumber = node.path("lotNumber").asText();
-                            int mismatchQty = node.path("qty").asInt(1);
-                            String eType = node.path("errorType").asText("OVERAGE");
-                            String locs = node.path("locations").toString();
-
-                            String desc = "Keeper quét thừa hàng so với yêu cầu.\n"
-                                    + "- Lỗi: " + eType + "\n"
-                                    + "- SL dư: " + mismatchQty + "\n"
-                                    + "- Đề xuất cycle count tại: " + locs;
-
-                            String incidentCode = "INC-R-" + System.currentTimeMillis();
-                            IncidentEntity inc = IncidentEntity.builder()
-                                    .warehouseId(warehouseId)
-                                    .soId(task.getSoId()) // Gắn với Sales Order để truy vết
-                                    .incidentCode(incidentCode)
-                                    .incidentType(org.example.sep26management.application.enums.IncidentType.OVERAGE)
-                                    .category(org.example.sep26management.application.enums.IncidentCategory.QUALITY)
-                                    .severity("LOW") 
-                                    .description(desc)
-                                    .reportedBy(userId) // Keeper tự làm tự chịu
-                                    .status("OPEN")
-                                    .build();
-                            
-                            IncidentEntity savedInc = incidentRepo.save(inc);
-
-                            // Tạo IncidentItem mapping
-                            IncidentItemEntity iItem = new IncidentItemEntity();
-                            iItem.setIncident(savedInc);
-                            
-                            // Map SKU: Try barcode first, fallback to skuCode
-                            if (!barcode.isBlank()) {
-                                org.example.sep26management.infrastructure.persistence.entity.SkuEntity skuEnt = 
-                                    skuRepository.findByBarcode(barcode)
-                                    .orElseGet(() -> skuRepository.findBySkuCode(barcode).orElse(null));
-                                
-                                if (skuEnt != null) {
-                                    iItem.setSkuId(skuEnt.getSkuId());
-                                    if (lotNumber != null && !lotNumber.isBlank() && !"null".equals(lotNumber)) {
-                                        lotRepository.findBySkuIdAndLotNumber(skuEnt.getSkuId(), lotNumber)
-                                                .ifPresent(l -> iItem.setLotNumber(l.getLotNumber()));
-                                    }
-                                } else {
-                                    throw new BusinessException("Không tìm thấy sản phẩm với mã: " + barcode);
-                                }
-                            } else {
-                                throw new BusinessException("Thiếu thông tin mã vạch trong danh sách hàng thừa.");
-                            }
-                            iItem.setDamagedQty(BigDecimal.valueOf(mismatchQty));
-                            iItem.setReasonCode("OVERAGE");
-                            iItem.setNote(eType);
-                            incidentItemRepo.save(iItem);
-
-                            log.info("Created Overage Incident {} for Keeper {}", incidentCode, userId);
-                        }
-                    }
-                } catch (BusinessException be) {
-                    throw be;
-                } catch (Exception ex) {
-                    log.error("Failed to parse mispickJson for taskId={}", taskId, ex);
-                    throw new BusinessException("Lỗi dữ liệu hàng thừa: " + ex.getMessage());
-                }
+            // 7) Xử lý Mispick → Hiện tại frontend đã in phiếu ra giấy để xử lý bằng tay ngoài thực tế. BE không tự động tạo incident nữa.
+            if (mispickJson != null && !mispickJson.isBlank() && !mispickJson.equals("[]")) {
+                log.info("Mispick info received for taskId={}, but automated Incident creation is disabled. Data: {}", taskId, mispickJson);
             }
 
             auditLogService.logAction(userId, "PICKING_CONFIRMED", "picking_tasks", taskId,
