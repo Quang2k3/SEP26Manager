@@ -630,17 +630,21 @@ public class OutboundController {
     public ResponseEntity<ApiResponse<Map<String, String>>> uploadMispickPhoto(
             @PathVariable Long taskId,
             @RequestParam("photo") org.springframework.web.multipart.MultipartFile photo) {
-        
-        // 1. Đọc Mispick Queue từ Redis
-        String mispickJson = stringRedisTemplate.opsForValue().get("OUTBOUND:MISPICK:" + taskId);
-        
-        // 2. Chuyển xuống Service xử lý Auto-Relocation + Upload Ảnh
-        ApiResponse<Map<String, String>> response = pickListService.uploadMispickResolutionNote(taskId, photo, mispickJson);
-        
-        // 3. Xoá Cache Redis
-        stringRedisTemplate.delete("OUTBOUND:MISPICK:" + taskId);
-        
-        return ResponseEntity.ok(response);
+        try {
+            // 1. Đọc Mispick Queue từ Redis
+            String mispickJson = stringRedisTemplate.opsForValue().get("OUTBOUND:MISPICK:" + taskId);
+            
+            // 2. Chuyển xuống Service xử lý Auto-Relocation + Upload Ảnh
+            ApiResponse<Map<String, String>> response = pickListService.uploadMispickResolutionNote(taskId, photo, mispickJson);
+            
+            // 3. Xoá Cache Redis
+            stringRedisTemplate.delete("OUTBOUND:MISPICK:" + taskId);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Lỗi uploadMispickPhoto taskId={}: {}", taskId, e.getMessage(), e);
+            return ResponseEntity.status(500).body(ApiResponse.error("Lỗi Server 500: " + e.getMessage()));
+        }
     }
 
     @PutMapping("/pick-list/{taskId}/report-shortage")

@@ -626,6 +626,10 @@ public class PickListService {
             throw new BusinessException("Vui lòng chọn ảnh kiện hàng bị lấy nhầm.");
 
         try {
+            if (cloudinary == null) {
+                throw new BusinessException("Lỗi 500: Cloudinary bean is null. Admin chưa cấu hình API_KEY.");
+            }
+            
             String publicId = "mispick_notes/task_" + taskId + "_" + System.currentTimeMillis();
 
             @SuppressWarnings("unchecked")
