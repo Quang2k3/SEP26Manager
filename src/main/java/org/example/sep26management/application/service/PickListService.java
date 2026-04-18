@@ -760,6 +760,10 @@ public class PickListService {
         int healedCount = 0;
         int failedCount = 0;
 
+        // Tạo 1 ticket (PickingTaskEntity) mới cho toàn bộ các item sẽ được lấy bù.
+        // Điều này giúp Picker hiện tại không bị kẹt lại task, mà task bù sẽ do nhân viên rảnh nhận sau.
+        PickingTaskEntity compensationTask = null;
+
         for (var shortage : request.getShortages()) {
             PickingTaskItemEntity currentItem = pickingTaskItemRepository.findById(shortage.getTaskItemId())
                     .orElse(null);
@@ -818,7 +822,10 @@ public class PickListService {
 
                     if (shortage.getLotNumber() != null && snap.getLotId() != null) {
                         org.example.sep26management.infrastructure.persistence.entity.InventoryLotEntity lotEnt = lotRepository.findById(snap.getLotId()).orElse(null);
-                        if (lotEnt == null || !shortage.getLotNumber().equals(lotEnt.getLotNumber())) continue;
+                        // Khi quét lỗi thiếu, Frontend có truyền shortage.getLotNumber(). Tuy nhiên để dự phòng Lot đổi thì vẫn cho chạy bình thường.
+                        if (lotEnt != null && !shortage.getLotNumber().equals(lotEnt.getLotNumber())) {
+                            // Cố gắng tìm đúng lô (nếu user yêu cầu tìm lô)
+                        }
                     }
 
                     BigDecimal available = snap.getQuantity().subtract(snap.getReservedQty() != null ? snap.getReservedQty() : BigDecimal.ZERO);
@@ -836,8 +843,20 @@ public class PickListService {
                                 .build();
                         reservationRepository.save(res);
 
+                        if (compensationTask == null) {
+                            compensationTask = PickingTaskEntity.builder()
+                                    .warehouseId(warehouseId)
+                                    .soId(task.getSoId())
+                                    .shipmentId(task.getShipmentId())
+                                    .status("OPEN")
+                                    .priority(task.getPriority() != null ? task.getPriority() : 3)
+                                    .assignedTo(null) // Để bất khả kiến cho nhân viên rảnh tiếp theo
+                                    .build();
+                            pickingTaskRepository.save(compensationTask);
+                        }
+
                         PickingTaskItemEntity newItem = PickingTaskItemEntity.builder()
-                                .pickingTaskId(taskId)
+                                .pickingTaskId(compensationTask.getPickingTaskId())
                                 .skuId(sku.getSkuId())
                                 .lotId(snap.getLotId())
                                 .fromLocationId(snap.getLocationId())
@@ -846,7 +865,7 @@ public class PickListService {
                                 .build();
                         pickingTaskItemRepository.save(newItem);
 
-                        log.info("Auto-Heal Allocated: SKU {} (+{}) at Loc {}", sku.getSkuCode(), missingQty, snap.getLocationId());
+                        log.info("Auto-Heal Allocated: SKU {} (+{}) at Loc {} into Task {}", sku.getSkuCode(), missingQty, snap.getLocationId(), compensationTask.getPickingTaskId());
                         healedCount++;
                         allocated = true;
                     }
