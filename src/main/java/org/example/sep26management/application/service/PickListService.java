@@ -665,46 +665,10 @@ public class PickListService {
                         Object qtyObj = entry.get("qty");
                         java.math.BigDecimal qty = qtyObj != null ? new java.math.BigDecimal(qtyObj.toString()) : java.math.BigDecimal.ONE;
 
-                        // 1. Tìm SKU
-                        org.example.sep26management.infrastructure.persistence.entity.SkuEntity sku = skuRepository.findBySkuCode(barcode).orElse(null);
-                        if (sku == null) {
-                            sku = skuRepository.findByBarcode(barcode).orElse(null);
-                        }
-                        if (sku == null) continue;
-
-                        Long warehouseId = task.getWarehouseId();
-
-                        // 2. Tìm Optimal Bin Target để cất (Thêm +1)
-                        List<String> optimalBinCodes = snapshotRepository.findOptimalBinLocationByWarehouseAndSkuAndLot(
-                                warehouseId, sku.getSkuId(), lotNumber);
-
-                        if (!optimalBinCodes.isEmpty()) {
-                            String targetBinCode = optimalBinCodes.get(0);
-                            org.example.sep26management.infrastructure.persistence.entity.LocationEntity targetLoc = 
-                                    locationRepository.findByLocationCode(targetBinCode).orElse(null);
-                            
-                            if (targetLoc != null) {
-                                Long lotId = lotNumber != null ? lotRepository.findBySkuIdAndLotNumber(sku.getSkuId(), lotNumber).map(l -> l.getLotId()).orElse(null) : null;
-                                
-                                // Hệ thống GHI NHẬN TĂNG (Found Stock / Suspense Accounting) tại Bin cất mới.
-                                // Không tự ý trừ ở bất kì Bin nào khác để bảo Toàn vật lý. 
-                                // Nếu kho bị hụt ở Bin cũ, cơ chế Báo Cáo Shortage của thủ kho sẽ tự trừ (-1).
-                                snapshotRepository.upsertInventory(warehouseId, sku.getSkuId(), lotId, targetLoc.getLocationId(), qty);
-                                
-                                // Ghi Audit Log - Positive Adjustment (Mispick Found)
-                                txnRepository.save(org.example.sep26management.infrastructure.persistence.entity.InventoryTransactionEntity.builder()
-                                        .warehouseId(warehouseId).skuId(sku.getSkuId()).lotId(lotId)
-                                        .locationId(targetLoc.getLocationId()).quantity(qty)
-                                        .txnType("ADJUSTMENT")
-                                        .referenceTable("picking_tasks").referenceId(taskId)
-                                        .reasonCode("MISPICK_FOUND_ADJUSTMENT")
-                                        .createdBy(userId != null ? userId : (task.getAssignedTo() == null ? 1L : task.getAssignedTo()))
-                                        .build());
-                                        
-                                log.info("Suspense Accounting (Mispick): SKU {} (+{}) at Target: {}", 
-                                        sku.getSkuCode(), qty, targetLoc.getLocationId());
-                            }
-                        }
+                        // Không tự ý cộng/trừ ở bất kì Bin nào để bảo toàn số liệu cho đợt kiểm kê.
+                        // Yêu cầu: Trưởng ca sẽ lấy danh sách các Bin chứa SKU này để đi cycle count.
+                        log.info("Mispick Compliance Record: Barcode {} (qty {}). No automated inventory changes applied. Awaiting manual cycle count & put-back.", 
+                                barcode, qty);
                     }
                 } catch (Exception ex) {
                     log.error("Failed to parse or execute auto-relocation for mispickJson: {}", ex.getMessage(), ex);
