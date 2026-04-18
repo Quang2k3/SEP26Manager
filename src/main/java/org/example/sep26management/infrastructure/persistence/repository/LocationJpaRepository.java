@@ -22,6 +22,8 @@ public interface LocationJpaRepository extends JpaRepository<LocationEntity, Lon
 
         Optional<LocationEntity> findByZoneIdAndLocationCode(Long zoneId, String locationCode);
 
+        Optional<LocationEntity> findByLocationCode(String locationCode);
+
         /** BR-LOC-13: check for active child locations before deactivation */
         boolean existsByParentLocationIdAndActiveTrue(Long parentLocationId);
 
