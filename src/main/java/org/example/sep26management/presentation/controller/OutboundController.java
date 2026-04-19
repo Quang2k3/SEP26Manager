@@ -250,9 +250,9 @@ public class OutboundController {
 
     @PostMapping("/sales-orders/{soId}/create-backorder-grn")
     @PreAuthorize("hasRole('KEEPER')")
-    @Operation(summary = "Tạo phiếu nhập hàng bù nhanh (Backorder GRN)", 
-               description = "Tạo tự động 1 đơn GRN DRAFT chứa các mặt hàng đang thiếu cho Sales Order hiện tại. "
-                           + "Chỉ dùng khi đơn hàng ở trạng thái WAITING_STOCK.")
+    @Operation(summary = "Tạo phiếu nhập hàng bù nhanh (Backorder GRN)",
+            description = "Tạo tự động 1 đơn GRN DRAFT chứa các mặt hàng đang thiếu cho Sales Order hiện tại. "
+                    + "Chỉ dùng khi đơn hàng ở trạng thái WAITING_STOCK.")
     public ResponseEntity<ApiResponse<Map<String, Object>>> createBackorderGrn(
             @PathVariable Long soId,
             HttpServletRequest http) {
@@ -340,7 +340,7 @@ public class OutboundController {
             description = "Chuyển picking task OPEN/IN_PROGRESS → PICKED.")
     public ResponseEntity<ApiResponse<PickListResponse>> confirmPicked(
             @PathVariable Long taskId, HttpServletRequest http) {
-                    
+
         return ResponseEntity.ok(pickListService.confirmPicked(taskId, getUserId(), getIp(http), ua(http)));
     }
 
@@ -410,9 +410,10 @@ public class OutboundController {
                                 + " vừa được Keeper khác nhận. Vui lòng thử lại."));
             }
             try {
-                // [FIX] Thêm QC vào picking_claimed — QC cần biết Keeper đã nhận task
+                // [FIX] Gửi soId (không phải taskId) làm referenceId để FE gọi đúng GET /outbound/{soId}
+                Long soIdForNotif = task.getSoId();
                 notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER", "QC"},
-                        "picking_claimed", taskId, "Task #" + taskId,
+                        "picking_claimed", soIdForNotif, "Task #" + taskId,
                         "Keeper userId=" + userId + " bắt đầu picking");
             } catch (Exception ignored) {}
             log.info("[PickingClaim] Keeper userId={} claimed taskId={}", userId, taskId);

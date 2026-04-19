@@ -91,9 +91,10 @@ public class OutboundQcService {
             } else {
                 log.info("[QcClaim-OB] QC userId={} claimed taskId={}", userId, taskId);
                 try {
-                    // [FIX] Thêm KEEPER vào danh sách notify khi QC nhận task
+                    // [FIX] Gửi soId làm referenceId để FE gọi GET /outbound/{soId} đúng, thêm KEEPER
+                    Long soIdForNotif = task.getSoId();
                     notificationService.notifyRoles(new String[]{"QC", "MANAGER", "KEEPER"},
-                            "outbound_qc_claimed", taskId, "Task #" + taskId,
+                            "outbound_qc_claimed", soIdForNotif, "Task #" + taskId,
                             "QC userId=" + userId + " bắt đầu kiểm định outbound");
                 } catch (Exception ignored) {}
             }
@@ -390,8 +391,10 @@ public class OutboundQcService {
         // Release QC claim — task đã finalize, QC khác có thể xem lại nếu cần
         try { pickingTaskRepository.releaseQcAssignment(taskId, userId); } catch (Exception ignored) {}
         try {
+            // [FIX] Gửi soId (task.getSoId()) làm referenceId để FE gọi GET /outbound/{soId} đúng
+            Long soIdForQcRelease = task.getSoId();
             notificationService.notifyRoles(new String[]{"QC", "MANAGER", "KEEPER"},
-                    "outbound_qc_released", taskId, "Task #" + taskId,
+                    "outbound_qc_released", soIdForQcRelease, "Task #" + taskId,
                     "QC hoàn thành kiểm định outbound");
         } catch (Exception ignored) {}
 
@@ -618,18 +621,20 @@ public class OutboundQcService {
             so.setUpdatedAt(LocalDateTime.now());
             salesOrderRepository.save(so);
             log.info("SO {} → APPROVED (has RETURN_SCRAP: waiting for re-allocate)", so.getSoCode());
-            // [FIX] Gửi đúng event "outbound_approved" (status APPROVED) để FE cập nhật row
-            notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER", "QC"}, "outbound_approved",
+            notificationService.notifyRoles(new String[]{"KEEPER"}, "outbound_approved",
                     so.getSoId(), so.getSoCode(), "Có hàng lỗi bị trả lại — Phân bổ tồn kho lại để lấy hàng bù");
+            notificationService.notifyRoles(new String[]{"MANAGER", "QC"}, "outbound_approved",
+                    so.getSoId(), so.getSoCode(), "Đã duyệt xử lý một phần / toàn bộ RETURN_SCRAP — Keeper cần re-allocate");
         } else {
             // All items ACCEPTED
             so.setStatus("QC_PASSED");
             so.setUpdatedAt(LocalDateTime.now());
             salesOrderRepository.save(so);
             log.info("SO {} → QC_PASSED (all items ACCEPTED damage)", so.getSoCode());
-            // [FIX] Gửi đúng event "qc_outbound_passed" tới tất cả roles
-            notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER", "QC"}, "qc_outbound_passed",
+            notificationService.notifyRoles(new String[]{"KEEPER"}, "qc_outbound_passed",
                     so.getSoId(), so.getSoCode(), "QC đạt (bao gồm phần lỗi chấp nhận xuất) — Sẵn sàng xuất kho");
+            notificationService.notifyRoles(new String[]{"MANAGER", "QC"}, "outbound_approved",
+                    so.getSoId(), so.getSoCode(), "Chấp nhận toàn bộ hàng lỗi — Sẵn sàng xuất phần tốt");
         }
 
         incident.setStatus("RESOLVED");
@@ -848,8 +853,7 @@ public class OutboundQcService {
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
-                // [FIX] Gửi đúng event "outbound_waiting_stock" để FE tab ALERT cập nhật realtime
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_waiting_stock",
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
                         so.getSoId(), so.getSoCode(), "Chờ nhập bù hàng — tạm giữ đơn");
             }
             case "CLOSE_SHORT" -> {
@@ -858,8 +862,7 @@ public class OutboundQcService {
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → APPROVED (CLOSE_SHORT, re-Allocate ready)", so.getSoCode());
-                // [FIX] Gửi đúng event "outbound_shortage_resolved" để FE cập nhật realtime
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_shortage_resolved",
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
                         so.getSoId(), so.getSoCode(), "Đã cắt số lượng thiếu — cần phân bổ lại");
             }
             default -> throw new BusinessException(
