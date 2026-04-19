@@ -64,4 +64,8 @@ public class IncidentItemEntity {
 
     @Column(name = "expiry_date")
     private LocalDate expiryDate;
+
+    // [FIX VERDICT] Lưu phán quyết của Manager theo từng item: ACCEPT | RETURN_SCRAP
+    @Column(name = "resolved_action", length = 50)
+    private String resolvedAction;
 }

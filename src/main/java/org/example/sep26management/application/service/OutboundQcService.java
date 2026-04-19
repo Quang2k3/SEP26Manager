@@ -91,10 +91,8 @@ public class OutboundQcService {
             } else {
                 log.info("[QcClaim-OB] QC userId={} claimed taskId={}", userId, taskId);
                 try {
-                    // [FIX] Gửi soId làm referenceId để FE gọi GET /outbound/{soId} đúng, thêm KEEPER
-                    Long soIdForNotif = task.getSoId();
-                    notificationService.notifyRoles(new String[]{"QC", "MANAGER", "KEEPER"},
-                            "outbound_qc_claimed", soIdForNotif, "Task #" + taskId,
+                    notificationService.notifyRoles(new String[]{"QC", "MANAGER"},
+                            "outbound_qc_claimed", taskId, "Task #" + taskId,
                             "QC userId=" + userId + " bắt đầu kiểm định outbound");
                 } catch (Exception ignored) {}
             }
@@ -391,10 +389,8 @@ public class OutboundQcService {
         // Release QC claim — task đã finalize, QC khác có thể xem lại nếu cần
         try { pickingTaskRepository.releaseQcAssignment(taskId, userId); } catch (Exception ignored) {}
         try {
-            // [FIX] Gửi soId (task.getSoId()) làm referenceId để FE gọi GET /outbound/{soId} đúng
-            Long soIdForQcRelease = task.getSoId();
             notificationService.notifyRoles(new String[]{"QC", "MANAGER", "KEEPER"},
-                    "outbound_qc_released", soIdForQcRelease, "Task #" + taskId,
+                    "outbound_qc_released", taskId, "Task #" + taskId,
                     "QC hoàn thành kiểm định outbound");
         } catch (Exception ignored) {}
 
@@ -609,6 +605,9 @@ public class OutboundQcService {
             } else {
                 throw new BusinessException("Invalid action: " + act + " for item " + item.getIncidentItemId());
             }
+            // [FIX VERDICT] Lưu phán quyết của Manager vào từng item để FE hiển thị đúng phán quyết
+            item.setResolvedAction(act.toUpperCase());
+            incidentItemRepository.save(item);
         }
 
         // Apply actions to inventory and orders

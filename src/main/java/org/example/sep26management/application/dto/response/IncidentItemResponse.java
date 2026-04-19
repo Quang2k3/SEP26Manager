@@ -49,4 +49,8 @@ public class IncidentItemResponse {
 
     @Schema(description = "Hạn sử dụng", example = "2027-04-07")
     private LocalDate expiryDate;
+
+    // [FIX VERDICT] Phán quyết Manager đã lưu vào DB: ACCEPT | RETURN_SCRAP
+    @Schema(description = "Phán quyết của Manager: ACCEPT | RETURN_SCRAP")
+    private String resolvedAction;
 }
