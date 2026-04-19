@@ -220,7 +220,7 @@ public class AllocateStockService {
                         so.setStatus("ALLOCATED");
                         soRepository.save(so);
                         log.info("SO {} status → ALLOCATED", so.getSoCode());
-                        // ── [FIX REALTIME] Dùng đúng event type outbound_allocated ──────
+                        // [FIX] Gửi đúng event "outbound_allocated" để FE nhận và cập nhật status ALLOCATED
                         notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_allocated",
                                 so.getSoId(), so.getSoCode(), "Đã phân bổ tồn kho — cần tạo Pick List");
                     }
@@ -230,7 +230,7 @@ public class AllocateStockService {
                     if ("APPROVED".equals(t.getStatus())) {
                         t.setStatus("ALLOCATED");
                         transferRepository.save(t);
-                        // ── [FIX REALTIME] Dùng đúng event type outbound_allocated ──────
+                        // [FIX] Gửi đúng event "outbound_allocated" để FE nhận và cập nhật status ALLOCATED
                         notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_allocated",
                                 t.getTransferId(), t.getTransferCode(), "Transfer đã phân bổ — cần tạo Pick List");
                     }

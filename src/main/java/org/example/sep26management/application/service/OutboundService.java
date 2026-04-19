@@ -125,20 +125,16 @@ public class OutboundService {
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "SALES_ORDER", saved.getSoId(),
                 "Sales order " + code + " created DRAFT", ip, ua);
 
-        // ── [FIX REALTIME] Realtime: notify tất cả Keeper + Manager list refresh khi có DRAFT mới ─
+        // ── Realtime: notify Keeper (người tạo) biết lệnh xuất DRAFT vừa được tạo ──────────
         String customerName = customer != null ? customer.getCustomerName() : "—";
         final String soCode = code;
         final Long soId = saved.getSoId();
         final String custName = customerName;
-        // 1) Notify user cụ thể (cho NotificationBell của người tạo)
         userRepository.findById(createdBy).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "outbound_created",
                         soId, soCode, custName + " — Lệnh xuất mới"));
-        // 2) Broadcast tới role KEEPER (để tất cả Keeper nhìn thấy row mới realtime)
-        notificationService.notifyRole("KEEPER", "outbound_created",
-                soId, soCode, custName + " — Lệnh xuất mới");
-        // 3) Broadcast tới role MANAGER (dashboard/manager-list cũng cần biết có DRAFT mới)
-        notificationService.notifyRole("MANAGER", "outbound_created",
+        // [FIX] Broadcast tới tất cả KEEPER và MANAGER để list realtime thêm row mới
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "outbound_created",
                 soId, soCode, custName + " — Lệnh xuất mới");
 
         return buildSalesOrderResponse(saved, items, customer, warnings);
@@ -190,7 +186,7 @@ public class OutboundService {
         auditLogService.logAction(createdBy, "OUTBOUND_CREATED", "TRANSFER", saved.getTransferId(),
                 "Internal transfer " + code + " created DRAFT", ip, ua);
 
-        // ── [FIX REALTIME] Realtime: notify Keeper + Manager list refresh khi có DRAFT mới ─
+        // ── Realtime: notify Keeper (người tạo) biết lệnh chuyển kho vừa được tạo ────
         String destName = destWarehouse != null ? destWarehouse.getWarehouseName() : "—";
         final Long transferId = saved.getTransferId();
         final String transferCode = code;
@@ -198,9 +194,8 @@ public class OutboundService {
         userRepository.findById(createdBy).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "outbound_created",
                         transferId, transferCode, transferSubtitle));
-        notificationService.notifyRole("KEEPER", "outbound_created",
-                transferId, transferCode, transferSubtitle);
-        notificationService.notifyRole("MANAGER", "outbound_created",
+        // [FIX] Broadcast tới KEEPER và MANAGER để list realtime thêm row mới
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "outbound_created",
                 transferId, transferCode, transferSubtitle);
 
         return buildTransferResponse(saved, items, destWarehouse, warnings);
@@ -397,15 +392,11 @@ public class OutboundService {
         auditLogService.logAction(userId, "OUTBOUND_SUBMITTED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " submitted for approval", ip, ua);
 
-        // ── [FIX REALTIME] notify MANAGER + KEEPER để 2 list đều refresh realtime ───
+        // ── Realtime: notify MANAGER có lệnh xuất mới chờ duyệt ─────────────
         CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
-        final String submitSubtitle = custForNotif != null ? custForNotif.getCustomerName() : "—";
-        // 1) MANAGER: có lệnh xuất mới chờ duyệt
         notificationService.notifyRole("MANAGER", "outbound_pending_approval",
-                soId, so.getSoCode(), submitSubtitle);
-        // 2) KEEPER: list của người submit (và các Keeper khác) phải refresh row DRAFT → PENDING_APPROVAL
-        notificationService.notifyRole("KEEPER", "outbound_pending_approval",
-                soId, so.getSoCode(), submitSubtitle);
+                soId, so.getSoCode(),
+                custForNotif != null ? custForNotif.getCustomerName() : "—");
 
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_SUBMITTED_SUCCESS,
@@ -443,6 +434,10 @@ public class OutboundService {
                 "Internal transfer " + transfer.getTransferCode() + " auto-approved", ip, ua);
 
         WarehouseEntity dest = warehouseRepository.findById(transfer.getToWarehouseId()).orElse(null);
+        // [FIX] Notify tất cả roles biết transfer đã auto-approved và đã allocate
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "outbound_approved",
+                transferId, transfer.getTransferCode(),
+                (dest != null ? dest.getWarehouseName() : "—") + " — Transfer đã duyệt tự động, cần tạo Pick List");
         return ApiResponse.success(MessageConstants.OUTBOUND_TRANSFER_AUTO_APPROVED,
                 buildTransferResponse(transfer, items, dest, null));
     }
@@ -491,24 +486,16 @@ public class OutboundService {
         auditLogService.logAction(managerId, "OUTBOUND_APPROVED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " approved → APPROVED, chờ Keeper Allocate", ip, ua);
 
-        // ── [FIX REALTIME] notify KEEPER + MANAGER + QC để tất cả list đều refresh ───────
+        // ── Realtime: notify KEEPER đơn đã được duyệt, cần Allocate tồn kho ──
         CustomerEntity custForNotif = customerRepository.findById(so.getCustomerId()).orElse(null);
         final String approveSubtitle = custForNotif != null ? custForNotif.getCustomerName() : "—";
         final Long approvedSoId = soId;
         final String approvedSoCode = so.getSoCode();
-        // 1) Notify user cụ thể (Keeper đã tạo) → bell + toast
         userRepository.findById(so.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "outbound_approved",
                         approvedSoId, approvedSoCode, approveSubtitle));
-        // 2) Broadcast KEEPER → list của tất cả Keeper refresh PENDING_APPROVAL → APPROVED
         notificationService.notifyRole("KEEPER", "outbound_approved",
                 approvedSoId, approvedSoCode, approveSubtitle + " — đã duyệt, cần Phân Bổ Tồn Kho");
-        // 3) Broadcast MANAGER → list của Manager (người duyệt và Manager khác) refresh row
-        notificationService.notifyRole("MANAGER", "outbound_approved",
-                approvedSoId, approvedSoCode, approveSubtitle + " — đã duyệt");
-        // 4) Broadcast QC → QC list bắt đầu theo dõi đơn sẽ vào PICKING/QC sớm
-        notificationService.notifyRole("QC", "outbound_approved",
-                approvedSoId, approvedSoCode, approveSubtitle + " — đã duyệt");
 
         CustomerEntity customer = customerRepository.findById(so.getCustomerId()).orElse(null);
         return ApiResponse.success(MessageConstants.OUTBOUND_APPROVED_SUCCESS,
@@ -545,18 +532,16 @@ public class OutboundService {
         auditLogService.logAction(managerId, "OUTBOUND_REJECTED", "SALES_ORDER", soId,
                 "Sales order " + so.getSoCode() + " rejected. Reason: " + rejectionReason, ip, ua);
 
-        // ── [FIX REALTIME] notify KEEPER + MANAGER + QC để tất cả list refresh ────────────
+        // ── Realtime: notify KEEPER (người tạo) + broadcast tới role KEEPER ──────────────────
         CustomerEntity custForReject = customerRepository.findById(so.getCustomerId()).orElse(null);
         final String rejectSubtitle = (custForReject != null ? custForReject.getCustomerName() : "—")
                 + " — " + rejectionReason;
         final Long rejectedSoId = soId;
         final String rejectedSoCode = so.getSoCode();
-        // 1) Notify user cụ thể (Keeper đã tạo)
         userRepository.findById(so.getCreatedBy()).ifPresent(u ->
                 notificationService.notifyUser(u.getEmail(), "outbound_rejected",
                         rejectedSoId, rejectedSoCode, rejectSubtitle));
-        // 2) Broadcast KEEPER + MANAGER + QC → tất cả list refresh row sang REJECTED
-        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER", "QC"}, "outbound_rejected",
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "outbound_rejected",
                 rejectedSoId, rejectedSoCode, rejectSubtitle);
 
         List<SalesOrderItemEntity> items = soItemRepository.findBySoId(soId);
