@@ -405,6 +405,14 @@ public class PickListService {
                     so.setStatus("QC_SCAN");
                     soRepository.save(so);
                     log.info("SO {} → QC_SCAN after confirmPicked", so.getSoCode());
+
+                    // ── [FIX REALTIME] Notify tất cả role khi SO chuyển sang QC_SCAN ──
+                    // QC cần biết đơn đã sẵn sàng để scan kiểm định
+                    notificationService.notifyRole("QC", "qc_outbound_pending",
+                            so.getSoId(), so.getSoCode(), "Đã picked — cần QC scan kiểm định");
+                    // Keeper + Manager: row của họ phải refresh PICKING → QC_SCAN
+                    notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "qc_outbound_pending",
+                            so.getSoId(), so.getSoCode(), "Đã picked — QC đang kiểm định");
                 });
             }
 
@@ -583,9 +591,9 @@ public class PickListService {
                     String skuCode = skuRepository.findById(pItem.getSkuId()).map(s -> s.getSkuCode()).orElse("Unknown");
                     String skuName = skuRepository.findById(pItem.getSkuId()).map(s -> s.getSkuName()).orElse("Unknown");
                     String locCode = locationRepository.findById(pItem.getFromLocationId()).map(l -> l.getLocationCode()).orElse("Unknown");
-                    String lotNumber = pItem.getLotId() != null 
-                        ? lotRepository.findById(pItem.getLotId()).map(l -> l.getLotNumber()).orElse(null) 
-                        : null;
+                    String lotNumber = pItem.getLotId() != null
+                            ? lotRepository.findById(pItem.getLotId()).map(l -> l.getLotNumber()).orElse(null)
+                            : null;
 
                     java.util.Map<String, Object> rItem = new java.util.HashMap<>();
                     rItem.put("skuCode", skuCode);
@@ -594,7 +602,7 @@ public class PickListService {
                     rItem.put("locationCode", locCode);
                     rItem.put("quantity", passQty);
                     restockedItems.add(rItem);
-                    
+
                     log.info("RESTOCK PASS ITEMS: soId={} skuId={} qty={} loc={}", documentId, pItem.getSkuId(), passQty, pItem.getFromLocationId());
                 }
             }
@@ -631,7 +639,7 @@ public class PickListService {
             if (cloudinary == null) {
                 throw new BusinessException("Lỗi 500: Cloudinary bean is null. Admin chưa cấu hình API_KEY.");
             }
-            
+
             String publicId = "mispick_notes/task_" + taskId + "_" + System.currentTimeMillis();
 
             @SuppressWarnings("unchecked")
@@ -660,7 +668,7 @@ public class PickListService {
                     com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
                     java.util.List<java.util.Map<String, Object>> mispickQueue = mapper.readValue(
                             mispickJson, new com.fasterxml.jackson.core.type.TypeReference<>() {});
-                    
+
                     for (java.util.Map<String, Object> entry : mispickQueue) {
                         String barcode = (String) entry.get("barcode");
                         String lotNumber = (String) entry.get("lotNumber");
@@ -669,7 +677,7 @@ public class PickListService {
 
                         // Không tự ý cộng/trừ ở bất kì Bin nào để bảo toàn số liệu cho đợt kiểm kê.
                         // Yêu cầu: Trưởng ca sẽ lấy danh sách các Bin chứa SKU này để đi cycle count.
-                        log.info("Mispick Compliance Record: Barcode {} (qty {}). No automated inventory changes applied. Awaiting manual cycle count & put-back.", 
+                        log.info("Mispick Compliance Record: Barcode {} (qty {}). No automated inventory changes applied. Awaiting manual cycle count & put-back.",
                                 barcode, qty);
                     }
                 } catch (Exception ex) {
@@ -760,7 +768,7 @@ public class PickListService {
             // 3. Try to allocate new Bin!
             BigDecimal remainingMissingQty = missingQty;
             List<InventorySnapshotEntity> snapshots = snapshotRepository.findByWarehouseIdAndSkuId(warehouseId, sku.getSkuId());
-            
+
             if (snapshots != null) {
                 // Descending by Available Qty
                 snapshots.sort((a, b) -> {
@@ -823,7 +831,7 @@ public class PickListService {
             if (remainingMissingQty.compareTo(BigDecimal.ZERO) > 0) {
                 log.warn("Auto-Heal FAILED (Warehouse Exhausted) for SKU {} missing {}", sku.getSkuCode(), remainingMissingQty);
                 failedCount++;
-                
+
                 // Create Incident
                 String incidentCode = "SHT-" + System.currentTimeMillis() % 1_000_000;
                 IncidentEntity incident = IncidentEntity.builder()
@@ -850,7 +858,7 @@ public class PickListService {
                         .note("Thiếu " + remainingMissingQty + " (Auto-Heal không tìm thấy Bin khác)")
                         .build();
                 incidentItemRepo.save(incidentItem);
-                
+
                 // Set SO status to WAITING_STOCK
                 if (task.getSoId() != null) {
                     soRepository.findById(task.getSoId()).ifPresent(so -> {

@@ -648,16 +648,16 @@ public class OutboundQcService {
      * Process Outbound Damage Resolution per SKU accurately.
      * Moves FAIL units to Z-DEFECT. Reduces orderedQty by acceptQty. Keeps orderedQty for returnQty.
      */
-    private void processOutboundDamageResolution(Long soId, Long userId, Long warehouseId, 
-            java.util.Map<Long, BigDecimal> skuAcceptQtyMap, 
-            java.util.Map<Long, BigDecimal> skuReturnQtyMap) {
-        
+    private void processOutboundDamageResolution(Long soId, Long userId, Long warehouseId,
+                                                 java.util.Map<Long, BigDecimal> skuAcceptQtyMap,
+                                                 java.util.Map<Long, BigDecimal> skuReturnQtyMap) {
+
         List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
         if (allItems.isEmpty()) {
             log.warn("processOutboundDamageResolution: soId={} — no active picking task items found", soId);
             return;
         }
-        
+
         LocationEntity defectBin = getOrCreateDefectBin(warehouseId);
         Long actorId = userId != null ? userId : getSystemUserId();
 
@@ -693,7 +693,7 @@ public class OutboundQcService {
             BigDecimal totalPassQty = skuItems.stream()
                     .map(i -> safeBD(i.getQcPassQty()))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            
+
             BigDecimal returnQty = safeBD(skuReturnQtyMap.get(skuId));
 
             if (totalFailQty.compareTo(BigDecimal.ZERO) <= 0) continue;
@@ -712,7 +712,7 @@ public class OutboundQcService {
                             .txnType("DAMAGE_TRANSFER").referenceTable("sales_orders").referenceId(soId)
                             .reasonCode("QC_FAIL_TO_DEFECT").createdBy(actorId)
                             .build());
-                    log.info("processOutboundDamageResolution: skuId={} failQty={} → Z-DEFECT bin={}", 
+                    log.info("processOutboundDamageResolution: skuId={} failQty={} → Z-DEFECT bin={}",
                             item.getSkuId(), itemFailQty, defectBin.getLocationId());
                 }
             }
@@ -730,7 +730,7 @@ public class OutboundQcService {
                         if (newOrderedQty.compareTo(si.getOrderedQty()) < 0) {
                             si.setOrderedQty(newOrderedQty);
                             salesOrderItemRepository.save(si);
-                            log.info("processOutboundDamageResolution: reduce orderedQty sku={} → {} (pass: {}, return: {})", 
+                            log.info("processOutboundDamageResolution: reduce orderedQty sku={} → {} (pass: {}, return: {})",
                                     skuId, newOrderedQty, totalPassQty, returnQty);
                         }
                     });
@@ -849,7 +849,8 @@ public class OutboundQcService {
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → WAITING_STOCK (chờ hàng bù)", so.getSoCode());
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                // [FIX REALTIME] Dùng đúng event type outbound_waiting_stock
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_waiting_stock",
                         so.getSoId(), so.getSoCode(), "Chờ nhập bù hàng — tạm giữ đơn");
             }
             case "CLOSE_SHORT" -> {
@@ -858,7 +859,8 @@ public class OutboundQcService {
                 so.setUpdatedAt(LocalDateTime.now());
                 salesOrderRepository.save(so);
                 log.info("SO {} → APPROVED (CLOSE_SHORT, re-Allocate ready)", so.getSoCode());
-                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                // [FIX REALTIME] Dùng đúng event type outbound_shortage_resolved
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_shortage_resolved",
                         so.getSoId(), so.getSoCode(), "Đã cắt số lượng thiếu — cần phân bổ lại");
             }
             default -> throw new BusinessException(
