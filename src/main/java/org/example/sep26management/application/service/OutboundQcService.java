@@ -605,6 +605,9 @@ public class OutboundQcService {
             } else {
                 throw new BusinessException("Invalid action: " + act + " for item " + item.getIncidentItemId());
             }
+            // [FIX VERDICT] Lưu phán quyết của Manager vào từng item để FE hiển thị đúng phán quyết
+            item.setResolvedAction(act.toUpperCase());
+            incidentItemRepository.save(item);
         }
 
         // Apply actions to inventory and orders
@@ -648,16 +651,16 @@ public class OutboundQcService {
      * Process Outbound Damage Resolution per SKU accurately.
      * Moves FAIL units to Z-DEFECT. Reduces orderedQty by acceptQty. Keeps orderedQty for returnQty.
      */
-    private void processOutboundDamageResolution(Long soId, Long userId, Long warehouseId, 
-            java.util.Map<Long, BigDecimal> skuAcceptQtyMap, 
-            java.util.Map<Long, BigDecimal> skuReturnQtyMap) {
-        
+    private void processOutboundDamageResolution(Long soId, Long userId, Long warehouseId,
+                                                 java.util.Map<Long, BigDecimal> skuAcceptQtyMap,
+                                                 java.util.Map<Long, BigDecimal> skuReturnQtyMap) {
+
         List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
         if (allItems.isEmpty()) {
             log.warn("processOutboundDamageResolution: soId={} — no active picking task items found", soId);
             return;
         }
-        
+
         LocationEntity defectBin = getOrCreateDefectBin(warehouseId);
         Long actorId = userId != null ? userId : getSystemUserId();
 
@@ -693,7 +696,7 @@ public class OutboundQcService {
             BigDecimal totalPassQty = skuItems.stream()
                     .map(i -> safeBD(i.getQcPassQty()))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            
+
             BigDecimal returnQty = safeBD(skuReturnQtyMap.get(skuId));
 
             if (totalFailQty.compareTo(BigDecimal.ZERO) <= 0) continue;
@@ -712,7 +715,7 @@ public class OutboundQcService {
                             .txnType("DAMAGE_TRANSFER").referenceTable("sales_orders").referenceId(soId)
                             .reasonCode("QC_FAIL_TO_DEFECT").createdBy(actorId)
                             .build());
-                    log.info("processOutboundDamageResolution: skuId={} failQty={} → Z-DEFECT bin={}", 
+                    log.info("processOutboundDamageResolution: skuId={} failQty={} → Z-DEFECT bin={}",
                             item.getSkuId(), itemFailQty, defectBin.getLocationId());
                 }
             }
@@ -730,7 +733,7 @@ public class OutboundQcService {
                         if (newOrderedQty.compareTo(si.getOrderedQty()) < 0) {
                             si.setOrderedQty(newOrderedQty);
                             salesOrderItemRepository.save(si);
-                            log.info("processOutboundDamageResolution: reduce orderedQty sku={} → {} (pass: {}, return: {})", 
+                            log.info("processOutboundDamageResolution: reduce orderedQty sku={} → {} (pass: {}, return: {})",
                                     skuId, newOrderedQty, totalPassQty, returnQty);
                         }
                     });

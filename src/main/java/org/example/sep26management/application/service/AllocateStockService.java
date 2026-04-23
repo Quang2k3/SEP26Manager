@@ -220,8 +220,8 @@ public class AllocateStockService {
                         so.setStatus("ALLOCATED");
                         soRepository.save(so);
                         log.info("SO {} status → ALLOCATED", so.getSoCode());
-                        // ── Realtime: notify KEEPER đơn đã phân bổ, cần tạo pick list ──
-                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                        // [FIX] Gửi đúng event "outbound_allocated" để FE nhận và cập nhật status ALLOCATED
+                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_allocated",
                                 so.getSoId(), so.getSoCode(), "Đã phân bổ tồn kho — cần tạo Pick List");
                     }
                 });
@@ -230,8 +230,8 @@ public class AllocateStockService {
                     if ("APPROVED".equals(t.getStatus())) {
                         t.setStatus("ALLOCATED");
                         transferRepository.save(t);
-                        // ── Realtime: notify KEEPER transfer đã phân bổ ────────────────
-                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_approved",
+                        // [FIX] Gửi đúng event "outbound_allocated" để FE nhận và cập nhật status ALLOCATED
+                        notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_allocated",
                                 t.getTransferId(), t.getTransferCode(), "Transfer đã phân bổ — cần tạo Pick List");
                     }
                 });
@@ -337,7 +337,7 @@ public class AllocateStockService {
                 BigDecimal totalRes   = snapshotRepository.sumReservedByWarehouseAndSku(warehouseId, pair.skuId);
                 if (totalQty == null) totalQty = BigDecimal.ZERO;
                 if (totalRes == null) totalRes = BigDecimal.ZERO;
-                
+
                 BigDecimal actualAvailable = totalQty.subtract(totalRes).max(BigDecimal.ZERO);
                 
                 // [BUG-FIX] Chỉ auto-approve chờ hàng bù khi THỰC SỰ HẾT SẠCH HÀNG.

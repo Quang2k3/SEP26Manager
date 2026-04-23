@@ -31,6 +31,8 @@ public class PickSignedNoteService {
 
     private final SalesOrderJpaRepository salesOrderRepository;
     private final Cloudinary cloudinary;
+    // [FIX REALTIME] Thêm NotificationService để push event cho QC khi upload phiếu ký
+    private final NotificationService notificationService;
 
     private static final List<String> ALLOWED = Arrays.asList("jpg", "jpeg", "png", "webp", "heic");
     private static final long MAX_SIZE = 15 * 1024 * 1024; // 15MB
@@ -86,6 +88,20 @@ public class PickSignedNoteService {
             salesOrderRepository.save(so);
 
             log.info("Pick signed note uploaded for soId={}: {}", soId, url);
+
+            // ── [FIX REALTIME] Notify QC + MANAGER + KEEPER để list/modal refresh ────
+            // QC cần nhận event này để biết phiếu ký đã sẵn sàng → hiển thị ảnh trong modal
+            // và có thể bắt đầu bước QC tiếp theo mà không cần F5.
+            try {
+                notificationService.notifyRoles(
+                        new String[]{"QC", "MANAGER", "KEEPER"},
+                        "outbound_pick_signed_note_uploaded",
+                        soId, so.getSoCode(),
+                        "Đã upload phiếu lấy hàng có chữ ký — QC có thể kiểm định");
+            } catch (Exception ex) {
+                // Không để WS failure phá vỡ transaction upload chính
+                log.warn("WS notify pick_signed_note_uploaded failed (soId={}): {}", soId, ex.getMessage());
+            }
 
             return ApiResponse.success("Đã lưu ảnh phiếu lấy hàng thành công.", Map.of(
                     "soId",   String.valueOf(soId),

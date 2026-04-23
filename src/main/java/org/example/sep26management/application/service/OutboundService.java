@@ -131,8 +131,11 @@ public class OutboundService {
         final Long soId = saved.getSoId();
         final String custName = customerName;
         userRepository.findById(createdBy).ifPresent(u ->
-                notificationService.notifyUser(u.getEmail(), "outbound_approved",
+                notificationService.notifyUser(u.getEmail(), "outbound_created",
                         soId, soCode, custName + " — Lệnh xuất mới"));
+        // [FIX] Broadcast tới tất cả KEEPER và MANAGER để list realtime thêm row mới
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "outbound_created",
+                soId, soCode, custName + " — Lệnh xuất mới");
 
         return buildSalesOrderResponse(saved, items, customer, warnings);
     }
@@ -189,8 +192,11 @@ public class OutboundService {
         final String transferCode = code;
         final String transferSubtitle = "Chuyển kho → " + destName + " — Lệnh mới";
         userRepository.findById(createdBy).ifPresent(u ->
-                notificationService.notifyUser(u.getEmail(), "outbound_approved",
+                notificationService.notifyUser(u.getEmail(), "outbound_created",
                         transferId, transferCode, transferSubtitle));
+        // [FIX] Broadcast tới KEEPER và MANAGER để list realtime thêm row mới
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "outbound_created",
+                transferId, transferCode, transferSubtitle);
 
         return buildTransferResponse(saved, items, destWarehouse, warnings);
     }
@@ -428,6 +434,10 @@ public class OutboundService {
                 "Internal transfer " + transfer.getTransferCode() + " auto-approved", ip, ua);
 
         WarehouseEntity dest = warehouseRepository.findById(transfer.getToWarehouseId()).orElse(null);
+        // [FIX] Notify tất cả roles biết transfer đã auto-approved và đã allocate
+        notificationService.notifyRoles(new String[]{"KEEPER", "MANAGER"}, "outbound_approved",
+                transferId, transfer.getTransferCode(),
+                (dest != null ? dest.getWarehouseName() : "—") + " — Transfer đã duyệt tự động, cần tạo Pick List");
         return ApiResponse.success(MessageConstants.OUTBOUND_TRANSFER_AUTO_APPROVED,
                 buildTransferResponse(transfer, items, dest, null));
     }
@@ -637,7 +647,7 @@ public class OutboundService {
         for (SalesOrderItemEntity item : items) {
             BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("sales_orders", so.getSoId(), item.getSkuId());
             if (ownReserved == null) ownReserved = BigDecimal.ZERO;
-            
+
             BigDecimal missing = item.getOrderedQty().subtract(ownReserved);
             if (missing.compareTo(BigDecimal.ZERO) > 0) {
                 ReceivingItemEntity ri = ReceivingItemEntity.builder()
@@ -663,7 +673,7 @@ public class OutboundService {
         notificationService.notifyRole("QC", "receiving_pending_qc",
                 savedOrder.getReceivingId(), receivingCode, "Phiếu nhập hàng bù mới cho " + so.getSoCode());
 
-        return ApiResponse.success("Tạo phiếu nhập hàng bù thành công", 
+        return ApiResponse.success("Tạo phiếu nhập hàng bù thành công",
                 Map.of("receivingId", savedOrder.getReceivingId(), "receivingCode", receivingCode));
     }
 
@@ -745,7 +755,7 @@ public class OutboundService {
         List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream().map(i -> {
             BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("sales_orders", so.getSoId(), i.getSkuId());
             if (ownReserved == null) ownReserved = BigDecimal.ZERO;
-            
+
             BigDecimal rawAvailable = getAvailableQty(so.getWarehouseId(), i.getSkuId());
             // Tồn khả dụng THỰC TẾ = (Tồn khả dụng hiển thị hiện tại) + (Tồn đã bị chính đơn này giữ)
             BigDecimal trueAvailable = rawAvailable.add(ownReserved);
