@@ -322,7 +322,7 @@ public class AllocateStockService {
         List<CreateIncidentRequest.IncidentItemDto> incidentItems = new ArrayList<>();
         StringBuilder desc = new StringBuilder("Thiếu tồn kho khi phân bổ lệnh xuất " + documentCode + ": ");
 
-        boolean autoApproveBackorder = false;
+        boolean autoApproveBackorder = true; // Sẽ set thành false nếu có bất kỳ tồn kho nào khả dụng
 
         for (SkuQtyPair pair : required) {
             // SL đã allocate được cho đơn này (reservation OPEN)
@@ -339,8 +339,12 @@ public class AllocateStockService {
                 if (totalRes == null) totalRes = BigDecimal.ZERO;
                 
                 BigDecimal actualAvailable = totalQty.subtract(totalRes).max(BigDecimal.ZERO);
-                if (actualAvailable.compareTo(BigDecimal.ZERO) == 0) {
-                    autoApproveBackorder = true;
+                
+                // [BUG-FIX] Chỉ auto-approve chờ hàng bù khi THỰC SỰ HẾT SẠCH HÀNG.
+                // Nếu đã allocate được 1 phần (allocated > 0) hoặc còn tồn kho tự do (actualAvailable > 0),
+                // BẮT BUỘC gửi Manager duyệt để Manager có cơ hội chọn "Chốt thiếu" (CLOSE_SHORT).
+                if (allocated.compareTo(BigDecimal.ZERO) > 0 || actualAvailable.compareTo(BigDecimal.ZERO) > 0) {
+                    autoApproveBackorder = false;
                 }
 
                 // tồn thực trong kho = allocated (đang giữ cho đơn này) + phần tự do
