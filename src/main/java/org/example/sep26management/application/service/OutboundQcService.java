@@ -626,14 +626,37 @@ public class OutboundQcService {
                     so.getSoId(), so.getSoCode(), "Đã duyệt xử lý một phần / toàn bộ RETURN_SCRAP — Keeper cần re-allocate");
         } else {
             // All items ACCEPTED
-            so.setStatus("QC_PASSED");
-            so.setUpdatedAt(LocalDateTime.now());
-            salesOrderRepository.save(so);
-            log.info("SO {} → QC_PASSED (all items ACCEPTED damage)", so.getSoCode());
-            notificationService.notifyRoles(new String[]{"KEEPER"}, "qc_outbound_passed",
-                    so.getSoId(), so.getSoCode(), "QC đạt (bao gồm phần lỗi chấp nhận xuất) — Sẵn sàng xuất kho");
-            notificationService.notifyRoles(new String[]{"MANAGER", "QC"}, "outbound_approved",
-                    so.getSoId(), so.getSoCode(), "Chấp nhận toàn bộ hàng lỗi — Sẵn sàng xuất phần tốt");
+            BigDecimal totalOrderedQty = salesOrderItemRepository.findBySoId(so.getSoId()).stream()
+                    .map(SalesOrderItemEntity::getOrderedQty)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            if (totalOrderedQty.compareTo(BigDecimal.ZERO) <= 0) {
+                // Toàn bộ hàng đều hỏng và bị loại bỏ -> Đơn rỗng -> Huỷ đơn
+                completeOldPickingTask(incident.getSoId(), so.getWarehouseId());
+                so.setStatus("CANCELLED");
+                so.setUpdatedAt(LocalDateTime.now());
+                salesOrderRepository.save(so);
+                log.info("SO {} → CANCELLED (all items damaged and discarded via ACCEPT)", so.getSoCode());
+
+                // Giải phóng các reservation OPEN còn sót lại (nếu có)
+                reservationRepository.findByReferenceTableAndReferenceIdAndStatus("sales_orders", so.getSoId(), "OPEN")
+                        .forEach(r -> {
+                            r.setStatus("CANCELLED");
+                            reservationRepository.save(r);
+                        });
+
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_cancelled",
+                        so.getSoId(), so.getSoCode(), "Đơn bị HỦY do toàn bộ hàng hỏng bị loại bỏ (Xuất phần tốt, nhưng không còn phần tốt)");
+            } else {
+                so.setStatus("QC_PASSED");
+                so.setUpdatedAt(LocalDateTime.now());
+                salesOrderRepository.save(so);
+                log.info("SO {} → QC_PASSED (all items ACCEPTED damage)", so.getSoCode());
+                notificationService.notifyRoles(new String[]{"KEEPER"}, "qc_outbound_passed",
+                        so.getSoId(), so.getSoCode(), "QC đạt (bao gồm phần lỗi chấp nhận xuất) — Sẵn sàng xuất kho");
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC"}, "outbound_approved",
+                        so.getSoId(), so.getSoCode(), "Chấp nhận toàn bộ hàng lỗi — Sẵn sàng xuất phần tốt");
+            }
         }
 
         incident.setStatus("RESOLVED");
