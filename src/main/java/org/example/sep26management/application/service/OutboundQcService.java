@@ -79,6 +79,7 @@ public class OutboundQcService {
                     "Pick List #" + taskId + " đang được QC khác kiểm định. Vui lòng liên hệ quản lý.");
         }
 
+        boolean justClaimed = false;
         if (task.getAssignedQcId() == null) {
             int claimed = pickingTaskRepository.claimQcAssignment(taskId, userId);
             if (claimed == 0) {
@@ -89,12 +90,8 @@ public class OutboundQcService {
                             "Pick List #" + taskId + " vừa được QC khác nhận. Vui lòng thử lại.");
                 }
             } else {
+                justClaimed = true;
                 log.info("[QcClaim-OB] QC userId={} claimed taskId={}", userId, taskId);
-                try {
-                    notificationService.notifyRoles(new String[]{"QC", "MANAGER"},
-                            "outbound_qc_claimed", taskId, "Task #" + taskId,
-                            "QC userId=" + userId + " bắt đầu kiểm định outbound");
-                } catch (Exception ignored) {}
             }
         }
 
@@ -104,11 +101,20 @@ public class OutboundQcService {
         }
 
         if (task.getSoId() != null) {
+            final boolean finalJustClaimed = justClaimed;
             salesOrderRepository.findById(task.getSoId()).ifPresent(so -> {
                 if ("PICKING".equals(so.getStatus())) {
                     so.setStatus("QC_SCAN");
                     so.setUpdatedAt(LocalDateTime.now());
                     salesOrderRepository.save(so);
+                }
+                // [FIX REALTIME] Notify correct referenceId (soId) so FE doesn't 404
+                if (finalJustClaimed) {
+                    try {
+                        notificationService.notifyRoles(new String[]{"QC", "MANAGER"},
+                                "outbound_qc_claimed", so.getSoId(), "Đơn #" + so.getSoCode(),
+                                "QC userId=" + userId + " bắt đầu kiểm định outbound");
+                    } catch (Exception ignored) {}
                 }
             });
         }
@@ -390,7 +396,7 @@ public class OutboundQcService {
         try { pickingTaskRepository.releaseQcAssignment(taskId, userId); } catch (Exception ignored) {}
         try {
             notificationService.notifyRoles(new String[]{"QC", "MANAGER", "KEEPER"},
-                    "outbound_qc_released", taskId, "Task #" + taskId,
+                    "outbound_qc_released", soId, "Đơn #" + taskId,
                     "QC hoàn thành kiểm định outbound");
         } catch (Exception ignored) {}
 
