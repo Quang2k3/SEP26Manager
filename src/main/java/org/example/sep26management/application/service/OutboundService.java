@@ -750,7 +750,7 @@ public class OutboundService {
             SalesOrderEntity so, List<SalesOrderItemEntity> items,
             CustomerEntity customer, List<OutboundResponse.StockWarning> warnings) {
 
-        boolean isPostAllocate = POST_ALLOCATE_STATUSES.contains(so.getStatus());
+        boolean isPostAllocate = so.getStatus() != null && POST_ALLOCATE_STATUSES.contains(so.getStatus());
 
         List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream().map(i -> {
             BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("sales_orders", so.getSoId(), i.getSkuId());
@@ -764,7 +764,8 @@ public class OutboundService {
             String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
 
             // [FIX] Cập nhật insufficientStock phải dựa trên trueAvailable để không báo "Thiếu" khi chính đơn đã giữ đủ hàng.
-            boolean isInsufficient = isPostAllocate ? false : trueAvailable.compareTo(i.getOrderedQty()) < 0;
+            BigDecimal orderedQty = i.getOrderedQty() != null ? i.getOrderedQty() : BigDecimal.ZERO;
+            boolean isInsufficient = isPostAllocate ? false : trueAvailable.compareTo(orderedQty) < 0;
 
             return OutboundResponse.OutboundItemResponse.builder()
                     .itemId(i.getSoItemId()).skuId(i.getSkuId())
@@ -803,7 +804,7 @@ public class OutboundService {
             TransferEntity transfer, List<TransferItemEntity> items,
             WarehouseEntity dest, List<OutboundResponse.StockWarning> warnings) {
 
-        boolean isPostAllocate = POST_ALLOCATE_STATUSES.contains(transfer.getStatus());
+        boolean isPostAllocate = transfer.getStatus() != null && POST_ALLOCATE_STATUSES.contains(transfer.getStatus());
 
         List<OutboundResponse.OutboundItemResponse> itemResponses = items.stream().map(i -> {
             BigDecimal ownReserved = reservationRepository.sumReservedByReferenceAndSku("transfers", transfer.getTransferId(), i.getSkuId());
@@ -815,7 +816,8 @@ public class OutboundService {
             String skuCode = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuCode()).orElse(null);
             String skuName = skuRepository.findById(i.getSkuId()).map(s -> s.getSkuName()).orElse(null);
 
-            boolean isInsufficient = isPostAllocate ? false : trueAvailable.compareTo(i.getQuantity()) < 0;
+            BigDecimal quantity = i.getQuantity() != null ? i.getQuantity() : BigDecimal.ZERO;
+            boolean isInsufficient = isPostAllocate ? false : trueAvailable.compareTo(quantity) < 0;
 
             return OutboundResponse.OutboundItemResponse.builder()
                     .itemId(i.getTransferItemId()).skuId(i.getSkuId())
