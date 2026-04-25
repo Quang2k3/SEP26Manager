@@ -10,6 +10,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import org.example.sep26management.infrastructure.exception.BusinessException;
+
 import java.util.List;
 import java.util.Map;
 
@@ -105,12 +107,12 @@ public class ScannerOtpController {
             if (uid instanceof Long l)    return l;
             if (uid instanceof Integer i) return i.longValue();
         }
-        throw new RuntimeException("Cannot extract userId from auth");
+        throw new BusinessException("Cannot extract userId from auth");
     }
 
     private String extractEmail(Authentication auth) {
         if (auth != null) return auth.getName();
-        throw new RuntimeException("Cannot extract email from auth");
+        throw new BusinessException("Cannot extract email from auth");
     }
 
     private String extractRole(Authentication auth) {
@@ -119,9 +121,9 @@ public class ScannerOtpController {
                     .map(a -> a.getAuthority().replace("ROLE_", ""))
                     .filter(r -> "KEEPER".equals(r) || "QC".equals(r))
                     .findFirst()
-                    .orElseThrow(() -> new RuntimeException("User must have KEEPER or QC role"));
+                    .orElseThrow(() -> new BusinessException("User must have KEEPER or QC role"));
         }
-        throw new RuntimeException("Cannot extract role from auth");
+        throw new BusinessException("Cannot extract role from auth");
     }
 
     @SuppressWarnings("unchecked")
@@ -135,7 +137,7 @@ public class ScannerOtpController {
                 if (first instanceof Number n)  return n.longValue();
             }
         }
-        throw new RuntimeException("Cannot extract warehouseId from auth");
+        throw new BusinessException("Cannot extract warehouseId from auth");
     }
 
     private String getClientIp(HttpServletRequest request) {

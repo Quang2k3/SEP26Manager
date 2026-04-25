@@ -10,6 +10,7 @@ import org.example.sep26management.application.dto.scan.ScanLineItem;
 import org.example.sep26management.application.dto.scan.ScanSessionData;
 import org.example.sep26management.application.service.NotificationService;
 import org.example.sep26management.infrastructure.SseEmitterRegistry;
+import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.persistence.entity.PickingTaskItemEntity;
 import org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity;
 import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
@@ -67,7 +68,7 @@ public class ScanEventService {
 
         // 3. Load session
         ScanSessionData session = sessionRedis.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("Scan session hết hạn: " + sessionId));
+                .orElseThrow(() -> new BusinessException("Phiên scan đã hết hạn. Vui lòng tạo QR mới."));
 
         // ── Giải pháp 1: Validate receivingId binding ─────────────────────────
         if (session.getReceivingId() != null && request.getReceivingId() != null
@@ -157,7 +158,7 @@ public class ScanEventService {
             String sessionId, Long skuId, String condition, BigDecimal qtyToRemove, Long receivingId, String lotNumber) {
 
         ScanSessionData session = sessionRedis.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("Scan session hết hạn: " + sessionId));
+                .orElseThrow(() -> new BusinessException("Phiên scan đã hết hạn. Vui lòng tạo QR mới."));
 
         String norm = condition != null ? condition.toUpperCase() : "PASS";
         List<ScanLineItem> lines = session.getLines();

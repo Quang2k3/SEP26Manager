@@ -687,7 +687,7 @@ public class OutboundController {
     private Long getUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null)
-            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+            throw new org.example.sep26management.infrastructure.exception.UnauthorizedException(MessageConstants.NOT_AUTHENTICATED);
         Object details = auth.getDetails();
         if (details instanceof Map<?, ?> map) {
             Object uid = map.get("userId");
@@ -695,13 +695,13 @@ public class OutboundController {
             if (uid instanceof Integer i)   return i.longValue();
             if (uid != null)                return Long.parseLong(uid.toString());
         }
-        throw new RuntimeException(MessageConstants.USER_ID_NOT_FOUND);
+        throw new org.example.sep26management.infrastructure.exception.BusinessException(MessageConstants.USER_ID_NOT_FOUND);
     }
 
     private Long getWarehouseId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null)
-            throw new RuntimeException(MessageConstants.NOT_AUTHENTICATED);
+            throw new org.example.sep26management.infrastructure.exception.UnauthorizedException(MessageConstants.NOT_AUTHENTICATED);
         Object details = auth.getDetails();
         if (details instanceof Map<?, ?> map) {
             Object raw = map.get("warehouseIds");
@@ -713,7 +713,7 @@ public class OutboundController {
                 if (first != null)              return Long.parseLong(first.toString());
             }
         }
-        throw new RuntimeException("Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
+        throw new org.example.sep26management.infrastructure.exception.BusinessException("Warehouse ID not found in token. Ensure your account is assigned to a warehouse.");
     }
 
     private String getCurrentRole() {
