@@ -33,6 +33,16 @@ public interface InventorySnapshotJpaRepository
         @Query("SELECT COALESCE(SUM(s.reservedQty), 0) FROM InventorySnapshotEntity s WHERE s.locationId = :locationId")
         BigDecimal sumReservedByLocationId(@Param("locationId") Long locationId);
 
+        /** Single location — tổng kg đang tồn (quantity × weightPerCartonKg), chỉ SKU đã cấu hình kg */
+        @Query("""
+            SELECT COALESCE(SUM(s.quantity * sk.weightPerCartonKg), 0)
+            FROM InventorySnapshotEntity s
+            JOIN SkuEntity sk ON sk.skuId = s.skuId
+            WHERE s.locationId = :locationId
+              AND sk.weightPerCartonKg IS NOT NULL
+            """)
+        BigDecimal sumWeightKgByLocationId(@Param("locationId") Long locationId);
+
         // ── Batch-location queries (used by BinService.viewBinOccupancy) ─────────
 
         /** Batch — occupied qty per location */
