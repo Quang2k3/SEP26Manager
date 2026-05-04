@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -72,9 +73,9 @@ public class BinService {
         // [FIX] Batch-fetch tổng trọng lượng thực tế (kg) = sum(qty * weightPerCartonKg)
         Map<Long, BigDecimal> weightMap = snapshotRepository
                 .sumWeightKgByLocationIds(locationIds);
-        // Putaway allocations (RESERVED) — bin capacity đã bị lock
-        Map<Long, BigDecimal> putawayAllocMap = putawayAllocationRepository
-                .sumReservedByLocationIds(locationIds);
+        // Putaway RESERVED — tổng kg (allocatedQty × weight/thùng)
+        Map<Long, BigDecimal> putawayAllocWeightKgMap = putawayAllocationRepository
+                .sumReservedWeightKgByLocationIds(locationIds);
 
         // Resolve zone codes and parent codes (batch)
         Set<Long> zoneIds = binPage.getContent().stream()
@@ -96,16 +97,23 @@ public class BinService {
                             BigDecimal.ZERO);
                     BigDecimal reserved = reservedMap.getOrDefault(bin.getLocationId(),
                             BigDecimal.ZERO);
-                    BigDecimal putawayAlloc = putawayAllocMap.getOrDefault(bin.getLocationId(),
+                    BigDecimal occupiedWeightKg = weightMap.getOrDefault(bin.getLocationId(), BigDecimal.ZERO);
+                    BigDecimal putawayReservedKg = putawayAllocWeightKgMap.getOrDefault(bin.getLocationId(),
                             BigDecimal.ZERO);
-                    // BR-LOC-21: use maxWeightKg as primary capacity metric
-                    OccupancyStatus status = OccupancyStatus.of(occupied, bin.getMaxWeightKg());
+                    BigDecimal loadKg = occupiedWeightKg.add(putawayReservedKg);
 
-                    BigDecimal available = null;
-                    if (bin.getMaxWeightKg() != null) {
-                        available = bin.getMaxWeightKg().subtract(occupied).subtract(reserved).subtract(putawayAlloc);
-                        if (available.compareTo(BigDecimal.ZERO) < 0)
-                            available = BigDecimal.ZERO;
+                    OccupancyStatus status = (bin.getMaxWeightKg() != null
+                            && bin.getMaxWeightKg().compareTo(BigDecimal.ZERO) > 0)
+                            ? OccupancyStatus.of(loadKg, bin.getMaxWeightKg())
+                            : OccupancyStatus.of(occupied, null);
+
+                    BigDecimal availableQty = null;
+                    BigDecimal availableWeightKg = null;
+                    if (bin.getMaxWeightKg() != null && bin.getMaxWeightKg().compareTo(BigDecimal.ZERO) > 0) {
+                        availableWeightKg = bin.getMaxWeightKg().subtract(loadKg);
+                        if (availableWeightKg.compareTo(BigDecimal.ZERO) < 0) {
+                            availableWeightKg = BigDecimal.ZERO;
+                        }
                     }
 
                     // Resolve parent (RACK) and grandparent (AISLE)
@@ -137,10 +145,10 @@ public class BinService {
                             .maxWeightKg(bin.getMaxWeightKg())
                             .maxVolumeM3(bin.getMaxVolumeM3())
                             .occupiedQty(occupied)
-                            // [FIX] Set trọng lượng thực tế từ batch weight query
-                            .occupiedWeightKg(weightMap.getOrDefault(bin.getLocationId(), BigDecimal.ZERO))
+                            .occupiedWeightKg(occupiedWeightKg)
                             .reservedQty(reserved)
-                            .availableQty(available)
+                            .availableQty(availableQty)
+                            .availableWeightKg(availableWeightKg)
                             .occupancyStatus(status)
                             .isPickingFace(bin.getIsPickingFace())
                             .isStaging(bin.getIsStaging())
@@ -181,14 +189,24 @@ public class BinService {
 
         BigDecimal occupied = snapshotRepository.sumQuantityByLocationId(locationId);
         BigDecimal reserved = snapshotRepository.sumReservedByLocationId(locationId);
-        BigDecimal putawayAlloc = putawayAllocationRepository.sumReservedQtyByLocation(locationId);
-        OccupancyStatus status = OccupancyStatus.of(occupied, bin.getMaxWeightKg());
+        BigDecimal snapshotWeightKg = Optional.ofNullable(snapshotRepository.sumWeightKgByLocationId(locationId))
+                .orElse(BigDecimal.ZERO);
+        BigDecimal putawayReservedKg = Optional.ofNullable(
+                putawayAllocationRepository.sumReservedWeightKgByLocation(locationId))
+                .orElse(BigDecimal.ZERO);
+        BigDecimal loadKg = snapshotWeightKg.add(putawayReservedKg);
 
+        OccupancyStatus status = (bin.getMaxWeightKg() != null && bin.getMaxWeightKg().compareTo(BigDecimal.ZERO) > 0)
+                ? OccupancyStatus.of(loadKg, bin.getMaxWeightKg())
+                : OccupancyStatus.of(occupied, null);
+
+        BigDecimal availableWeightKg = null;
         BigDecimal available = null;
-        if (bin.getMaxWeightKg() != null) {
-            available = bin.getMaxWeightKg().subtract(occupied).subtract(reserved).subtract(putawayAlloc);
-            if (available.compareTo(BigDecimal.ZERO) < 0)
-                available = BigDecimal.ZERO;
+        if (bin.getMaxWeightKg() != null && bin.getMaxWeightKg().compareTo(BigDecimal.ZERO) > 0) {
+            availableWeightKg = bin.getMaxWeightKg().subtract(loadKg);
+            if (availableWeightKg.compareTo(BigDecimal.ZERO) < 0) {
+                availableWeightKg = BigDecimal.ZERO;
+            }
         }
 
         // Fetch detailed inventory items in this bin
@@ -244,11 +262,8 @@ public class BinService {
                 .map(LocationEntity::getLocationCode).orElse(null)
                 : null;
 
-        // [FIX] Tinh tong trong luong thuc (kg) tu items da build
-        BigDecimal occupiedWeightKg = items.stream()
-                .filter(i -> i.getWeightPerCartonKg() != null)
-                .map(i -> i.getQuantity().multiply(i.getWeightPerCartonKg()))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Tổng kg hiển thị: khớp batch occupancy (snapshot × weight); chi tiết từng dòng vẫn ở inventoryItems
+        BigDecimal occupiedWeightKg = snapshotWeightKg;
 
         BinOccupancyResponse response = BinOccupancyResponse.builder()
                 .locationId(bin.getLocationId())
@@ -263,6 +278,7 @@ public class BinService {
                 .occupiedWeightKg(occupiedWeightKg)
                 .reservedQty(reserved)
                 .availableQty(available)
+                .availableWeightKg(availableWeightKg)
                 .occupancyStatus(status)
                 .isPickingFace(bin.getIsPickingFace())
                 .isStaging(bin.getIsStaging())

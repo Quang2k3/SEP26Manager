@@ -54,8 +54,12 @@ public class BinOccupancyResponse {
     private BigDecimal occupiedWeightKg;
     @Schema(description = "Số lượng đang chờ xuất", example = "5.0")
     private BigDecimal reservedQty;
-    @Schema(description = "Còn trống khả dụng", example = "85.0")
-    private BigDecimal availableQty; // max - occupied - reserved (if max configured)
+    @Schema(description = "Còn trống khả dụng (đơn vị legacy — thùng/slot nếu BE tính theo qty)", example = "85.0")
+    private BigDecimal availableQty;
+
+    /** Kg còn chứa được = maxWeightKg − tồn thực (kg) − putaway RESERVED (kg). Chỉ có khi maxWeightKg được cấu hình. */
+    @Schema(description = "Kg còn lại trong BIN (đồng bộ với giới hạn maxWeightKg)", example = "120.5")
+    private BigDecimal availableWeightKg;
 
     /** BR-LOC-21: EMPTY / PARTIAL / FULL */
     @Schema(description = "Trạng Thái Khu Này", example = "PARTIAL")
