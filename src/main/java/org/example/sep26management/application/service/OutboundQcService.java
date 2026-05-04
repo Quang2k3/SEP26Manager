@@ -735,6 +735,38 @@ public class OutboundQcService {
             for (PickingTaskItemEntity item : skuItems) {
                 BigDecimal itemFailQty = safeBD(item.getQcFailQty());
                 if (itemFailQty.compareTo(BigDecimal.ZERO) > 0) {
+                    if (item.getFromLocationId() != null) {
+                        // Nếu không có RETURN_SCRAP (không bị huỷ reservation ở trên), ta phải chủ động giải phóng
+                        // reserved_qty cho phần FAIL này để khi trừ quantity không vi phạm constraint chk_reserved_lte_quantity
+                        if (!hasAnyReturnScrap) {
+                            List<ReservationEntity> openRes = reservationRepository
+                                    .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
+                            BigDecimal toRelease = itemFailQty;
+                            for (ReservationEntity r : openRes) {
+                                if (toRelease.compareTo(BigDecimal.ZERO) <= 0) break;
+                                if (r.getSkuId().equals(item.getSkuId()) && (r.getLocationId() == null || r.getLocationId().equals(item.getFromLocationId()))) {
+                                    BigDecimal releaseAmt = r.getQuantity().min(toRelease);
+                                    r.setQuantity(r.getQuantity().subtract(releaseAmt));
+                                    if (r.getQuantity().compareTo(BigDecimal.ZERO) <= 0) r.setStatus("CLOSED");
+                                    reservationRepository.save(r);
+
+                                    if (r.getLocationId() != null) {
+                                        inventorySnapshotRepository.decrementReservedByLocationSkuLot(
+                                                r.getLocationId(), r.getSkuId(), r.getLotId(), releaseAmt);
+                                    } else {
+                                        inventorySnapshotRepository.incrementReservedByWarehouseAndSku(
+                                                r.getWarehouseId(), r.getSkuId(), releaseAmt.negate());
+                                    }
+                                    toRelease = toRelease.subtract(releaseAmt);
+                                }
+                            }
+                        }
+
+                        // Trừ physical quantity ở source bin trước khi cộng vào Z-DEFECT
+                        inventorySnapshotRepository.decrementQuantity(
+                                warehouseId, item.getSkuId(), item.getLotId(), item.getFromLocationId(), itemFailQty);
+                    }
+
                     inventorySnapshotRepository.upsertInventory(
                             warehouseId, item.getSkuId(), item.getLotId(),
                             defectBin.getLocationId(), itemFailQty);
@@ -1032,17 +1064,55 @@ public class OutboundQcService {
                     "Còn thiếu ảnh Phiếu xuất kho đã ký. Scan QR 'Phiếu xuất kho' để chụp và upload.");
         }
 
+        // [NEW] Thực hiện trừ tồn kho tại bước cuối cùng này
+        List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
+        for (PickingTaskItemEntity item : allItems) {
+            BigDecimal passQty = item.getQcPassQty();
+            if (passQty != null && passQty.compareTo(BigDecimal.ZERO) > 0 && item.getFromLocationId() != null) {
+                Long locId = item.getFromLocationId();
+                Long skuId = item.getSkuId();
+                Long lotId = item.getLotId();
+
+                // 1) Giải phóng reserved_qty TRƯỚC cho phần PASS
+                inventorySnapshotRepository.decrementReservedByLocationSkuLot(locId, skuId, lotId, passQty);
+
+                // 2) Trừ physical quantity
+                inventorySnapshotRepository.decrementQuantity(so.getWarehouseId(), skuId, lotId, locId, passQty);
+
+                // 3) Ghi transaction
+                inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                        .warehouseId(so.getWarehouseId())
+                        .skuId(skuId)
+                        .lotId(lotId)
+                        .locationId(locId)
+                        .quantity(passQty.negate())
+                        .txnType("PICK")
+                        .referenceTable("sales_orders")
+                        .referenceId(soId)
+                        .createdBy(userId != null ? userId : getSystemUserId())
+                        .build());
+            }
+        }
+
+        // Close toàn bộ OPEN reservations còn lại của Sales Order
+        List<ReservationEntity> remainingRes = reservationRepository
+                .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
+        remainingRes.forEach(r -> {
+            r.setStatus("CLOSED");
+            reservationRepository.save(r);
+        });
+
         so.setStatus("COMPLETED");
         so.setUpdatedAt(LocalDateTime.now());
         salesOrderRepository.save(so);
-        log.info("SO {} → COMPLETED (both signed notes uploaded)", so.getSoCode());
+        log.info("SO {} → COMPLETED (both signed notes uploaded, inventory deducted)", so.getSoCode());
 
         String customerName = customerRepository.findById(so.getCustomerId())
                 .map(c -> c.getCustomerName()).orElse("—");
         notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_completed",
                 so.getSoId(), so.getSoCode(), customerName + " — Xuất kho hoàn tất");
 
-        return ApiResponse.success("Xuất kho hoàn tất. Đơn hàng đã COMPLETED.", null);
+        return ApiResponse.success("Xuất kho hoàn tất. Tồn kho đã được trừ. Đơn hàng đã COMPLETED.", null);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

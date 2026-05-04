@@ -331,47 +331,45 @@ public class PickListService {
                 }
             }
 
-            // Trừ tồn kho theo từng item
+            // Trừ tồn kho theo từng item (Chỉ áp dụng cho Internal Transfer)
             for (PickingTaskItemEntity item : items) {
                 BigDecimal qty = item.getPickedQty().compareTo(BigDecimal.ZERO) > 0
                         ? item.getPickedQty() : item.getRequiredQty();
 
                 Long locationId = item.getFromLocationId();
 
-                // 1) Giải phóng reserved_qty TRƯỚC — constraint chk_reserved_lte_quantity
-                //    yêu cầu reserved_qty <= quantity tại mọi thời điểm.
-                //    Nếu trừ quantity trước → quantity=0 nhưng reserved>0 → vi phạm constraint → JDBC error.
-                snapshotRepository.decrementReservedByLocationSkuLot(
-                        locationId, item.getSkuId(), item.getLotId(), qty);
+                if (task.getSoId() == null) {
+                    // 1) Giải phóng reserved_qty TRƯỚC
+                    snapshotRepository.decrementReservedByLocationSkuLot(
+                            locationId, item.getSkuId(), item.getLotId(), qty);
 
-                // 2) Trừ quantity trong BIN sau khi reserved đã về 0
-                snapshotRepository.decrementQuantity(
-                        warehouseId, item.getSkuId(), item.getLotId(), locationId, qty);
+                    // 2) Trừ quantity trong BIN sau khi reserved đã về 0
+                    snapshotRepository.decrementQuantity(
+                            warehouseId, item.getSkuId(), item.getLotId(), locationId, qty);
 
-                // 3) Ghi inventory_transaction txnType = PICK
-                txnRepository.save(InventoryTransactionEntity.builder()
-                        .warehouseId(warehouseId)
-                        .skuId(item.getSkuId())
-                        .lotId(item.getLotId())
-                        .locationId(locationId)
-                        .quantity(qty.negate())
-                        .txnType("PICK")
-                        .referenceTable("picking_tasks")
-                        .referenceId(taskId)
-                        .createdBy(userId)
-                        .build());
+                    // 3) Ghi inventory_transaction txnType = PICK
+                    txnRepository.save(InventoryTransactionEntity.builder()
+                            .warehouseId(warehouseId)
+                            .skuId(item.getSkuId())
+                            .lotId(item.getLotId())
+                            .locationId(locationId)
+                            .quantity(qty.negate())
+                            .txnType("PICK")
+                            .referenceTable("picking_tasks")
+                            .referenceId(taskId)
+                            .createdBy(userId)
+                            .build());
+                } else {
+                    // Sales Order: Hàng hoá vẫn nằm ở kho vật lý dưới dạng đã được Reserved.
+                    // Việc trừ tồn sẽ được thực hiện khi người dùng Hoàn Thành xuất kho (completeOutbound).
+                }
             }
 
             // 4) Close OPEN reservations liên quan đến document của task này
-            //    Với SO: refTable=sales_orders, refId=soId
-            //    Với Transfer: tìm từ reservations theo items
             if (task.getSoId() != null) {
-                List<ReservationEntity> openRes = reservationRepository
-                        .findByReferenceTableAndReferenceIdAndStatus("sales_orders", task.getSoId(), "OPEN");
-                openRes.forEach(r -> {
-                    r.setStatus("CLOSED");
-                    reservationRepository.save(r);
-                });
+                // DO NOT close reservations here for SO!
+                // We leave them OPEN so the items remain reserved.
+                log.info("Reservations for SO {} are kept OPEN until completeOutbound.", task.getSoId());
             } else {
                 // Internal Transfer: close reservation bằng cách match sku + location từ items
                 for (PickingTaskItemEntity item : items) {
@@ -565,29 +563,15 @@ public class PickListService {
                 reservationRepository.save(existing);
             }
 
-            // [NEW] Hoàn trả hàng đã PASS QC từ các vòng repick trước
+            // [REMOVED] Khôi phục hàng hóa đã PASS QC về lại kho vật lý.
+            // Do hiện tại hệ thống dời việc trừ tồn vào cuối chu trình xuất kho (completeOutbound),
+            // hàng hoá ở bước PICKING vẫn nằm trong kho vật lý (chỉ bị Reserved).
+            // Vì vậy, việc giải phóng Reservations ở trên đã đủ để hoàn trả tồn kho,
+            // không cần phải thực hiện upsertInventory hay RESTOCK_CANCEL nữa.
             List<PickingTaskItemEntity> passedItems = pickingTaskItemRepository.findPassedItemsBySoId(documentId);
             for (PickingTaskItemEntity pItem : passedItems) {
                 java.math.BigDecimal passQty = pItem.getQcPassQty();
                 if (passQty != null && passQty.compareTo(java.math.BigDecimal.ZERO) > 0 && pItem.getFromLocationId() != null) {
-                    // Trả lại kho vật lý (cộng available)
-                    snapshotRepository.upsertInventory(
-                            task.getWarehouseId(), pItem.getSkuId(), pItem.getLotId(),
-                            pItem.getFromLocationId(), passQty);
-
-                    txnRepository.save(InventoryTransactionEntity.builder()
-                            .warehouseId(task.getWarehouseId())
-                            .skuId(pItem.getSkuId())
-                            .lotId(pItem.getLotId())
-                            .locationId(pItem.getFromLocationId())
-                            .quantity(passQty)
-                            .txnType("RESTOCK_CANCEL")
-                            .referenceTable("sales_orders")
-                            .referenceId(documentId)
-                            .reasonCode("SO_CANCELLED_RESTOCK")
-                            .createdBy(userId)
-                            .build());
-
                     String skuCode = skuRepository.findById(pItem.getSkuId()).map(s -> s.getSkuCode()).orElse("Unknown");
                     String skuName = skuRepository.findById(pItem.getSkuId()).map(s -> s.getSkuName()).orElse("Unknown");
                     String locCode = locationRepository.findById(pItem.getFromLocationId()).map(l -> l.getLocationCode()).orElse("Unknown");
@@ -603,7 +587,7 @@ public class PickListService {
                     rItem.put("quantity", passQty);
                     restockedItems.add(rItem);
 
-                    log.info("RESTOCK PASS ITEMS: soId={} skuId={} qty={} loc={}", documentId, pItem.getSkuId(), passQty, pItem.getFromLocationId());
+                    log.info("RESTOCK PASS ITEMS BY RELEASING RESERVATIONS ONLY: soId={} skuId={} qty={} loc={}", documentId, pItem.getSkuId(), passQty, pItem.getFromLocationId());
                 }
             }
 
