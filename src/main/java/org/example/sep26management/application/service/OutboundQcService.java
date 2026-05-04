@@ -1065,8 +1065,8 @@ public class OutboundQcService {
         }
 
         // [NEW] Thực hiện trừ tồn kho tại bước cuối cùng này
-        List<PickingTaskItemEntity> allItems = pickingTaskItemRepository.findAllActiveItemsBySoId(soId);
-        for (PickingTaskItemEntity item : allItems) {
+        List<PickingTaskItemEntity> passedItems = pickingTaskItemRepository.findPassedItemsBySoId(soId);
+        for (PickingTaskItemEntity item : passedItems) {
             BigDecimal passQty = item.getQcPassQty();
             if (passQty != null && passQty.compareTo(BigDecimal.ZERO) > 0 && item.getFromLocationId() != null) {
                 Long locId = item.getFromLocationId();
