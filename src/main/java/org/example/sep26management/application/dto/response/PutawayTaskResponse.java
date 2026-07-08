@@ -119,5 +119,8 @@ public class PutawayTaskResponse {
 
         @Schema(description = "Vị trí thực tế Cất (Nhân viên dùng súng quét Bin thực tế)", example = "2")
         private Long actualLocationId;
+
+        @Schema(description = "Trọng lượng 1 thùng (kg) — từ master SKU, dùng giới hạn BIN theo maxWeightKg")
+        private BigDecimal weightPerCartonKg;
     }
 }

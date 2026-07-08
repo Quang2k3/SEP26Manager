@@ -11,6 +11,7 @@ import org.example.sep26management.application.dto.response.PutawayTaskResponse;
 import org.example.sep26management.application.event.PutawayEventPublisher;
 import org.example.sep26management.application.event.PutawayTaskEvent;
 import org.example.sep26management.infrastructure.persistence.entity.LocationEntity;
+import org.example.sep26management.infrastructure.persistence.entity.SkuEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayAllocationEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskEntity;
 import org.example.sep26management.infrastructure.persistence.entity.PutawayTaskItemEntity;
@@ -32,6 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -209,17 +211,40 @@ public class PutawayTaskService {
                 throw new RuntimeException("Số lượng cất vượt quá yêu cầu lệnh! Thừa hàng, yêu cầu kiểm tra và cất đúng số lượng (Chỉ cất thêm tối đa: " + remaining + ").");
             }
 
+            SkuEntity skuEntity = skuRepo.findById(alloc.getSkuId())
+                    .orElseThrow(() -> new RuntimeException("SKU not found: " + alloc.getSkuId()));
+
             // SELECT FOR UPDATE: khóa bin row trước check capacity
             // → chống 2 Keeper putaway vào cùng BIN đồng thời gây overflow
             LocationEntity bin = locationRepo.findByIdForUpdate(alloc.getLocationId())
                     .orElseThrow(() -> new RuntimeException("Location not found: " + alloc.getLocationId()));
-            if (bin.getMaxWeightKg() != null) {
-                BigDecimal occupied = inventorySnapshotRepo.sumQuantityByLocationId(alloc.getLocationId());
-                BigDecimal binReserved = allocationRepo.sumReservedQtyByLocation(alloc.getLocationId());
-                BigDecimal totalInBin = occupied.add(binReserved).add(alloc.getQty());
-                if (totalInBin.compareTo(bin.getMaxWeightKg()) > 0) {
-                    BigDecimal binAvailable = bin.getMaxWeightKg().subtract(occupied).subtract(binReserved);
-                    throw new RuntimeException("Bin " + bin.getLocationCode() + " does not have enough capacity. Available: " + binAvailable);
+
+            // Giới hạn theo kg: tồn thực (quantity×kg/thùng) + putaway RESERVED kg + lượng đặt lần này
+            if (bin.getMaxWeightKg() != null && bin.getMaxWeightKg().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal wpc = skuEntity.getWeightPerCartonKg();
+                if (wpc == null || wpc.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new RuntimeException(
+                            "SKU \"" + skuEntity.getSkuCode() + "\" chưa cấu hình trọng lượng 1 thùng (kg). "
+                                    + "Cập nhật master SKU để phân bổ vào BIN có giới hạn tải (maxWeightKg).");
+                }
+                BigDecimal occupiedKg = Optional.ofNullable(inventorySnapshotRepo.sumWeightKgByLocationId(alloc.getLocationId()))
+                        .orElse(BigDecimal.ZERO);
+                BigDecimal putawayReservedKg = Optional.ofNullable(allocationRepo.sumReservedWeightKgByLocation(alloc.getLocationId()))
+                        .orElse(BigDecimal.ZERO);
+                BigDecimal allocKg = alloc.getQty().multiply(wpc).setScale(3, RoundingMode.HALF_UP);
+                BigDecimal afterKg = occupiedKg.add(putawayReservedKg).add(allocKg);
+                if (afterKg.compareTo(bin.getMaxWeightKg()) > 0) {
+                    BigDecimal remainingKg = bin.getMaxWeightKg().subtract(occupiedKg).subtract(putawayReservedKg);
+                    if (remainingKg.compareTo(BigDecimal.ZERO) < 0) {
+                        remainingKg = BigDecimal.ZERO;
+                    }
+                    BigDecimal maxCartons = wpc.compareTo(BigDecimal.ZERO) > 0
+                            ? remainingKg.divideToIntegralValue(wpc)
+                            : BigDecimal.ZERO;
+                    throw new RuntimeException(
+                            "BIN " + bin.getLocationCode() + " không đủ trọng tải. Còn khoảng "
+                                    + remainingKg.stripTrailingZeros().toPlainString() + " kg (tối đa thêm ~"
+                                    + maxCartons.stripTrailingZeros().toPlainString() + " thùng SKU này).");
                 }
             }
 
@@ -510,6 +535,7 @@ public class PutawayTaskService {
         skuRepo.findById(i.getSkuId()).ifPresent(sku -> {
             builder.skuCode(sku.getSkuCode());
             builder.skuName(sku.getSkuName());
+            builder.weightPerCartonKg(sku.getWeightPerCartonKg());
         });
 
         return builder.build();

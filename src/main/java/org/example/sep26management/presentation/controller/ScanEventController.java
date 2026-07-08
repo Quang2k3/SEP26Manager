@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.example.sep26management.application.dto.request.ScanEventRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.service.ScanEventService;
+import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -70,6 +71,6 @@ public class ScanEventController {
         if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
             return bearer.substring(7);
         }
-        throw new RuntimeException("Missing Authorization header");
+        throw new BusinessException("Thiếu Authorization header. Vui lòng nhập OTP để lấy token trước khi scan.");
     }
 }

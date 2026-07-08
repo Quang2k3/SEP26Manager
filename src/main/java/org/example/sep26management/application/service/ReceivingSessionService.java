@@ -8,6 +8,7 @@ import org.example.sep26management.application.dto.response.ScanSessionResponse;
 import org.example.sep26management.application.dto.scan.ScanLineItem;
 import org.example.sep26management.application.dto.scan.ScanSessionData;
 import org.example.sep26management.infrastructure.SseEmitterRegistry;
+import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.example.sep26management.infrastructure.persistence.entity.ReceivingItemEntity;
 import org.example.sep26management.infrastructure.persistence.entity.ReceivingOrderEntity;
 import org.example.sep26management.infrastructure.persistence.entity.SupplierEntity;
@@ -183,7 +184,7 @@ public class ReceivingSessionService {
                 String sessionId, Long userId, String role) {
 
                 ScanSessionData session = sessionRedis.findById(sessionId)
-                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new BusinessException("Phiên scan đã hết hạn hoặc không tồn tại. Vui lòng tạo QR mới."));
 
                 String token   = jwtTokenProvider.generateScanToken(sessionId, session.getWarehouseId(), role, userId);
                 String scanUrl = baseUrl + "/v1/scan?token=" + token;
@@ -200,7 +201,7 @@ public class ReceivingSessionService {
 
         public ApiResponse<ScanSessionResponse> getSession(String sessionId) {
                 ScanSessionData data = sessionRedis.findById(sessionId)
-                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new BusinessException("Phiên scan đã hết hạn hoặc không tồn tại. Vui lòng tạo QR mới."));
                 return ApiResponse.success("OK", toResponse(data));
         }
 
@@ -208,7 +209,7 @@ public class ReceivingSessionService {
 
         public SseEmitter stream(String sessionId) {
                 sessionRedis.findById(sessionId)
-                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new BusinessException("Phiên scan đã hết hạn hoặc không tồn tại. Vui lòng tạo QR mới."));
 
                 SseEmitter emitter = new SseEmitter(600_000L); // 10 phút
                 sseRegistry.register(sessionId, emitter);
@@ -237,7 +238,7 @@ public class ReceivingSessionService {
                 String sessionId, CreateGrnRequest request, Long userId) {
 
                 ScanSessionData session = sessionRedis.findById(sessionId)
-                        .orElseThrow(() -> new RuntimeException("Session not found: " + sessionId));
+                        .orElseThrow(() -> new BusinessException("Phiên scan đã hết hạn hoặc không tồn tại. Vui lòng tạo QR mới."));
 
                 List<ScanLineItem> lines = session.getLines();
                 if (lines == null || lines.isEmpty()) {

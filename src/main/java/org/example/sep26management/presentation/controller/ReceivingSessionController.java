@@ -8,6 +8,7 @@ import org.example.sep26management.application.dto.request.CreateGrnRequest;
 import org.example.sep26management.application.dto.response.ApiResponse;
 import org.example.sep26management.application.dto.response.ScanSessionResponse;
 import org.example.sep26management.application.service.ReceivingSessionService;
+import org.example.sep26management.infrastructure.exception.BusinessException;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -134,7 +135,7 @@ public class ReceivingSessionController {
             if (uid instanceof Integer)
                 return ((Integer) uid).longValue();
         }
-        throw new RuntimeException("Cannot extract userId from authentication");
+        throw new BusinessException("Không xác định được người dùng. Vui lòng đăng nhập lại.");
     }
 
     /**
@@ -154,8 +155,8 @@ public class ReceivingSessionController {
                     return ((Number) first).longValue();
             }
         }
-        throw new RuntimeException(
-                "Cannot extract warehouseId from authentication — ensure the role is assigned to a warehouse");
+        throw new BusinessException(
+                "Không xác định được kho. Vui lòng kiểm tra tài khoản đã được gán kho chưa.");
     }
 
     private String extractRole(Authentication auth) {

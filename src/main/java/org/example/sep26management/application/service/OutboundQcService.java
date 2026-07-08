@@ -79,6 +79,7 @@ public class OutboundQcService {
                     "Pick List #" + taskId + " đang được QC khác kiểm định. Vui lòng liên hệ quản lý.");
         }
 
+        boolean justClaimed = false;
         if (task.getAssignedQcId() == null) {
             int claimed = pickingTaskRepository.claimQcAssignment(taskId, userId);
             if (claimed == 0) {
@@ -89,12 +90,8 @@ public class OutboundQcService {
                             "Pick List #" + taskId + " vừa được QC khác nhận. Vui lòng thử lại.");
                 }
             } else {
+                justClaimed = true;
                 log.info("[QcClaim-OB] QC userId={} claimed taskId={}", userId, taskId);
-                try {
-                    notificationService.notifyRoles(new String[]{"QC", "MANAGER"},
-                            "outbound_qc_claimed", taskId, "Task #" + taskId,
-                            "QC userId=" + userId + " bắt đầu kiểm định outbound");
-                } catch (Exception ignored) {}
             }
         }
 
@@ -104,11 +101,20 @@ public class OutboundQcService {
         }
 
         if (task.getSoId() != null) {
+            final boolean finalJustClaimed = justClaimed;
             salesOrderRepository.findById(task.getSoId()).ifPresent(so -> {
                 if ("PICKING".equals(so.getStatus())) {
                     so.setStatus("QC_SCAN");
                     so.setUpdatedAt(LocalDateTime.now());
                     salesOrderRepository.save(so);
+                }
+                // [FIX REALTIME] Notify correct referenceId (soId) so FE doesn't 404
+                if (finalJustClaimed) {
+                    try {
+                        notificationService.notifyRoles(new String[]{"QC", "MANAGER"},
+                                "outbound_qc_claimed", so.getSoId(), "Đơn #" + so.getSoCode(),
+                                "QC userId=" + userId + " bắt đầu kiểm định outbound");
+                    } catch (Exception ignored) {}
                 }
             });
         }
@@ -390,7 +396,7 @@ public class OutboundQcService {
         try { pickingTaskRepository.releaseQcAssignment(taskId, userId); } catch (Exception ignored) {}
         try {
             notificationService.notifyRoles(new String[]{"QC", "MANAGER", "KEEPER"},
-                    "outbound_qc_released", taskId, "Task #" + taskId,
+                    "outbound_qc_released", soId, "Đơn #" + taskId,
                     "QC hoàn thành kiểm định outbound");
         } catch (Exception ignored) {}
 
@@ -626,14 +632,37 @@ public class OutboundQcService {
                     so.getSoId(), so.getSoCode(), "Đã duyệt xử lý một phần / toàn bộ RETURN_SCRAP — Keeper cần re-allocate");
         } else {
             // All items ACCEPTED
-            so.setStatus("QC_PASSED");
-            so.setUpdatedAt(LocalDateTime.now());
-            salesOrderRepository.save(so);
-            log.info("SO {} → QC_PASSED (all items ACCEPTED damage)", so.getSoCode());
-            notificationService.notifyRoles(new String[]{"KEEPER"}, "qc_outbound_passed",
-                    so.getSoId(), so.getSoCode(), "QC đạt (bao gồm phần lỗi chấp nhận xuất) — Sẵn sàng xuất kho");
-            notificationService.notifyRoles(new String[]{"MANAGER", "QC"}, "outbound_approved",
-                    so.getSoId(), so.getSoCode(), "Chấp nhận toàn bộ hàng lỗi — Sẵn sàng xuất phần tốt");
+            BigDecimal totalOrderedQty = salesOrderItemRepository.findBySoId(so.getSoId()).stream()
+                    .map(SalesOrderItemEntity::getOrderedQty)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            if (totalOrderedQty.compareTo(BigDecimal.ZERO) <= 0) {
+                // Toàn bộ hàng đều hỏng và bị loại bỏ -> Đơn rỗng -> Huỷ đơn
+                completeOldPickingTask(incident.getSoId(), so.getWarehouseId());
+                so.setStatus("CANCELLED");
+                so.setUpdatedAt(LocalDateTime.now());
+                salesOrderRepository.save(so);
+                log.info("SO {} → CANCELLED (all items damaged and discarded via ACCEPT)", so.getSoCode());
+
+                // Giải phóng các reservation OPEN còn sót lại (nếu có)
+                reservationRepository.findByReferenceTableAndReferenceIdAndStatus("sales_orders", so.getSoId(), "OPEN")
+                        .forEach(r -> {
+                            r.setStatus("CANCELLED");
+                            reservationRepository.save(r);
+                        });
+
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_cancelled",
+                        so.getSoId(), so.getSoCode(), "Đơn bị HỦY do toàn bộ hàng hỏng bị loại bỏ (Xuất phần tốt, nhưng không còn phần tốt)");
+            } else {
+                so.setStatus("QC_PASSED");
+                so.setUpdatedAt(LocalDateTime.now());
+                salesOrderRepository.save(so);
+                log.info("SO {} → QC_PASSED (all items ACCEPTED damage)", so.getSoCode());
+                notificationService.notifyRoles(new String[]{"KEEPER"}, "qc_outbound_passed",
+                        so.getSoId(), so.getSoCode(), "QC đạt (bao gồm phần lỗi chấp nhận xuất) — Sẵn sàng xuất kho");
+                notificationService.notifyRoles(new String[]{"MANAGER", "QC"}, "outbound_approved",
+                        so.getSoId(), so.getSoCode(), "Chấp nhận toàn bộ hàng lỗi — Sẵn sàng xuất phần tốt");
+            }
         }
 
         incident.setStatus("RESOLVED");
@@ -706,6 +735,38 @@ public class OutboundQcService {
             for (PickingTaskItemEntity item : skuItems) {
                 BigDecimal itemFailQty = safeBD(item.getQcFailQty());
                 if (itemFailQty.compareTo(BigDecimal.ZERO) > 0) {
+                    if (item.getFromLocationId() != null) {
+                        // Nếu không có RETURN_SCRAP (không bị huỷ reservation ở trên), ta phải chủ động giải phóng
+                        // reserved_qty cho phần FAIL này để khi trừ quantity không vi phạm constraint chk_reserved_lte_quantity
+                        if (!hasAnyReturnScrap) {
+                            List<ReservationEntity> openRes = reservationRepository
+                                    .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
+                            BigDecimal toRelease = itemFailQty;
+                            for (ReservationEntity r : openRes) {
+                                if (toRelease.compareTo(BigDecimal.ZERO) <= 0) break;
+                                if (r.getSkuId().equals(item.getSkuId()) && (r.getLocationId() == null || r.getLocationId().equals(item.getFromLocationId()))) {
+                                    BigDecimal releaseAmt = r.getQuantity().min(toRelease);
+                                    r.setQuantity(r.getQuantity().subtract(releaseAmt));
+                                    if (r.getQuantity().compareTo(BigDecimal.ZERO) <= 0) r.setStatus("CLOSED");
+                                    reservationRepository.save(r);
+
+                                    if (r.getLocationId() != null) {
+                                        inventorySnapshotRepository.decrementReservedByLocationSkuLot(
+                                                r.getLocationId(), r.getSkuId(), r.getLotId(), releaseAmt);
+                                    } else {
+                                        inventorySnapshotRepository.incrementReservedByWarehouseAndSku(
+                                                r.getWarehouseId(), r.getSkuId(), releaseAmt.negate());
+                                    }
+                                    toRelease = toRelease.subtract(releaseAmt);
+                                }
+                            }
+                        }
+
+                        // Trừ physical quantity ở source bin trước khi cộng vào Z-DEFECT
+                        inventorySnapshotRepository.decrementQuantity(
+                                warehouseId, item.getSkuId(), item.getLotId(), item.getFromLocationId(), itemFailQty);
+                    }
+
                     inventorySnapshotRepository.upsertInventory(
                             warehouseId, item.getSkuId(), item.getLotId(),
                             defectBin.getLocationId(), itemFailQty);
@@ -1003,17 +1064,55 @@ public class OutboundQcService {
                     "Còn thiếu ảnh Phiếu xuất kho đã ký. Scan QR 'Phiếu xuất kho' để chụp và upload.");
         }
 
+        // [NEW] Thực hiện trừ tồn kho tại bước cuối cùng này
+        List<PickingTaskItemEntity> passedItems = pickingTaskItemRepository.findPassedItemsBySoId(soId);
+        for (PickingTaskItemEntity item : passedItems) {
+            BigDecimal passQty = item.getQcPassQty();
+            if (passQty != null && passQty.compareTo(BigDecimal.ZERO) > 0 && item.getFromLocationId() != null) {
+                Long locId = item.getFromLocationId();
+                Long skuId = item.getSkuId();
+                Long lotId = item.getLotId();
+
+                // 1) Giải phóng reserved_qty TRƯỚC cho phần PASS
+                inventorySnapshotRepository.decrementReservedByLocationSkuLot(locId, skuId, lotId, passQty);
+
+                // 2) Trừ physical quantity
+                inventorySnapshotRepository.decrementQuantity(so.getWarehouseId(), skuId, lotId, locId, passQty);
+
+                // 3) Ghi transaction
+                inventoryTransactionRepository.save(InventoryTransactionEntity.builder()
+                        .warehouseId(so.getWarehouseId())
+                        .skuId(skuId)
+                        .lotId(lotId)
+                        .locationId(locId)
+                        .quantity(passQty.negate())
+                        .txnType("PICK")
+                        .referenceTable("sales_orders")
+                        .referenceId(soId)
+                        .createdBy(userId != null ? userId : getSystemUserId())
+                        .build());
+            }
+        }
+
+        // Close toàn bộ OPEN reservations còn lại của Sales Order
+        List<ReservationEntity> remainingRes = reservationRepository
+                .findByReferenceTableAndReferenceIdAndStatus("sales_orders", soId, "OPEN");
+        remainingRes.forEach(r -> {
+            r.setStatus("CLOSED");
+            reservationRepository.save(r);
+        });
+
         so.setStatus("COMPLETED");
         so.setUpdatedAt(LocalDateTime.now());
         salesOrderRepository.save(so);
-        log.info("SO {} → COMPLETED (both signed notes uploaded)", so.getSoCode());
+        log.info("SO {} → COMPLETED (both signed notes uploaded, inventory deducted)", so.getSoCode());
 
         String customerName = customerRepository.findById(so.getCustomerId())
                 .map(c -> c.getCustomerName()).orElse("—");
         notificationService.notifyRoles(new String[]{"MANAGER", "QC", "KEEPER"}, "outbound_completed",
                 so.getSoId(), so.getSoCode(), customerName + " — Xuất kho hoàn tất");
 
-        return ApiResponse.success("Xuất kho hoàn tất. Đơn hàng đã COMPLETED.", null);
+        return ApiResponse.success("Xuất kho hoàn tất. Tồn kho đã được trừ. Đơn hàng đã COMPLETED.", null);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
